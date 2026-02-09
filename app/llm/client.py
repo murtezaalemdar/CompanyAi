@@ -16,7 +16,7 @@ class OllamaClient:
         self.base_url = settings.OLLAMA_BASE_URL
         self.model = settings.LLM_MODEL  # mistral
         self.vision_model = getattr(settings, "VISION_MODEL", "llava")  # llava / llava-llama3
-        self.timeout = 120.0  # LLM yanıt süresi için uzun timeout
+        self.timeout = 900.0  # GPU yok — CPU inference için 15 dakika timeout
     
     async def generate(
         self,

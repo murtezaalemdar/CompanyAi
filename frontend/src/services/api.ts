@@ -243,8 +243,8 @@ export const ragApi = {
         return response.data
     },
 
-    clearAll: async () => {
-        const response = await api.delete('/rag/documents')
+    clearAll: async (password: string) => {
+        const response = await api.post('/rag/documents/clear-all', { password })
         return response.data
     }
 }

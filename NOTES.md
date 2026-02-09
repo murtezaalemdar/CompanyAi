@@ -1,5 +1,24 @@
 # Şirket AI Asistanı - Günlük Notlar
 
+## 📅 Tarih: 10 Şubat 2026 (Güncelleme 4)
+
+### ⏱️ LLM Timeout 15 Dakikaya Uzatıldı
+
+**Neden:** Sunucuda GPU yok, Ollama CPU üzerinden inference yapıyor. 120 saniyelik timeout yetersiz kalıyor ve "LLM yanıt süresi aşıldı" hatası veriyor.
+**Değişiklik:** `app/llm/client.py` → `self.timeout = 120.0` → `self.timeout = 900.0` (15 dakika)
+**Not:** GPU eklendiğinde bu değer tekrar 120 saniyeye düşürülebilir.
+
+### 🔐 "Tüm Hafızayı Temizle" — Admin Şifre Doğrulaması Eklendi
+
+- **Endpoint:** `DELETE /rag/documents` → `POST /rag/documents/clear-all` (body: `{password}`)
+- **Modal dialog:** Kırmızı uyarı bandı, "TÜM departmanlardaki TÜM dokümanlar silinecek" uyarısı
+- **Şifre doğrulama:** `verify_password()` ile admin şifresi doğrulanıyor
+- **Ekleyen (author):** `current_user.email` → `current_user.full_name or current_user.email`
+- **Tarih:** `str(datetime.utcnow())` → `datetime.utcnow().isoformat()` (Invalid Date düzeltildi)
+- **Frontend formatDate:** Python datetime formatını da destekliyor (boşluk → T normalize)
+
+---
+
 ## 📅 Tarih: 10 Şubat 2026 (Güncelleme 3)
 
 ### 🔧 CSS İkon/Yazı Üst Üste Binme Düzeltmesi

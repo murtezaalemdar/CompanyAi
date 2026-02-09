@@ -16,6 +16,7 @@ import structlog
 from app.db.database import get_db
 from app.db.models import User
 from app.api.routes.auth import get_current_user
+from app.auth.jwt_handler import verify_password
 
 logger = structlog.get_logger()
 
@@ -164,6 +165,11 @@ class LearnFromVideoRequest(BaseModel):
     department: str = "Genel"
     title: Optional[str] = Field(None, description="Opsiyonel başlık")
     language: str = Field("tr", description="Tercih edilen altyazı dili (tr, en, vb.)")
+
+
+class ClearAllRequest(BaseModel):
+    """Tüm dokümanları silme isteği — admin şifresi gerektirir"""
+    password: str = Field(..., description="Admin kullanıcısının şifresi")
 
 
 class DocumentResponse(BaseModel):
@@ -430,8 +436,8 @@ async def add_document_text(
         doc_type=request.doc_type,
         metadata={
             "department": request.department,
-            "author": current_user.email,
-            "created_at": str(datetime.utcnow())
+            "author": current_user.full_name or current_user.email,
+            "created_at": datetime.utcnow().isoformat()
         }
     )
     
@@ -475,8 +481,8 @@ async def upload_document(
             doc_type=doc_type,
             metadata={
                 "department": department,
-                "author": current_user.email,
-                "created_at": str(datetime.utcnow())
+                "author": current_user.full_name or current_user.email,
+                "created_at": datetime.utcnow().isoformat()
             }
         )
         
@@ -533,8 +539,8 @@ async def upload_multiple_documents(
                 doc_type=doc_type,
                 metadata={
                     "department": department,
-                    "author": current_user.email,
-                    "created_at": str(datetime.utcnow())
+                    "author": current_user.full_name or current_user.email,
+                    "created_at": datetime.utcnow().isoformat()
                 }
             )
             
@@ -608,21 +614,31 @@ async def delete_doc(
         raise HTTPException(status_code=404, detail="Doküman bulunamadı")
 
 
-@router.delete("/documents")
+@router.post("/documents/clear-all")
 async def clear_all_docs(
+    request: ClearAllRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """Tüm dokümanları sil (sadece admin)"""
+    """Tüm dokümanları sil (sadece admin, şifre doğrulaması gerektirir)
+    
+    DİKKAT: Bu işlem TÜM departmanlardaki TÜM dokümanları kalıcı olarak siler.
+    Geri alınamaz.
+    """
     if not RAG_AVAILABLE:
         raise HTTPException(status_code=503, detail="RAG sistemi kullanılamıyor")
     
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Sadece admin tüm dokümanları silebilir")
     
+    # Admin şifresini doğrula
+    if not verify_password(request.password, current_user.hashed_password):
+        raise HTTPException(status_code=401, detail="Şifre hatalı. İşlem iptal edildi.")
+    
     success = clear_all_documents()
     
     if success:
-        return {"message": "Tüm dokümanlar silindi", "success": True}
+        logger.info("all_documents_cleared_by_admin", admin=current_user.email)
+        return {"message": "Tüm departmanlardaki tüm dokümanlar silindi", "success": True}
     else:
         raise HTTPException(status_code=500, detail="Silme işlemi başarısız")
 
@@ -644,9 +660,9 @@ async def teach_knowledge(
     
     metadata = {
         "department": request.department,
-        "author": current_user.email,
+        "author": current_user.full_name or current_user.email,
         "type": "manual_entry",
-        "created_at": str(datetime.utcnow())
+        "created_at": datetime.utcnow().isoformat()
     }
     
     try:
@@ -793,10 +809,10 @@ async def learn_from_url(
             doc_type="web_page",
             metadata={
                 "department": request.department,
-                "author": current_user.email,
+                "author": current_user.full_name or current_user.email,
                 "url": request.url,
                 "type": "web_page",
-                "created_at": str(datetime.utcnow())
+                "created_at": datetime.utcnow().isoformat()
             }
         )
         
@@ -924,12 +940,12 @@ async def learn_from_video(
                         doc_type="video_transcript",
                         metadata={
                             "department": request.department,
-                            "author": current_user.email,
+                            "author": current_user.full_name or current_user.email,
                             "url": request.url,
                             "video_id": video_id,
                             "language": used_language,
                             "type": "video_transcript",
-                            "created_at": str(datetime.utcnow())
+                            "created_at": datetime.utcnow().isoformat()
                         }
                     )
                     
@@ -1004,12 +1020,12 @@ async def learn_from_video(
             doc_type="video_transcript",
             metadata={
                 "department": request.department,
-                "author": current_user.email,
+                "author": current_user.full_name or current_user.email,
                 "url": request.url,
                 "video_id": video_id,
                 "language": used_language,
                 "type": "video_transcript",
-                "created_at": str(datetime.utcnow())
+                "created_at": datetime.utcnow().isoformat()
             }
         )
         

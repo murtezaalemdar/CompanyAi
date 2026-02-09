@@ -33,7 +33,9 @@ import {
     User,
     Hash,
     ExternalLink,
-    Video
+    Video,
+    ShieldAlert,
+    Lock
 } from 'lucide-react'
 import clsx from 'clsx'
 import { ragApi } from '../services/api'
@@ -100,14 +102,18 @@ function formatFileSize(bytes: number): string {
 }
 
 function formatDate(dateStr: string): string {
+    if (!dateStr) return '-'
     try {
-        const date = new Date(dateStr)
+        // ISO format veya Python datetime formatını destekle
+        const normalized = dateStr.replace(' ', 'T')
+        const date = new Date(normalized)
+        if (isNaN(date.getTime())) return '-'
         return date.toLocaleDateString('tr-TR', {
             day: '2-digit', month: '2-digit', year: 'numeric',
             hour: '2-digit', minute: '2-digit'
         })
     } catch {
-        return dateStr
+        return '-'
     }
 }
 
@@ -217,6 +223,11 @@ export default function Documents() {
     const [videoTitle, setVideoTitle] = useState('')
     const [videoLanguage, setVideoLanguage] = useState('tr')
 
+    // Clear All Modal States
+    const [showClearModal, setShowClearModal] = useState(false)
+    const [clearPassword, setClearPassword] = useState('')
+    const [clearError, setClearError] = useState('')
+
     // Kullanıcı departmanlarını çözümle
     const userDepartments = useMemo(() => {
         if (!user?.department) return []
@@ -312,10 +323,16 @@ export default function Documents() {
     })
 
     const clearAllMutation = useMutation({
-        mutationFn: ragApi.clearAll,
+        mutationFn: (password: string) => ragApi.clearAll(password),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['rag-status'] })
             queryClient.invalidateQueries({ queryKey: ['documents-list'] })
+            setShowClearModal(false)
+            setClearPassword('')
+            setClearError('')
+        },
+        onError: (error: any) => {
+            setClearError(error?.response?.data?.detail || 'Silme işlemi başarısız')
         }
     })
 
@@ -417,9 +434,17 @@ export default function Documents() {
     }
 
     const handleClearAll = () => {
-        if (confirm('Tüm dokümanları silmek istediğinize emin misiniz? Bu işlem geri alınamaz!')) {
-            clearAllMutation.mutate()
+        setShowClearModal(true)
+        setClearPassword('')
+        setClearError('')
+    }
+
+    const handleClearConfirm = () => {
+        if (!clearPassword.trim()) {
+            setClearError('Şifrenizi girin')
+            return
         }
+        clearAllMutation.mutate(clearPassword)
     }
 
     const handleTeachSubmit = (e: React.FormEvent) => {
@@ -843,6 +868,84 @@ export default function Documents() {
                     )}
                 </div>
 
+                {/* ═══ CLEAR ALL MODAL ═══ */}
+                {showClearModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                        <div className="bg-dark-800 border border-red-500/50 rounded-xl shadow-2xl w-full max-w-md mx-4 p-0 overflow-hidden">
+                            {/* Modal Header - Kırmızı uyarı bandı */}
+                            <div className="bg-red-500/20 border-b border-red-500/30 px-6 py-4 flex items-center gap-3">
+                                <div className="p-2 bg-red-500/20 rounded-full">
+                                    <ShieldAlert className="w-6 h-6 text-red-400" />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-semibold text-red-400">Kritik Uyarı!</h3>
+                                    <p className="text-xs text-red-300/70">Bu işlem geri alınamaz</p>
+                                </div>
+                            </div>
+
+                            <div className="px-6 py-5 space-y-4">
+                                {/* Uyarı mesajları */}
+                                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 space-y-2">
+                                    <p className="text-sm text-red-300 font-medium">
+                                        Bu işlem aşağıdaki verileri kalıcı olarak silecektir:
+                                    </p>
+                                    <ul className="text-xs text-red-300/80 space-y-1 ml-4 list-disc">
+                                        <li><strong>TÜM departmanlardaki</strong> tüm dokümanlar silinecek</li>
+                                        <li>Yüklenen dosyalar, URL'lerden öğrenilenler, video transkriptleri</li>
+                                        <li>Manuel girilen bilgiler dahil tüm RAG hafızası</li>
+                                        <li className="font-semibold text-red-400">Toplam {ragStatus?.document_count || 0} doküman</li>
+                                    </ul>
+                                </div>
+
+                                {/* Şifre girişi */}
+                                <div>
+                                    <label className="block text-xs font-medium text-dark-300 mb-1.5">
+                                        Onaylamak için admin şifrenizi girin:
+                                    </label>
+                                    <div className="relative">
+                                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
+                                        <input
+                                            type="password"
+                                            value={clearPassword}
+                                            onChange={(e) => { setClearPassword(e.target.value); setClearError('') }}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleClearConfirm()}
+                                            placeholder="Admin şifresi"
+                                            className="input pl-10 w-full"
+                                            autoFocus
+                                        />
+                                    </div>
+                                    {clearError && (
+                                        <p className="text-xs text-red-400 mt-1.5 flex items-center gap-1">
+                                            <AlertCircle className="w-3 h-3" /> {clearError}
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Butonlar */}
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        onClick={() => { setShowClearModal(false); setClearPassword(''); setClearError('') }}
+                                        className="btn-secondary flex-1"
+                                        disabled={clearAllMutation.isPending}
+                                    >
+                                        İptal
+                                    </button>
+                                    <button
+                                        onClick={handleClearConfirm}
+                                        disabled={clearAllMutation.isPending || !clearPassword.trim()}
+                                        className="flex-1 bg-red-600 hover:bg-red-500 disabled:bg-red-800 disabled:text-red-400 text-white font-medium px-6 py-2.5 rounded-lg transition-all flex items-center justify-center gap-2"
+                                    >
+                                        {clearAllMutation.isPending
+                                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Siliniyor...</>
+                                            : <><Trash2 className="w-4 h-4" /> Tümünü Sil</>
+                                        }
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* ── SAĞ: Hafızada Ara (2/5) ── */}
                 <div className="lg:col-span-2 card">
                     <h2 className="text-lg font-medium text-white mb-4 flex items-center gap-2">
@@ -991,7 +1094,7 @@ export default function Documents() {
                                         <td className="py-2.5">
                                             <span className="flex items-center gap-1 text-xs text-dark-400">
                                                 <User className="w-3 h-3" />
-                                                {doc.author?.split('@')[0] || '-'}
+                                                {doc.author || '-'}
                                             </span>
                                         </td>
                                         <td className="py-2.5">

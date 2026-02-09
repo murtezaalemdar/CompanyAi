@@ -19,6 +19,7 @@ httpx>=0.26.0
 structlog>=24.1.0
 python-multipart>=0.0.6
 redis>=5.0.1
+slowapi>=0.1.9
 
 # RAG (Retrieval Augmented Generation)
 chromadb>=0.4.0

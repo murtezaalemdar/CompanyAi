@@ -1,18 +1,31 @@
 """
 Kurumsal AI Asistanı - FastAPI Ana Uygulama
 
-Local LLM (Mistral) + Öğrenen Vektör Hafıza + JWT Auth
+Local LLM (GPT-OSS-20B) + Öğrenen Vektör Hafıza + JWT Auth
 """
-
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 import structlog
 
 from app.config import settings
 from app.db.database import engine, init_db
 from app.db.models import Base
 from app.api.routes import auth, ask, admin, documents, multimodal, memory, analyze
+
+# Rate Limiting
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    limiter = Limiter(key_func=get_remote_address, default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"])
+    RATE_LIMIT_AVAILABLE = True
+except ImportError:
+    limiter = None
+    RATE_LIMIT_AVAILABLE = False
 
 # Structured logging yapılandırması
 structlog.configure(
@@ -23,6 +36,17 @@ structlog.configure(
     ]
 )
 logger = structlog.get_logger()
+
+
+# ── Correlation ID Middleware ──
+class CorrelationIDMiddleware(BaseHTTPMiddleware):
+    """Her isteğe benzersiz request_id atar — log tracking için"""
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4())[:8])
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
 
 
 @asynccontextmanager
@@ -50,7 +74,7 @@ async def lifespan(app: FastAPI):
             logger.info("creating_admin_user")
             admin_user = User(
                 email="admin@company.ai",
-                hashed_password=hash_password("admin123"),
+                hashed_password=hash_password(settings.ADMIN_DEFAULT_PASSWORD),
                 full_name="System Admin",
                 role="admin",
                 is_active=True,
@@ -63,8 +87,10 @@ async def lifespan(app: FastAPI):
 
     yield
     
-    # Shutdown
+    # Shutdown — kaynakları temizle
     logger.info("app_shutting_down")
+    from app.llm.client import ollama_client
+    await ollama_client.close()
     await engine.dispose()
 
 
@@ -72,11 +98,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Kurumsal AI Asistanı",
     description="Local LLM tabanlı kurumsal yapay zeka asistanı",
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
 )
+
+# ── Middleware'lar ──
+
+# Correlation ID (en dışta — her isteğe ID atar)
+app.add_middleware(CorrelationIDMiddleware)
 
 # CORS middleware
 app.add_middleware(
@@ -86,6 +117,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate Limiting
+if RATE_LIMIT_AVAILABLE and limiter:
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── Merkezi Error Handler ──
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Yakalanmamış hataları loglayıp güvenli JSON döner"""
+    request_id = getattr(request.state, "request_id", "unknown")
+    logger.error(
+        "unhandled_exception",
+        error=str(exc),
+        error_type=type(exc).__name__,
+        path=str(request.url.path),
+        request_id=request_id,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": "Sunucu hatası oluştu",
+            "request_id": request_id,
+        },
+    )
 
 # Router'ları ekle
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
@@ -102,7 +158,7 @@ async def root():
     """API ana sayfa"""
     return {
         "name": "Kurumsal AI Asistanı",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "status": "running",
         "docs": "/docs" if settings.DEBUG else "Disabled in production",
     }
@@ -110,8 +166,29 @@ async def root():
 
 @app.get("/api/health")
 async def health():
-    """Sağlık kontrolü endpoint'i"""
-    return {"status": "healthy"}
+    """Gelişmiş sağlık kontrolü — DB, LLM, ChromaDB durumu"""
+    from app.llm.client import ollama_client
+    
+    checks = {"status": "healthy"}
+    
+    # DB kontrolü
+    try:
+        from app.db.database import async_session_maker
+        from sqlalchemy import text
+        async with async_session_maker() as session:
+            await session.execute(text("SELECT 1"))
+        checks["database"] = "connected"
+    except Exception:
+        checks["database"] = "disconnected"
+        checks["status"] = "degraded"
+    
+    # LLM kontrolü
+    try:
+        checks["llm"] = "available" if await ollama_client.is_available() else "unavailable"
+    except Exception:
+        checks["llm"] = "unavailable"
+    
+    return checks
 
 
 if __name__ == "__main__":

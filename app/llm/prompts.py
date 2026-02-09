@@ -1,8 +1,39 @@
 """Prompt Templates - Kurumsal AI Asistanı (Sadeleştirilmiş)
 
-Mistral 7B CPU için optimize edilmiş kısa ve net prompt'lar.
+GPT-OSS-20B CPU için optimize edilmiş kısa ve net prompt'lar.
 Uzun prompt = kötü yanıt. Kısa prompt = iyi yanıt.
 """
+
+import re
+
+# ── Prompt Injection Filtreleme ──
+_INJECTION_PATTERNS = [
+    r"ignore\s+(previous|above|all)\s+(instructions?|prompts?|rules?)",
+    r"forget\s+(everything|all|your)\s+(instructions?|rules?|training)",
+    r"you\s+are\s+now\s+(a|an|the)\s+",
+    r"system\s*:\s*",
+    r"<\|?\s*(system|im_start|im_end)\s*\|?>",
+    r"act\s+as\s+(if|a|an)\s+",
+    r"pretend\s+(you|that)\s+(are|were)\s+",
+    r"override\s+(your|the|all)\s+(instructions?|rules?|behavior)",
+]
+_injection_regex = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE)
+
+
+def sanitize_input(text: str) -> str:
+    """Kullanıcı girdisinden prompt injection denemelerini temizle"""
+    # Injection pattern'larını tespit et ama metni tamamen silme — sadece etiketle
+    if _injection_regex.search(text):
+        return f"[Kullanıcı sorusu]: {text}"
+    return text
+
+
+def sanitize_document_content(text: str) -> str:
+    """RAG doküman içeriğinden tehlikeli pattern'ları temizle"""
+    # System prompt injection denemelerini kaldır
+    cleaned = re.sub(r"<\|?\s*(system|im_start|im_end)\s*\|?>", "", text)
+    cleaned = re.sub(r"\[INST\]|\[/INST\]|\[SYS\]|\[/SYS\]", "", cleaned)
+    return cleaned.strip()
 
 
 # ── Ana sistem prompt'u — KISA ve NET ──
@@ -37,6 +68,9 @@ def build_prompt(question: str, context: dict) -> tuple[str, str]:
     department = context.get("dept", "Genel")
     mode = context.get("mode", "Sohbet")
     
+    # Kullanıcı girdisini sanitize et
+    safe_question = sanitize_input(question)
+    
     # Temel system prompt — KISA
     system = SYSTEM_PROMPT
     
@@ -52,7 +86,7 @@ def build_prompt(question: str, context: dict) -> tuple[str, str]:
         if dept_prompt:
             system += f" {dept_prompt}"
     
-    return system, question
+    return system, safe_question
 
 
 def build_rag_prompt(question: str, context: dict, documents: list = None) -> tuple[str, str]:
@@ -63,7 +97,7 @@ def build_rag_prompt(question: str, context: dict, documents: list = None) -> tu
         doc_text = "\n\nİlgili dokümanlar:\n"
         for i, doc in enumerate(documents[:3], 1):
             source = doc.get('source', '?')
-            content = doc.get('content', '')[:400]
+            content = sanitize_document_content(doc.get('content', '')[:400])
             doc_text += f"[{source}]: {content}\n"
         doc_text += "\nYukarıdaki dokümanlara dayanarak yanıt ver."
         system += doc_text

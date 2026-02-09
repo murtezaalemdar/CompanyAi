@@ -3,6 +3,8 @@
 from pydantic_settings import BaseSettings
 from typing import List
 import json
+import secrets
+import warnings
 
 
 class Settings(BaseSettings):
@@ -15,6 +17,10 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-this-to-a-very-long-random-string-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    
+    # Admin
+    ADMIN_DEFAULT_PASSWORD: str = "admin123"
     
     # LLM (Ollama + GPT-OSS-20B)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
@@ -27,6 +33,10 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     DEBUG: bool = False
+    
+    # Security
+    PASSWORD_MIN_LENGTH: int = 8
+    RATE_LIMIT_PER_MINUTE: int = 30
     
     # CORS
     CORS_ORIGINS: str = '["http://localhost:3000","http://localhost:5173"]'
@@ -44,3 +54,14 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# ── Güvenlik Uyarıları (Startup) ──
+_DEFAULT_KEY = "change-this-to-a-very-long-random-string-in-production"
+if settings.SECRET_KEY == _DEFAULT_KEY:
+    warnings.warn(
+        "⚠️  SECRET_KEY varsayılan değerde! Production'da mutlaka değiştirin. "
+        "Geçici olarak rastgele key üretiliyor.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
+    settings.SECRET_KEY = secrets.token_urlsafe(64)

@@ -27,8 +27,9 @@ except ImportError:
     logger.warning("sentence_transformers_not_installed")
 
 
-# Vektör veritabanı yolu
-CHROMA_PERSIST_DIR = "/opt/companyai/data/chromadb"
+# Vektör veritabanı yolu (env'den okunabilir)
+import os
+CHROMA_PERSIST_DIR = os.environ.get("CHROMA_PERSIST_DIR", "/opt/companyai/data/chromadb")
 COLLECTION_NAME = "company_documents"
 
 # Embedding modeli (Türkçe destekli, küçük ve hızlı)
@@ -198,39 +199,63 @@ def search_documents(query: str, n_results: int = 3, department: str = None) -> 
         return []
 
 
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> List[str]:
     """
-    Metni parçalara böler.
+    Metni akıllı parçalara böler — cümle sınırlarına saygı gösterir.
     
     Args:
         text: Bölünecek metin
-        chunk_size: Parça boyutu (karakter)
+        chunk_size: Hedef parça boyutu (karakter)
         overlap: Parçalar arası örtüşme
     
     Returns:
         Metin parçaları listesi
     """
+    import re
+    
+    # Cümle sınırlarından böl
+    sentences = re.split(r'(?<=[.!?。\n])\s+', text)
+    
     chunks = []
-    start = 0
-    text_len = len(text)
+    current_chunk = ""
     
-    while start < text_len:
-        end = start + chunk_size
+    for sentence in sentences:
+        # Eğer tek cümle bile chunk_size'ı aşıyorsa, kelime sınırından böl
+        if len(sentence) > chunk_size:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+                current_chunk = ""
+            # Uzun cümleyi kelime sınırlarından böl
+            words = sentence.split()
+            sub_chunk = ""
+            for word in words:
+                if len(sub_chunk) + len(word) + 1 > chunk_size:
+                    if sub_chunk:
+                        chunks.append(sub_chunk.strip())
+                    sub_chunk = word
+                else:
+                    sub_chunk = f"{sub_chunk} {word}" if sub_chunk else word
+            if sub_chunk:
+                current_chunk = sub_chunk
+            continue
         
-        # Kelime ortasında bölmemeye çalış
-        if end < text_len:
-            # Son boşluğu bul (fakat start + overlap'ten ileride olmalı)
-            last_space = text.rfind(' ', start + overlap, end)
-            if last_space > start:
-                end = last_space
-        
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        
-        start = end - overlap
+        # Chunk kapasitesi dolduysa yeni chunk başlat
+        if len(current_chunk) + len(sentence) + 1 > chunk_size:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+                # Overlap: son cümlenin bir kısmını sonraki chunk'a taşı
+                overlap_text = current_chunk[-overlap:] if len(current_chunk) > overlap else ""
+                current_chunk = overlap_text + " " + sentence if overlap_text else sentence
+            else:
+                current_chunk = sentence
+        else:
+            current_chunk = f"{current_chunk} {sentence}" if current_chunk else sentence
     
-    return chunks
+    # Son kalan chunk
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+    
+    return chunks if chunks else [text[:chunk_size]]
 
 
 def get_stats() -> dict:

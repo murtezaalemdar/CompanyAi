@@ -169,7 +169,20 @@ async def get_chat_session_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Belirli bir oturumun mesajlarını getir"""
+    """Belirli bir oturumun mesajlarını getir (sadece kendi oturumları)"""
+    # IDOR koruması: oturumun bu kullanıcıya ait olduğunu doğrula
+    from sqlalchemy import select
+    from app.db.models import ChatSession
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.id == session_id,
+            ChatSession.user_id == current_user.id
+        )
+    )
+    session_obj = result.scalar_one_or_none()
+    if not session_obj:
+        raise HTTPException(status_code=404, detail="Oturum bulunamadı")
+    
     messages = await get_session_messages(db, session_id)
     return {"messages": messages, "session_id": session_id}
 

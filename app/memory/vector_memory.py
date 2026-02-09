@@ -62,11 +62,11 @@ class VectorMemory:
                 metadata={"description": "Kurumsal AI Asistanı Hafıza Koleksiyonu"}
             )
             
-            # Embedding model (opsiyonel - daha iyi sonuçlar için)
+            # Embedding model — RAG ile aynı modeli kullan (Türkçe destekli)
             if EMBEDDINGS_AVAILABLE:
                 try:
-                    self._embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-                    logger.info("embedding_model_loaded", model="all-MiniLM-L6-v2")
+                    self._embedding_model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')
+                    logger.info("embedding_model_loaded", model="paraphrase-multilingual-mpnet-base-v2")
                 except Exception as e:
                     logger.warning("embedding_model_failed", error=str(e))
                     self._embedding_model = None

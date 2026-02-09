@@ -15,13 +15,31 @@ logger = structlog.get_logger()
 
 
 class OllamaClient:
-    """Ollama Chat API ile iletişim kuran async client"""
+    """Ollama Chat API ile iletişim kuran async client — connection pooling destekli"""
     
     def __init__(self):
         self.base_url = settings.OLLAMA_BASE_URL
-        self.model = settings.LLM_MODEL  # mistral
+        self.model = settings.LLM_MODEL
         self.vision_model = getattr(settings, "VISION_MODEL", "llava")
         self.timeout = 900.0  # CPU inference — 15 dk
+        # Connection pooling — her istekte yeni client oluşturmak yerine tek client
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Persistent HTTP client döner (connection pooling)"""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self.timeout,
+                trust_env=False,
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            )
+        return self._client
+
+    async def close(self):
+        """Client'ı kapat (shutdown'da çağrılır)"""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     def _build_messages(
         self,
@@ -86,19 +104,19 @@ class OllamaClient:
                 },
             }
 
-            async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
-                logger.info("ollama_chat_request", model=model, msg_count=len(messages))
-                response = await client.post(
-                    f"{self.base_url}/api/chat",
-                    json=payload,
-                )
-                response.raise_for_status()
-                result = response.json()
-                
-                # /api/chat yanıt formatı: {"message": {"role": "assistant", "content": "..."}}
-                msg = result.get("message", {})
-                return msg.get("content", "")
-                
+            client = await self._get_client()
+            logger.info("ollama_chat_request", model=model, msg_count=len(messages))
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json=payload,
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            # /api/chat yanıt formatı: {"message": {"role": "assistant", "content": "..."}}
+            msg = result.get("message", {})
+            return msg.get("content", "")
+
         except httpx.TimeoutException:
             logger.error("ollama_timeout", model=model)
             raise Exception("LLM yanıt süresi aşıldı")
@@ -118,25 +136,28 @@ class OllamaClient:
         try:
             messages = self._build_messages(prompt, system_prompt, history)
             
-            async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
-                logger.info("ollama_chat_stream", model=self.model, msg_count=len(messages))
-                async with client.stream(
-                    "POST",
-                    f"{self.base_url}/api/chat",
-                    json={
-                        "model": self.model,
-                        "messages": messages,
-                        "stream": True,
-                    }
-                ) as response:
-                    async for line in response.aiter_lines():
-                        if line:
+            client = await self._get_client()
+            logger.info("ollama_chat_stream", model=self.model, msg_count=len(messages))
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": True,
+                }
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if line:
+                        try:
                             data = json.loads(line)
-                            # /api/chat stream formatı: {"message": {"content": "..."}}
-                            msg = data.get("message", {})
-                            content = msg.get("content", "")
-                            if content:
-                                yield content
+                        except json.JSONDecodeError:
+                            continue
+                        msg = data.get("message", {})
+                        content = msg.get("content", "")
+                        if content:
+                            yield content
                                 
         except Exception as e:
             logger.error("ollama_stream_error", error=str(e))
@@ -145,20 +166,20 @@ class OllamaClient:
     async def is_available(self) -> bool:
         """Ollama servisinin erişilebilir olup olmadığını kontrol eder"""
         try:
-            async with httpx.AsyncClient(timeout=5.0, trust_env=False) as client:
-                response = await client.get(f"{self.base_url}/api/tags")
-                return response.status_code == 200
+            client = await self._get_client()
+            response = await client.get(f"{self.base_url}/api/tags")
+            return response.status_code == 200
         except Exception:
             return False
     
     async def get_models(self) -> list:
         """Mevcut modelleri listeler"""
         try:
-            async with httpx.AsyncClient(timeout=5.0, trust_env=False) as client:
-                response = await client.get(f"{self.base_url}/api/tags")
-                response.raise_for_status()
-                data = response.json()
-                return [m["name"] for m in data.get("models", [])]
+            client = await self._get_client()
+            response = await client.get(f"{self.base_url}/api/tags")
+            response.raise_for_status()
+            data = response.json()
+            return [m["name"] for m in data.get("models", [])]
         except Exception:
             return []
 

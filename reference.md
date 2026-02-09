@@ -2,7 +2,7 @@
 
 > **Proje Adı:** Kurumsal Yapay Zeka Asistanı – LOCAL & ÖĞRENEN  
 > **Amaç:** Kurumsal kullanım için tasarlanmış, tamamen lokal çalışan ve öğrenen bir AI asistan sistemi.  
-> **Son Güncelleme:** 11 Şubat 2026
+> **Son Güncelleme:** 9 Şubat 2026 (Phase 18: Güvenlik & Kalite İyileştirmesi)
 
 ---
 
@@ -24,7 +24,7 @@ CompanyAi/
 │   │       ├── memory.py             # Hafıza API (/api/memory)
 │   │       └── multimodal.py         # Dosya+resim destekli AI (/api/ask/multimodal)
 │   ├── auth/                         # Kimlik & yetkilendirme
-│   │   ├── jwt_handler.py            # JWT token + password hash (pbkdf2)
+│   │   ├── jwt_handler.py            # JWT token (access+refresh) + password hash (pbkdf2)
 │   │   └── rbac.py                   # Rol tanımları + check_admin/check_admin_or_manager
 │   ├── core/                         # Çekirdek işlem motoru
 │   │   ├── audit.py                  # ✅ Denetim kaydı (AuditLog) yardımcısı
@@ -34,9 +34,9 @@ CompanyAi/
 │   │   ├── database.py               # Async SQLAlchemy engine & session
 │   │   └── models.py                 # User, Query, AuditLog, SystemSettings
 │   ├── llm/                          # Dil modeli entegrasyonu
-│   │   ├── client.py                 # Ollama HTTP client (generate/stream/health/vision)
+│   │   ├── client.py                 # Ollama HTTP client (connection pooling + generate/stream/health/vision)
 │   │   ├── local_llm.py              # ✅ OllamaClient wrapper (geriye uyumluluk)
-│   │   └── prompts.py                # Departman/risk bazlı prompt şablonları
+│   │   └── prompts.py                # Departman/risk bazlı prompt şablonları + injection koruması
 │   ├── memory/                       # Hafıza ve öğrenme sistemi
 │   │   └── vector_memory.py          # ChromaDB + SentenceTransformers
 │   ├── rag/                          # Retrieval Augmented Generation
@@ -743,3 +743,143 @@ sudo systemctl restart nginx
 - **Sebep:** `chat_patterns.json` → `thanks` kategorisinde "Süpersin" entry'sinin yanıtı "güzel soru sordun" idi — bağlam dışı.
 - **Çözüm:** Tüm `thanks` kategorisi yanıtları bağlamdan bağımsız olacak şekilde güncellendi. "Teşekkürler kanka" ve "Sağ ol canım" pattern'ları eklendi.
 
+---
+
+## 🔒 Phase 18: Güvenlik & Kalite İyileştirmesi (Profesyonel Review)
+
+**Tarih:** 9 Şubat 2026  
+**Durum:** ✅ Deploy edildi & test edildi  
+**Kapsam:** 17 iyileştirme — Güvenlik (P0), Altyapı (P1), Kalite (P2), Temizlik (P3)
+
+### P0 — Kritik Güvenlik Düzeltmeleri
+
+#### 1. SECRET_KEY Otomatik Üretimi
+- **Sorun:** `config.py`'deki SECRET_KEY hardcoded default ile kalabiliyordu
+- **Çözüm:** Startup'ta SECRET_KEY default mı kontrol edilir → `secrets.token_urlsafe(64)` ile otomatik üretilir + warning loglanır
+- **Dosya:** `app/config.py`
+
+#### 2. XSS Koruma (DOMPurify)
+- **Sorun:** `Analyze.tsx`'de `dangerouslySetInnerHTML` sanitize edilmeden kullanılıyordu
+- **Çözüm:** `dompurify` npm paketi eklendi, `renderMarkdown()` çıktısı `DOMPurify.sanitize(html, {ALLOWED_TAGS: [...]})` ile temizleniyor
+- **Dosyalar:** `frontend/src/pages/Analyze.tsx`, `frontend/package.json`
+
+#### 3. IDOR Session Erişim Kontrolü
+- **Sorun:** `/sessions/{id}/messages` endpoint'i herhangi bir kullanıcının başka kullanıcı session'ına erişmesine izin veriyordu
+- **Çözüm:** `ChatSession.user_id == current_user.id` ownership kontrolü eklendi, 404 döner
+- **Dosya:** `app/api/routes/memory.py`
+
+#### 4. Şifre Validasyon Kuralları
+- **Sorun:** Kayıt sırasında şifre güçlülük kontrolü yoktu
+- **Çözüm:** Minimum uzunluk (`PASSWORD_MIN_LENGTH=8`) + en az harf ve rakam içermesi zorunlu
+- **Dosya:** `app/api/routes/auth.py`
+
+#### 5. Production DEBUG Kapatma
+- **Sorun:** Systemd servisinde `DEBUG=true` bırakılmıştı
+- **Çözüm:** `DEBUG=false` olarak güncellendi
+- **Dosya:** `companyai-backend.service`
+
+### P1 — Altyapı İyileştirmeleri
+
+#### 6. Rate Limiting (slowapi)
+- **Sorun:** API endpoint'lerinde istek hız sınırı yoktu (DDoS riski)
+- **Çözüm:** `slowapi` paketi eklendi, `RATE_LIMIT_PER_MINUTE=30` yapılandırılabilir, graceful import (sunucuda yoksa çalışmaya devam eder)
+- **Dosyalar:** `app/main.py`, `app/config.py`, `requirements.txt`
+
+#### 7. Refresh Token Mekanizması
+- **Sorun:** Sadece kısa ömürlü access token vardı, kullanıcı her seferinde yeniden login olmak zorundaydı
+- **Çözüm:** `create_refresh_token()` fonksiyonu (7 gün ömür), `/auth/refresh` endpoint'i, token rotation (her refresh'te yeni çift üretilir), tip kontrolü (refresh token ile access endpoint'e erişim engellenir)
+- **Dosyalar:** `app/auth/jwt_handler.py`, `app/api/routes/auth.py`, `app/config.py`
+
+#### 8. Streaming DB Session Yaşam Döngüsü Fix
+- **Sorun:** SSE streaming endpoint'inde FastAPI dependency injection session'ı kapanıyordu → DB yazma hatası
+- **Çözüm:** `_save_stream_conversation()` kendi `async_session_maker()` ile bağımsız DB session oluşturur
+- **Dosya:** `app/api/routes/ask.py`
+
+### P2 — Kalite & Performans İyileştirmeleri
+
+#### 9. Prompt Injection Koruması
+- **Sorun:** Kullanıcı girdisi ve RAG dokümanları LLM'e doğrudan gönderiliyordu
+- **Çözüm:** 8 regex pattern ile injection tespiti (`ignore previous`, `system:`, `act as`, vb.), `sanitize_input()` şüpheli girdiyi `[Kullanıcı sorusu]:` prefix'i ile sarar, `sanitize_document_content()` RAG dokümanlarından `<|system|>`, `[INST]`, `[SYS]` tag'lerini temizler
+- **Dosya:** `app/llm/prompts.py`
+
+#### 10. LLM Connection Pooling
+- **Sorun:** Her istekte yeni `httpx.AsyncClient` oluşturuluyordu (overhead)
+- **Çözüm:** Persistent `self._client` ile `httpx.Limits(max_connections=10, max_keepalive_connections=5)`, `close()` metodu shutdown'da çağrılır
+- **Dosya:** `app/llm/client.py`
+
+#### 11. Merkezi Hata Yakalayıcı (Global Exception Handler)
+- **Sorun:** Yakalanmayan hatalar stack trace döndürüyordu (güvenlik riski)
+- **Çözüm:** `@app.exception_handler(Exception)` middleware'i → hata loglanır (request_id ile), kullanıcıya güvenli JSON döner
+- **Dosya:** `app/main.py`
+
+#### 12. datetime.utcnow Deprecation Fix
+- **Sorun:** Python 3.12+'de `datetime.utcnow()` deprecated
+- **Çözüm:** `_utcnow()` helper fonksiyonu → `datetime.now(timezone.utc).replace(tzinfo=None)` (DB TIMESTAMP WITHOUT TIME ZONE uyumluluğu korunuyor)
+- **Dosya:** `app/db/models.py` (12 kullanım yerinde güncellendi)
+
+#### 13. Embedding Model Tutarlılığı
+- **Sorun:** `vector_memory.py` farklı embedding modeli kullanıyordu (`all-MiniLM-L6-v2`, İngilizce, 384-dim) — RAG'den farklı
+- **Çözüm:** Her iki modül de `paraphrase-multilingual-mpnet-base-v2` (çok dilli, 768-dim) kullanıyor
+- **Dosya:** `app/memory/vector_memory.py`
+
+#### 14. RAG Chunking İyileştirmesi
+- **Sorun:** Karakter bazlı kaba bölme, cümle ortasından kesiyordu
+- **Çözüm:** Cümle sınırına duyarlı (sentence-boundary-aware) chunking: regex ile cümle bölme, akıllı overlap (100 karakter), uzun cümleler kelime sınırından bölünür
+- **Dosya:** `app/rag/vector_store.py`
+
+#### 15. Health Endpoint İyileştirmesi
+- **Sorun:** Health endpoint sadece "ok" dönüyordu, DB ve LLM durumu bilinmiyordu
+- **Çözüm:** DB bağlantısı (SELECT 1) ve LLM erişilebilirliği (ollama is_available) kontrol edilir
+- **Dosya:** `app/main.py`
+
+#### 16. Request Correlation ID (X-Request-ID)
+- **Sorun:** Log'larda istek takibi yapılamıyordu
+- **Çözüm:** `CorrelationIDMiddleware` → her isteğe UUID tabanlı `X-Request-ID` atanır, response header'a ve log'lara eklenir
+- **Dosya:** `app/main.py`
+
+### P3 — Kod Temizliği
+
+#### 17. Duplicate Kod Kaldırma
+- **Sorun:** `ask.py`'de 3 farklı stream save fonksiyonu benzer iş yapıyordu
+- **Çözüm:** Tek `_save_stream_conversation(user_id, question, answer, dept)` fonksiyonuna birleştirildi
+- **Dosya:** `app/api/routes/ask.py`
+
+### Değişen Dosyalar Özeti
+
+| Dosya | Kategoriler |
+|-------|-------------|
+| `app/config.py` | P0: SECRET_KEY, P1: Rate limit, Refresh token config |
+| `app/main.py` | P1: Rate limiting, P2: Global error handler, Health, Correlation ID |
+| `app/auth/jwt_handler.py` | P1: Refresh token, P2: datetime fix |
+| `app/api/routes/auth.py` | P0: Şifre validasyon, P1: Refresh token endpoint |
+| `app/api/routes/memory.py` | P0: IDOR fix |
+| `app/api/routes/ask.py` | P1: DB session fix, P3: Duplicate temizliği |
+| `app/llm/client.py` | P2: Connection pooling |
+| `app/llm/prompts.py` | P2: Prompt injection koruması |
+| `app/db/models.py` | P2: datetime.utcnow fix |
+| `app/memory/vector_memory.py` | P2: Embedding model tutarlılığı |
+| `app/rag/vector_store.py` | P2: Chunking iyileştirmesi |
+| `frontend/src/pages/Analyze.tsx` | P0: XSS koruması (DOMPurify) |
+| `frontend/package.json` | P0: DOMPurify bağımlılığı |
+| `companyai-backend.service` | P0: DEBUG=false |
+| `requirements.txt` | P1: slowapi eklendi |
+
+### Yeni Bağımlılıklar
+
+| Paket | Tip | Amaç |
+|-------|-----|------|
+| `slowapi>=0.1.9` | Backend (pip) | API rate limiting |
+| `dompurify` | Frontend (npm) | XSS sanitization |
+| `@types/dompurify` | Frontend (npm-dev) | TypeScript type definitions |
+
+### Yeni API Endpoint'leri
+
+| Endpoint | Method | Açıklama |
+|----------|--------|----------|
+| `/api/auth/refresh` | POST | Refresh token ile yeni token çifti al |
+
+### Yeni Response Header'ları
+
+| Header | Değer | Açıklama |
+|--------|-------|----------|
+| `X-Request-ID` | UUID (8 char) | Her isteğe atanan korelasyon kimliği |

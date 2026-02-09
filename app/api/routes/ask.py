@@ -40,29 +40,18 @@ MAX_HISTORY_FOR_LLM = 20  # LLM'e gönderilecek max konuşma
 
 
 # ── Stream endpoint yardımcı fonksiyonları ──
-async def _stream_save_conv(db, user_id, question, answer, dept):
-    """Stream endpoint'inden konuşma kaydet (pattern match)"""
+async def _save_stream_conversation(user_id: int, question: str, answer: str, dept: str):
+    """Stream endpoint'inden konuşma kaydet — kendi DB session'ı ile (lifecycle güvenli)"""
+    from app.db.database import async_session_maker
     try:
-        active_session = await get_active_session(db, user_id)
-        sid = active_session["id"] if active_session else None
-        await save_conversation(db, user_id, question, answer, department=dept, session_id=sid)
-        if sid:
-            await update_session_title(db, sid, question)
-        await extract_and_save_culture(db, user_id, question, answer)
-    except Exception:
-        pass
-
-_stream_save_conv_ref = _stream_save_conv  # alias
-
-async def _async_save_stream_conv(db, user_id, question, answer, dept):
-    """Stream generator içinden konuşma kaydet"""
-    try:
-        active_session = await get_active_session(db, user_id)
-        sid = active_session["id"] if active_session else None
-        await save_conversation(db, user_id, question, answer, department=dept, session_id=sid)
-        if sid:
-            await update_session_title(db, sid, question)
-        await extract_and_save_culture(db, user_id, question, answer)
+        async with async_session_maker() as db:
+            active_session = await get_active_session(db, user_id)
+            sid = active_session["id"] if active_session else None
+            await save_conversation(db, user_id, question, answer, department=dept, session_id=sid)
+            if sid:
+                await update_session_title(db, sid, question)
+            await extract_and_save_culture(db, user_id, question, answer)
+            await db.commit()
     except Exception:
         pass
 
@@ -70,6 +59,16 @@ async def _async_save_stream_conv(db, user_id, question, answer, dept):
 class AskRequest(BaseModel):
     question: str
     department: Optional[str] = None  # Opsiyonel departman override
+    
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    
+    def model_post_init(self, __context) -> None:
+        if len(self.question) > 10000:
+            raise ValueError("Soru 10.000 karakteri aşamaz")
+        if len(self.question.strip()) == 0:
+            raise ValueError("Soru boş olamaz")
 
 
 class AskResponse(BaseModel):
@@ -285,7 +284,7 @@ async def ask_ai_stream(
                 if first_name:
                     pattern_answer = f"{first_name}, {pattern_answer[0].lower()}{pattern_answer[1:]}"
             
-            await _stream_save_conv(db, current_user.id, request.question, pattern_answer, dept)
+            await _save_stream_conversation(current_user.id, request.question, pattern_answer, dept)
 
             async def _fast_event():
                 # Tüm cevabı tek token olarak gönder (anlık)
@@ -345,8 +344,8 @@ async def ask_ai_stream(
         processing_ms = int((time.time() - start_time) * 1000)
         full_answer = "".join(collected)
         
-        # Kalıcı hafızaya kaydet
-        await _async_save_stream_conv(db, current_user.id, request.question, full_answer, dept)
+        # Kalıcı hafızaya kaydet (kendi DB session'u ile — SSE lifecycle-safe)
+        await _save_stream_conversation(current_user.id, request.question, full_answer, dept)
 
         # DB kaydet
         try:

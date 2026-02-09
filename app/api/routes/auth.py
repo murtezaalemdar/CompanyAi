@@ -11,6 +11,7 @@ from app.db.database import get_db
 from app.db.models import User
 from app.auth.jwt_handler import (
     create_access_token,
+    create_refresh_token,
     verify_token,
     hash_password,
     verify_password,
@@ -43,6 +44,7 @@ class UserResponse(BaseModel):
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
 
 
@@ -86,6 +88,18 @@ async def get_current_user(
 @router.post("/register", response_model=UserResponse)
 async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     """Yeni kullanıcı kaydı"""
+    # Şifre validasyonu
+    if len(user_data.password) < settings.PASSWORD_MIN_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Şifre en az {settings.PASSWORD_MIN_LENGTH} karakter olmalıdır"
+        )
+    if user_data.password.isdigit() or user_data.password.isalpha():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Şifre hem harf hem rakam içermelidir"
+        )
+    
     # Email kontrolü
     result = await db.execute(select(User).where(User.email == user_data.email))
     if result.scalar_one_or_none():
@@ -130,10 +144,10 @@ async def login(
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Hesap devre dışı")
     
-    # Token oluştur
-    access_token = create_access_token(
-        data={"sub": str(user.id), "role": user.role}
-    )
+    # Token öluştur
+    token_data = {"sub": str(user.id), "role": user.role}
+    access_token = create_access_token(data=token_data)
+    refresh_token = create_refresh_token(data=token_data)
     
     # Audit log
     ip = request.client.host if request and request.client else None
@@ -144,7 +158,37 @@ async def login(
     )
     await db.commit()
     
-    return Token(access_token=access_token)
+    return Token(access_token=access_token, refresh_token=refresh_token)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@router.post("/refresh", response_model=Token)
+async def refresh_access_token(
+    body: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Refresh token ile yeni access token al"""
+    payload = verify_token(body.refresh_token, token_type="refresh")
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Geçersiz veya süresi dolmuş refresh token",
+        )
+    
+    user_id = payload.get("sub")
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="Kullanıcı bulunamadı")
+    
+    token_data = {"sub": str(user.id), "role": user.role}
+    new_access = create_access_token(data=token_data)
+    new_refresh = create_refresh_token(data=token_data)
+    
+    return Token(access_token=new_access, refresh_token=new_refresh)
 
 
 @router.get("/me", response_model=UserResponse)

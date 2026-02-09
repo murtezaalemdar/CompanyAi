@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
+import DOMPurify from 'dompurify'
 import {
     BarChart3,
     Upload,
@@ -227,7 +228,7 @@ export default function Analyze() {
 
     // ── MARKDOWN → basit HTML dönüştürücü ──
     const renderMarkdown = (text: string) => {
-        return text
+        const html = text
             .replace(/### (.*)/g, '<h3 class="text-lg font-bold text-white mt-4 mb-2">$1</h3>')
             .replace(/## (.*)/g, '<h2 class="text-xl font-bold text-white mt-5 mb-2">$1</h2>')
             .replace(/# (.*)/g, '<h1 class="text-2xl font-bold text-white mt-6 mb-3">$1</h1>')
@@ -241,6 +242,11 @@ export default function Analyze() {
                 return '<tr>' + cells.map(c => `<td class="border border-dark-600 px-3 py-1.5 text-sm">${c.trim()}</td>`).join('') + '</tr>'
             })
             .replace(/\n/g, '<br/>')
+        // DOMPurify ile XSS koruması
+        return DOMPurify.sanitize(html, {
+            ALLOWED_TAGS: ['h1','h2','h3','strong','em','li','tr','td','br','table','tbody','thead','th','ul','ol','p','span','div','code','pre'],
+            ALLOWED_ATTR: ['class'],
+        })
     }
 
     return (

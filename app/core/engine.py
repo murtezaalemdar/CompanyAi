@@ -117,12 +117,23 @@ async def process_question(
     relevant_docs = []
     web_results = None
     
-    # RAG araması (sohbet dışında)
-    if use_rag and RAG_AVAILABLE and intent != "sohbet":
+    # RAG araması (sohbet dışında + sadece SORU varsa)
+    # "fabrikamızın adı X" gibi bilgi verme cümlelerinde RAG çalıştırma
+    is_statement = not any(c in question for c in "??") and len(question.split()) < 10
+    if use_rag and RAG_AVAILABLE and intent != "sohbet" and not is_statement:
         try:
-            relevant_docs = search_documents(question, n_results=3)
-            if relevant_docs:
-                logger.info("rag_documents_found", count=len(relevant_docs))
+            raw_docs = search_documents(question, n_results=3)
+            # Alakasız dokümanları filtrele (distance skoru yüksekse = alakasız)
+            if raw_docs:
+                for doc in raw_docs:
+                    score = doc.get('distance', doc.get('score', 999))
+                    # ChromaDB distance: düşük = benzer. 1.0'dan büyükse alakasız.
+                    if score < 1.0:
+                        relevant_docs.append(doc)
+                if relevant_docs:
+                    logger.info("rag_documents_found", count=len(relevant_docs))
+                else:
+                    logger.info("rag_documents_filtered_out", raw=len(raw_docs))
         except Exception as e:
             logger.error("rag_search_error", error=str(e))
     

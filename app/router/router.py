@@ -51,6 +51,10 @@ CHAT_PATTERNS = [
     # Kimlik soruları
     r"\b(kimsin|nesin|adın\s*ne|sen\s*kimsin|ne\s*yapabilirsin)\b",
     r"\b(kendini\s*tanıt|hakkında\s*bilgi)\b",
+    # Tanıtma / bilgi verme (kişi, şirket, fabrika adı söyleme)
+    r"\b(benim\s*adım|adım\s+\w|ben\s+[A-Z]|ismim)\b",
+    r"(fabrikamız|şirketimiz|firmamız).*adı",
+    r"adı(mız)?\s*[:.]?\s*[A-ZÇĞİÖŞÜ]",
     # Genel sohbet / fikir
     r"\b(sence|bence|ne\s*dersin|ne\s*düşünüyorsun|fikrin\s*ne)\b",
     r"\b(bir\s*şey\s*soracağım|merak\s*ettim|acaba)\b",

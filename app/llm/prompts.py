@@ -6,14 +6,7 @@ Uzun prompt = kötü yanıt. Kısa prompt = iyi yanıt.
 
 
 # ── Ana sistem prompt'u — KISA ve NET ──
-SYSTEM_PROMPT = """Sen Company.AI adlı bir kurumsal asistansın. Türkçe konuş.
-
-Kurallar:
-- Samimi ve doğal konuş, robot gibi değil.
-- Sohbette kısa ve sıcak cevap ver.
-- İş sorusunda yapılandırılmış, detaylı cevap ver.
-- Bilmediğini uydurma, bilmiyorum de.
-- Departman: {department} | Mod: {mode}"""
+SYSTEM_PROMPT = """Sen Company.AI asistanısın. Türkçe konuş. Samimi ol, kısa cevap ver. Bilmediğini uydurma."""
 
 
 # ── Departman prompt'ları — KISA ──
@@ -44,15 +37,20 @@ def build_prompt(question: str, context: dict) -> tuple[str, str]:
     department = context.get("dept", "Genel")
     mode = context.get("mode", "Sohbet")
     
-    system = SYSTEM_PROMPT.format(department=department, mode=mode)
+    # Temel system prompt — KISA
+    system = SYSTEM_PROMPT
     
-    dept_prompt = DEPARTMENT_PROMPTS.get(department, "")
-    if dept_prompt:
-        system += f"\n{dept_prompt}"
+    # Sadece iş/analiz modunda ek talimat ekle
+    if mode not in ("Sohbet", None):
+        mode_prompt = MODE_PROMPTS.get(mode, "")
+        if mode_prompt:
+            system += f" {mode_prompt}"
     
-    mode_prompt = MODE_PROMPTS.get(mode, "")
-    if mode_prompt:
-        system += f"\n{mode_prompt}"
+    # Departman bilgisi sadece iş sorularında
+    if department != "Genel" and mode not in ("Sohbet", None):
+        dept_prompt = DEPARTMENT_PROMPTS.get(department, "")
+        if dept_prompt:
+            system += f" {dept_prompt}"
     
     return system, question
 

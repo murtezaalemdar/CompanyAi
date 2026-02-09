@@ -87,6 +87,12 @@ def _match_pattern_category(question: str) -> Optional[str]:
     if re.search(r"(benim\s*adım|adım\s+\w|ben\s+[A-ZÇĞİÖŞÜa-zçğıöşü]{2,}$|ismim)", q):
         return "introduction"
     
+    # Şirket/fabrika adı tanıtma
+    if re.search(r"(fabrikamız|şirketimiz|firmamız).*adı", q, re.IGNORECASE):
+        return "company_introduction"
+    if re.search(r"(adımız|biz\s+\w+.*olarak\s+(çalış|faaliyet))", q, re.IGNORECASE):
+        return "company_introduction"
+    
     # Nasılsın
     if re.search(r"(nasılsın|naber|ne\s*haber|iyi\s*misin|keyfin|keyifler)", q):
         return "how_are_you"
@@ -142,16 +148,31 @@ def get_pattern_response(question: str) -> Optional[str]:
     # İsim tanıtma: yanıttaki örnek ismi gerçek isimle değiştir
     if category == "introduction" and response:
         q = question.strip()
-        # İsmi çıkar
         name_match = re.search(
             r"(?:benim\s*adım|adım|ben|ismim)\s+([A-ZÇĞİÖŞÜa-zçğıöşü]+)",
             q, re.IGNORECASE
         )
         if name_match:
             real_name = name_match.group(1).capitalize()
-            # Yanıttaki örnek isimleri gerçek isimle değiştir
             for placeholder in ["Ali", "Ayşe", "Mehmet", "Murteza"]:
                 response = response.replace(placeholder, real_name)
+    
+    # Şirket/fabrika adı tanıtma: ismi çıkar ve yerleştir
+    if category == "company_introduction" and response:
+        q = question.strip()
+        # "adı X" veya "adı: X" formatı
+        name_match = re.search(
+            r"adı\s*[:.]?\s*(.+?)$",
+            q, re.IGNORECASE
+        )
+        if not name_match:
+            # "biz X olarak" formatı
+            name_match = re.search(r"biz\s+(.+?)\s+olarak", q, re.IGNORECASE)
+        if name_match:
+            company_name = name_match.group(1).strip()
+            # Placeholder isimleri değiştir
+            for placeholder in ["ORHAN KARAKOÇ TEKSTİL", "ABC Tekstil", "XYZ", "KARAKOÇ TEKSTİL"]:
+                response = response.replace(placeholder, company_name)
     
     return response
 

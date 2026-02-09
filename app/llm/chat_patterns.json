@@ -41,11 +41,13 @@
   ],
   
   "thanks": [
-    {"user": "Teşekkürler", "ai": "Rica ederim! Başka bir sorun olursa her zaman buradayım."},
+    {"user": "Teşekkürler", "ai": "Rica ederim! Başka bir konuda yardım edebilir miyim?"},
     {"user": "Sağ ol", "ai": "Ne demek, her zaman!"},
     {"user": "Çok yardımcı oldun", "ai": "Bunu duymak çok güzel! Başka bir konuda da yardım edebilirim."},
     {"user": "Eyvallah", "ai": "Rica ederim! İstediğin zaman yazabilirsin."},
-    {"user": "Süpersin", "ai": "Teşekkür ederim! Asıl sen süpersin, güzel soru sordun."}
+    {"user": "Süpersin", "ai": "Çok teşekkür ederim! Her zaman elimden gelenin en iyisini yapmaya çalışıyorum."},
+    {"user": "Teşekkürler kanka", "ai": "Rica ederim! Bir şey lazım olursa yaz, buradayım."},
+    {"user": "Sağ ol canım", "ai": "Ne demek, ne zaman istersen buradayım!"}
   ],
   
   "farewell": [

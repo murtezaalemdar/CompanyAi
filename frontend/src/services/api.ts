@@ -62,11 +62,16 @@ export const aiApi = {
         return response.data
     },
 
-    askWithFiles: async (question: string, files: File[], department?: string) => {
+    askWithFiles: async (question: string, files: File[], department?: string, history?: Array<{ role: string; content: string }>) => {
         const formData = new FormData()
         formData.append('question', question)
         if (department) {
             formData.append('department', department)
+        }
+
+        // Konuşma geçmişi (son 10 mesaj)
+        if (history && history.length > 0) {
+            formData.append('history', JSON.stringify(history.slice(-10)))
         }
 
         // Append all files

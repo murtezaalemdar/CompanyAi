@@ -167,8 +167,9 @@ async def process_question(
         system_prompt += f"\nWeb bilgisi: {web_results[:300]}"
     
     # Chat history — system prompt'a DEĞİL, client'a ayrı gönder
+    # Her intent'te (sohbet dahil) geçmişi gönder — "biraz daha basit anlat" gibi takip soruları için
     chat_history = []
-    if intent != "sohbet" and session_history:
+    if session_history:
         chat_history = session_history[-5:]
     
     # 5. LLM'e sor

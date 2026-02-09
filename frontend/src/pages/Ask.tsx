@@ -86,9 +86,9 @@ export default function Ask() {
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     const askMutation = useMutation({
-        mutationFn: async ({ question, files, department }: { question: string; files: File[]; department?: string }) => {
-            // FormData ile gönderim
-            return await aiApi.askWithFiles(question, files, department)
+        mutationFn: async ({ question, files, department, history }: { question: string; files: File[]; department?: string; history?: Array<{ role: string; content: string }> }) => {
+            // FormData ile gönderim — konuşma geçmişi dahil
+            return await aiApi.askWithFiles(question, files, department, history)
         },
         onSuccess: (data) => {
             const botMessage: Message = {
@@ -221,10 +221,18 @@ export default function Ask() {
             attachments: [...attachedFiles],
         }
         setMessages((prev) => [...prev, userMessage])
+
+        // Konuşma geçmişini hazırla (mevcut mesajlar + yeni kullanıcı mesajı)
+        const chatHistory = [...messages, userMessage].map((m) => ({
+            role: m.role,
+            content: m.content,
+        }))
+
         askMutation.mutate({
             question: input,
             files: attachedFiles.map((f) => f.file),
-            department: selectedDepartment !== 'Genel' ? selectedDepartment : undefined
+            department: selectedDepartment !== 'Genel' ? selectedDepartment : undefined,
+            history: chatHistory,
         })
         setInput('')
         setAttachedFiles([])

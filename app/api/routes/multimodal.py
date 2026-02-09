@@ -2,6 +2,7 @@
 
 import time
 import os
+import json
 import base64
 import tempfile
 import io
@@ -195,10 +196,26 @@ async def process_document_content(file: UploadFile) -> dict:
     }
 
 
+# ── Basit oturum hafızası (sunucu tarafı, kullanıcı bazlı) ────
+_user_sessions: dict[int, list] = {}
+MAX_SESSION_MESSAGES = 10
+
+def _get_session(user_id: int) -> list:
+    return _user_sessions.get(user_id, [])
+
+def _add_to_session(user_id: int, question: str, answer: str):
+    if user_id not in _user_sessions:
+        _user_sessions[user_id] = []
+    _user_sessions[user_id].append({"q": question, "a": answer})
+    if len(_user_sessions[user_id]) > MAX_SESSION_MESSAGES:
+        _user_sessions[user_id] = _user_sessions[user_id][-MAX_SESSION_MESSAGES:]
+
+
 @router.post("/ask/multimodal", response_model=MultimodalResponse)
 async def ask_ai_multimodal(
     question: str = Form(...),
     department: Optional[str] = Form(None),
+    history: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -209,8 +226,38 @@ async def ask_ai_multimodal(
     - Resim dosyaları: JPEG, PNG, GIF, WEBP, BMP
     - Doküman dosyaları: PDF, DOCX, XLSX, TXT, CSV, JSON
     - Maksimum 10 dosya, her biri maksimum 50MB
+    - history: JSON string, konuşma geçmişi [{role, content}, ...]
     """
     start_time = time.time()
+    
+    # Konuşma geçmişini parse et
+    session_history = _get_session(current_user.id)  # Sunucu tarafı fallback
+    if history:
+        try:
+            parsed = json.loads(history)
+            # Frontend formatı: [{role: 'user', content: '...'}, {role: 'assistant', content: '...'}]
+            # Engine formatı: [{q: '...', a: '...'}, ...]
+            converted = []
+            i = 0
+            while i < len(parsed):
+                entry = {}
+                if parsed[i].get('role') == 'user':
+                    entry['q'] = parsed[i].get('content', '')
+                    # Sonraki mesaj assistant mı?
+                    if i + 1 < len(parsed) and parsed[i + 1].get('role') == 'assistant':
+                        entry['a'] = parsed[i + 1].get('content', '')
+                        i += 2
+                    else:
+                        i += 1
+                else:
+                    i += 1
+                    continue
+                if entry:
+                    converted.append(entry)
+            if converted:
+                session_history = converted[-MAX_SESSION_MESSAGES:]
+        except (json.JSONDecodeError, TypeError):
+            pass  # Sunucu tarafı session'ı kullan
     
     # Departman yetki kontrolü
     import json
@@ -339,7 +386,16 @@ Lütfen paylaşılan dosya içeriklerini dikkate alarak soruyu cevapla."""
                 # Vision model yoksa normal akışa devam et
 
         # Normal metin tabanlı akış (resim yoksa veya vision başarısızsa)
-        result = await process_question(enhanced_question, department)
+        result = await process_question(
+            enhanced_question, 
+            department_override=department,
+            user_name=current_user.full_name or current_user.email.split("@")[0],
+            user_department=department,
+            session_history=session_history,
+        )
+        
+        # Oturuma kaydet
+        _add_to_session(current_user.id, question, result["answer"])
         
         processing_time = int((time.time() - start_time) * 1000)
         

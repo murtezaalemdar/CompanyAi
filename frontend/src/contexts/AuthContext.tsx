@@ -52,7 +52,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(userData)
     }
 
-    const logout = () => {
+    const logout = async () => {
+        // Oturum kapatınca yeni sohbet oturumu oluştur (eski oturum kapansın)
+        try {
+            const token = localStorage.getItem('token')
+            if (token) {
+                // Yeni session oluştur → eski aktif oturum kapanır
+                const response = await fetch('/api/memory/sessions/new', {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${token}` },
+                })
+            }
+        } catch {
+            // sessiz geç
+        }
         localStorage.removeItem('token')
         setUser(null)
     }

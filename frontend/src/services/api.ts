@@ -93,6 +93,32 @@ export const aiApi = {
         return response.data
     },
 
+    // Sohbet Oturumu API'leri
+    getActiveSession: async () => {
+        const response = await api.get('/memory/sessions/active')
+        return response.data
+    },
+
+    listSessions: async (limit = 30) => {
+        const response = await api.get(`/memory/sessions?limit=${limit}`)
+        return response.data
+    },
+
+    getSessionMessages: async (sessionId: number) => {
+        const response = await api.get(`/memory/sessions/${sessionId}/messages`)
+        return response.data
+    },
+
+    switchSession: async (sessionId: number) => {
+        const response = await api.post(`/memory/sessions/${sessionId}/switch`)
+        return response.data
+    },
+
+    createNewSession: async () => {
+        const response = await api.post('/memory/sessions/new')
+        return response.data
+    },
+
     uploadDocument: async (file: File, category?: string) => {
         const formData = new FormData()
         formData.append('file', file)

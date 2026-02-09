@@ -21,6 +21,8 @@ from app.memory.persistent_memory import (
     save_conversation, get_conversation_history,
     get_conversation_count, extract_and_save_preferences,
     build_memory_context, get_preferences,
+    get_active_session, update_session_title,
+    extract_and_save_culture,
 )
 
 # Few-shot sohbet örnekleri
@@ -35,6 +37,34 @@ except ImportError:
 router = APIRouter()
 
 MAX_HISTORY_FOR_LLM = 20  # LLM'e gönderilecek max konuşma
+
+
+# ── Stream endpoint yardımcı fonksiyonları ──
+async def _stream_save_conv(db, user_id, question, answer, dept):
+    """Stream endpoint'inden konuşma kaydet (pattern match)"""
+    try:
+        active_session = await get_active_session(db, user_id)
+        sid = active_session["id"] if active_session else None
+        await save_conversation(db, user_id, question, answer, department=dept, session_id=sid)
+        if sid:
+            await update_session_title(db, sid, question)
+        await extract_and_save_culture(db, user_id, question, answer)
+    except Exception:
+        pass
+
+_stream_save_conv_ref = _stream_save_conv  # alias
+
+async def _async_save_stream_conv(db, user_id, question, answer, dept):
+    """Stream generator içinden konuşma kaydet"""
+    try:
+        active_session = await get_active_session(db, user_id)
+        sid = active_session["id"] if active_session else None
+        await save_conversation(db, user_id, question, answer, department=dept, session_id=sid)
+        if sid:
+            await update_session_title(db, sid, question)
+        await extract_and_save_culture(db, user_id, question, answer)
+    except Exception:
+        pass
 
 
 class AskRequest(BaseModel):
@@ -105,6 +135,10 @@ async def ask_ai(
         # Kullanıcı bilgilerini çıkar ve kaydet (ad, departman, vs.)
         await extract_and_save_preferences(db, current_user.id, request.question)
         
+        # Aktif oturumu al (yoksa oluştur)
+        active_session = await get_active_session(db, current_user.id)
+        session_id = active_session["id"] if active_session else None
+        
         # Kalıcı hafıza: PostgreSQL'den geçmiş yükle
         session_history = await get_conversation_history(db, current_user.id, limit=MAX_HISTORY_FOR_LLM)
         memory_ctx = await build_memory_context(db, current_user.id)
@@ -119,11 +153,19 @@ async def ask_ai(
             memory_context=memory_ctx,
         )
         
-        # Konuşmayı kalıcı hafızaya kaydet (PostgreSQL)
+        # Konuşmayı kalıcı hafızaya kaydet (PostgreSQL) — session_id ile
         await save_conversation(
             db, current_user.id, request.question, result["answer"],
-            department=result["department"], intent=result.get("intent")
+            department=result["department"], intent=result.get("intent"),
+            session_id=session_id,
         )
+        
+        # Oturum başlığını ilk sorudan oluştur
+        if session_id:
+            await update_session_title(db, session_id, request.question)
+        
+        # Şirket kültürü sinyallerini çıkar ve kaydet
+        await extract_and_save_culture(db, current_user.id, request.question, result["answer"])
         
         processing_time = int((time.time() - start_time) * 1000)
         
@@ -243,7 +285,7 @@ async def ask_ai_stream(
                 if first_name:
                     pattern_answer = f"{first_name}, {pattern_answer[0].lower()}{pattern_answer[1:]}"
             
-            _add_to_session(current_user.id, request.question, pattern_answer)
+            await _stream_save_conv(db, current_user.id, request.question, pattern_answer, dept)
 
             async def _fast_event():
                 # Tüm cevabı tek token olarak gönder (anlık)
@@ -286,8 +328,8 @@ async def ask_ai_stream(
             if few_shot:
                 system_prompt += few_shot
 
-    # Chat history — stream de history desteklesin
-    session_history = _get_session(current_user.id)
+    # Chat history — DB'den yükle
+    session_history = await get_conversation_history(db, current_user.id, limit=5)
     chat_history = session_history[-5:] if session_history and intent != "sohbet" else None
 
     async def _event_generator():
@@ -303,8 +345,8 @@ async def ask_ai_stream(
         processing_ms = int((time.time() - start_time) * 1000)
         full_answer = "".join(collected)
         
-        # Oturuma kaydet
-        _add_to_session(current_user.id, request.question, full_answer)
+        # Kalıcı hafızaya kaydet
+        await _async_save_stream_conv(db, current_user.id, request.question, full_answer, dept)
 
         # DB kaydet
         try:

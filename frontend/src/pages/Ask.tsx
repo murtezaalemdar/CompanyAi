@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { aiApi } from '../services/api'
 import {
@@ -20,12 +20,15 @@ import {
     Trash2,
     Sparkles,
     Brain,
-    ShieldX
+    ShieldX,
+    MessageSquarePlus,
+    History,
+    ChevronLeft
 } from 'lucide-react'
 import clsx from 'clsx'
 import FileUploadModal from '../components/FileUploadModal'
 import { useAuth } from '../contexts/AuthContext'
-import { DEPARTMENTS } from '../constants'
+import { DEPARTMENTS }  from '../constants'
 
 interface AttachedFile {
     id: string
@@ -46,6 +49,13 @@ interface Message {
     }
 }
 
+interface ChatSessionInfo {
+    id: number
+    title: string
+    is_active?: boolean
+    created_at: string
+}
+
 export default function Ask() {
     const [input, setInput] = useState('')
     const [messages, setMessages] = useState<Message[]>([])
@@ -53,6 +63,12 @@ export default function Ask() {
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
     const [previewImage, setPreviewImage] = useState<string | null>(null)
     const [isDragging, setIsDragging] = useState(false)
+
+    // Session state
+    const [currentSessionId, setCurrentSessionId] = useState<number | null>(null)
+    const [sessions, setSessions] = useState<ChatSessionInfo[]>([])
+    const [showSessions, setShowSessions] = useState(false)
+    const [sessionsLoaded, setSessionsLoaded] = useState(false)
 
     // Departman Mantığı
     const { user } = useAuth()
@@ -85,6 +101,42 @@ export default function Ask() {
         }
     }, [user, isRestricted])
 
+    // Aktif oturumu ve mesajları yükle (sayfa açılışında + yenilemede)
+    const loadActiveSession = useCallback(async () => {
+        try {
+            // Aktif oturumu al
+            const session = await aiApi.getActiveSession()
+            if (session?.id) {
+                setCurrentSessionId(session.id)
+                // Oturumun mesajlarını yükle
+                const data = await aiApi.getSessionMessages(session.id)
+                if (data?.messages?.length > 0) {
+                    const restored: Message[] = []
+                    for (const msg of data.messages) {
+                        restored.push({
+                            id: `q-${msg.id}`,
+                            role: 'user',
+                            content: msg.question,
+                        })
+                        restored.push({
+                            id: `a-${msg.id}`,
+                            role: 'assistant',
+                            content: msg.answer,
+                            metadata: { department: msg.department },
+                        })
+                    }
+                    setMessages(restored)
+                }
+            }
+        } catch {
+            // Hata varsa sessiz geç
+        }
+    }, [])
+
+    useEffect(() => {
+        loadActiveSession()
+    }, [loadActiveSession])
+
     // Hafıza sayısını yükle
     useEffect(() => {
         aiApi.getMemoryStatus()
@@ -98,6 +150,61 @@ export default function Ask() {
             setMemoryCount((prev) => prev + 1)
         }
     }, [messages.length])
+
+    // Oturum listesini yükle
+    const loadSessions = async () => {
+        try {
+            const data = await aiApi.listSessions()
+            setSessions(data?.sessions || [])
+            setSessionsLoaded(true)
+        } catch {
+            // sessiz geç
+        }
+    }
+
+    // Oturum değiştir
+    const handleSwitchSession = async (sessionId: number) => {
+        try {
+            const data = await aiApi.switchSession(sessionId)
+            setCurrentSessionId(sessionId)
+            if (data?.messages?.length > 0) {
+                const restored: Message[] = []
+                for (const msg of data.messages) {
+                    restored.push({
+                        id: `q-${msg.id}`,
+                        role: 'user',
+                        content: msg.question,
+                    })
+                    restored.push({
+                        id: `a-${msg.id}`,
+                        role: 'assistant',
+                        content: msg.answer,
+                        metadata: { department: msg.department },
+                    })
+                }
+                setMessages(restored)
+            } else {
+                setMessages([])
+            }
+            setShowSessions(false)
+        } catch {
+            // sessiz geç
+        }
+    }
+
+    // Yeni sohbet oluştur
+    const handleNewChat = async () => {
+        try {
+            const data = await aiApi.createNewSession()
+            setCurrentSessionId(data.session_id)
+            setMessages([])
+            setShowSessions(false)
+            // Oturum listesini güncelle
+            loadSessions()
+        } catch {
+            // sessiz geç
+        }
+    }
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -250,7 +357,7 @@ export default function Ask() {
     }
 
     const clearChat = () => {
-        setMessages([])
+        handleNewChat()
     }
 
     const handleForgetMemory = async () => {
@@ -516,25 +623,34 @@ export default function Ask() {
 
                         {/* Right side buttons */}
                         <div className="flex items-center gap-1 sm:gap-2">
+                            {/* Session History Button */}
+                            <button
+                                type="button"
+                                onClick={() => { setShowSessions(!showSessions); if (!sessionsLoaded) loadSessions(); }}
+                                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs text-dark-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors"
+                                title="Sohbet geçmişi"
+                            >
+                                <History className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Geçmiş</span>
+                            </button>
+
+                            {/* New Chat Button */}
+                            <button
+                                type="button"
+                                onClick={handleNewChat}
+                                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs text-dark-400 hover:text-green-400 hover:bg-green-500/10 rounded-lg transition-colors"
+                                title="Yeni sohbet başlat"
+                            >
+                                <MessageSquarePlus className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Yeni</span> Sohbet
+                            </button>
+
                             {/* Memory indicator */}
                             {memoryCount > 0 && (
                                 <div className="hidden sm:flex items-center gap-1 px-2 py-1.5 text-xs text-dark-500" title={`${memoryCount} konuşma hafızada`}>
                                     <Brain className="w-3.5 h-3.5 text-primary-400" />
                                     <span>{memoryCount}</span>
                                 </div>
-                            )}
-
-                            {/* Clear Chat Button — sadece ekranı temizler */}
-                            {messages.length > 0 && (
-                                <button
-                                    type="button"
-                                    onClick={clearChat}
-                                    className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs text-dark-400 hover:text-yellow-400 hover:bg-yellow-500/10 rounded-lg transition-colors"
-                                    title="Ekranı temizle (hafıza korunur)"
-                                >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                    <span className="hidden sm:inline">Ekranı</span> Temizle
-                                </button>
                             )}
 
                             {/* Forget Memory Button */}
@@ -671,6 +787,65 @@ export default function Ask() {
                     >
                         <X className="w-6 h-6 text-white" />
                     </button>
+                </div>
+            )}
+
+            {/* Session History Sidebar */}
+            {showSessions && (
+                <div className="fixed inset-0 z-50 flex" onClick={() => setShowSessions(false)}>
+                    <div className="absolute inset-0 bg-black/50" />
+                    <div
+                        className="relative ml-auto w-80 max-w-[85vw] h-full bg-dark-900 border-l border-dark-700 shadow-xl overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="sticky top-0 bg-dark-900 border-b border-dark-700 p-4 flex items-center justify-between">
+                            <h3 className="text-white font-semibold flex items-center gap-2">
+                                <History className="w-4 h-4 text-primary-400" />
+                                Sohbet Geçmişi
+                            </h3>
+                            <button
+                                onClick={() => setShowSessions(false)}
+                                className="p-1 hover:bg-dark-800 rounded-lg transition-colors"
+                            >
+                                <X className="w-5 h-5 text-dark-400" />
+                            </button>
+                        </div>
+
+                        <div className="p-3">
+                            <button
+                                onClick={handleNewChat}
+                                className="w-full flex items-center gap-2 px-4 py-3 mb-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-sm font-medium transition-colors"
+                            >
+                                <MessageSquarePlus className="w-4 h-4" />
+                                Yeni Sohbet Başlat
+                            </button>
+
+                            <div className="space-y-1">
+                                {sessions.map((s) => (
+                                    <button
+                                        key={s.id}
+                                        onClick={() => handleSwitchSession(s.id)}
+                                        className={clsx(
+                                            "w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors",
+                                            s.id === currentSessionId
+                                                ? "bg-primary-500/20 text-primary-300 border border-primary-500/30"
+                                                : "text-dark-300 hover:bg-dark-800 hover:text-white"
+                                        )}
+                                    >
+                                        <p className="truncate font-medium">{s.title || 'Yeni Sohbet'}</p>
+                                        <p className="text-xs text-dark-500 mt-0.5">
+                                            {new Date(s.created_at).toLocaleDateString('tr-TR', {
+                                                day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                                            })}
+                                        </p>
+                                    </button>
+                                ))}
+                                {sessions.length === 0 && sessionsLoaded && (
+                                    <p className="text-center text-dark-500 text-sm py-8">Henüz sohbet yok</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             )}
 

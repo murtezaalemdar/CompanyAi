@@ -13,6 +13,8 @@ from app.auth.rbac import Role
 from app.memory.persistent_memory import (
     get_conversation_history, get_conversation_count,
     get_preferences, forget_everything, save_preference,
+    get_active_session, get_session_messages, list_user_sessions,
+    switch_to_session, create_session,
 )
 
 router = APIRouter()
@@ -133,3 +135,67 @@ async def admin_clear_all_memory(
         "conversations_deleted": r1.rowcount,
         "preferences_deleted": r2.rowcount,
     }
+
+
+# ═══════════════════════════════════════════════
+#  Sohbet Oturumu API'leri (Chat Sessions)
+# ═══════════════════════════════════════════════
+
+@router.get("/sessions/active")
+async def get_active_chat_session(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanıcının aktif sohbet oturumunu getir (yoksa oluştur)"""
+    session = await get_active_session(db, current_user.id)
+    await db.commit()
+    return session
+
+
+@router.get("/sessions")
+async def list_chat_sessions(
+    limit: int = 30,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanıcının tüm sohbet oturumlarını listele"""
+    sessions = await list_user_sessions(db, current_user.id, limit=limit)
+    return {"sessions": sessions}
+
+
+@router.get("/sessions/{session_id}/messages")
+async def get_chat_session_messages(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Belirli bir oturumun mesajlarını getir"""
+    messages = await get_session_messages(db, session_id)
+    return {"messages": messages, "session_id": session_id}
+
+
+@router.post("/sessions/{session_id}/switch")
+async def switch_chat_session(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Belirli bir oturuma geç"""
+    success = await switch_to_session(db, current_user.id, session_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Oturum değiştirilemedi")
+    await db.commit()
+    # Mesajları da döndür
+    messages = await get_session_messages(db, session_id)
+    return {"success": True, "session_id": session_id, "messages": messages}
+
+
+@router.post("/sessions/new")
+async def create_new_chat_session(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Yeni sohbet oturumu oluştur"""
+    session_id = await create_session(db, current_user.id)
+    await db.commit()
+    return {"session_id": session_id, "title": "Yeni Sohbet"}

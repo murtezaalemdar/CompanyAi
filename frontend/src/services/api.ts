@@ -267,4 +267,93 @@ export const memoryApi = {
     },
 }
 
+// Analiz API (Gelişmiş Doküman Analizi)
+export const analyzeApi = {
+    /** Dosya yükle + otomatik analiz */
+    uploadAndAnalyze: async (file: File, analysisType: string = 'full', question?: string, department: string = 'Genel') => {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('analysis_type', analysisType)
+        if (question) formData.append('question', question)
+        formData.append('department', department)
+        const response = await api.post('/analyze/upload-analyze', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 900000, // 15 dk - analiz zaman alabilir
+        })
+        return response.data
+    },
+
+    /** Dosya yapısını keşfet (sütunlar, türler vs.) */
+    discover: async (file: File) => {
+        const formData = new FormData()
+        formData.append('file', file)
+        const response = await api.post('/analyze/discover', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        return response.data
+    },
+
+    /** Cache'teki veriden pivot tablo oluştur */
+    pivot: async (rows?: string[], columns?: string[], values?: string[], aggfunc: string = 'sum', filename?: string) => {
+        const response = await api.post('/analyze/pivot', {
+            rows, columns, values, aggfunc, filename,
+        })
+        return response.data
+    },
+
+    /** Doğal dil ile veri sorgula */
+    query: async (question: string, filename?: string) => {
+        const response = await api.post('/analyze/query', { question, filename })
+        return response.data
+    },
+
+    /** İstatistik analiz */
+    statistics: async (filename?: string) => {
+        const response = await api.post('/analyze/statistics', null, {
+            params: filename ? { filename } : undefined,
+        })
+        return response.data
+    },
+
+    /** Trend analizi */
+    trend: async (filename?: string, dateCol?: string, valueCol?: string) => {
+        const response = await api.post('/analyze/trend', null, {
+            params: { ...(filename && { filename }), ...(dateCol && { date_col: dateCol }), ...(valueCol && { value_col: valueCol }) },
+        })
+        return response.data
+    },
+
+    /** Grup karşılaştırması */
+    compare: async (filename?: string, groupCol?: string) => {
+        const response = await api.post('/analyze/compare', null, {
+            params: { ...(filename && { filename }), ...(groupCol && { group_col: groupCol }) },
+        })
+        return response.data
+    },
+
+    /** Cache'teki dosyalar */
+    cached: async () => {
+        const response = await api.get('/analyze/cached')
+        return response.data
+    },
+
+    /** Streaming analiz */
+    uploadAndAnalyzeStream: (file: File, analysisType: string = 'full', question?: string, department: string = 'Genel') => {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('analysis_type', analysisType)
+        if (question) formData.append('question', question)
+        formData.append('department', department)
+
+        const token = localStorage.getItem('token')
+        return fetch(`${API_BASE_URL}/analyze/upload-analyze/stream`, {
+            method: 'POST',
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: formData,
+        })
+    },
+}
+
 export default api

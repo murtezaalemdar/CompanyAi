@@ -12,6 +12,7 @@ import {
     BrainCircuit,
     FileText,
     Users,
+    BarChart3,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -25,6 +26,7 @@ export default function Layout() {
         { name: 'Panel', href: '/', icon: LayoutDashboard, roles: ['admin', 'manager'] },
         { name: 'AI Asistan', href: '/ask', icon: MessageSquare, roles: ['admin', 'manager', 'user'] },
         { name: 'Dokümanlar', href: '/documents', icon: FileText, roles: ['admin', 'manager', 'user'] },
+        { name: 'Analiz', href: '/analyze', icon: BarChart3, roles: ['admin', 'manager', 'user'] },
         { name: 'Kullanıcılar', href: '/users', icon: Users, roles: ['admin', 'manager'] },
         { name: 'Sorgu Geçmişi', href: '/queries', icon: History, roles: ['admin', 'manager', 'user'] },
         { name: 'Ayarlar', href: '/settings', icon: Settings, roles: ['admin', 'manager'] },

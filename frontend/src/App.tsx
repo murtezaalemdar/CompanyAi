@@ -7,6 +7,7 @@ import Queries from './pages/Queries'
 import Ask from './pages/Ask'
 import Settings from './pages/Settings'
 import Documents from './pages/Documents'
+import Analyze from './pages/Analyze'
 import Users from './pages/Users'
 
 // Protected Route wrapper
@@ -46,6 +47,7 @@ function App() {
                         <Route path="queries" element={<Queries />} />
                         <Route path="ask" element={<Ask />} />
                         <Route path="documents" element={<Documents />} />
+                        <Route path="analyze" element={<Analyze />} />
                         <Route path="users" element={<Users />} />
                         <Route path="settings" element={<Settings />} />
                     </Route>

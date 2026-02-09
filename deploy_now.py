@@ -34,6 +34,8 @@ BACKEND_FILES = [
     "app/core/audit.py",
     "app/core/constants.py",
     "app/core/engine.py",
+    "app/core/document_analyzer.py",
+    "app/api/routes/analyze.py",
     "app/db/__init__.py",
     "app/db/database.py",
     "app/db/models.py",

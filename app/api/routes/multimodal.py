@@ -22,6 +22,8 @@ from app.memory.persistent_memory import (
     is_forget_command, forget_everything,
     save_conversation, get_conversation_history,
     extract_and_save_preferences, build_memory_context,
+    get_active_session, update_session_title,
+    extract_and_save_culture,
 )
 
 import structlog
@@ -238,8 +240,12 @@ async def ask_ai_multimodal(
     # Kullanıcı bilgilerini çıkar ve kaydet
     await extract_and_save_preferences(db, current_user.id, question)
     
-    # Kalıcı hafıza: PostgreSQL'den geçmiş yükle
-    session_history = await get_conversation_history(db, current_user.id, limit=MAX_HISTORY_FOR_LLM)
+    # Aktif oturumu al (yoksa oluştur)
+    active_session = await get_active_session(db, current_user.id)
+    session_id = active_session["id"] if active_session else None
+    
+    # Kalıcı hafıza: PostgreSQL'den geçmiş yükle (aktif session bazlı)
+    session_history = await get_conversation_history(db, current_user.id, limit=MAX_HISTORY_FOR_LLM, session_id=session_id)
     memory_ctx = await build_memory_context(db, current_user.id)
     
     # Departman yetki kontrolü
@@ -353,6 +359,15 @@ Lütfen paylaşılan dosya içeriklerini dikkate alarak soruyu cevapla."""
                     processing_time_ms=processing_time,
                 )
                 db.add(query_obj)
+                
+                # Konuşmayı hafızaya kaydet (vision) — session_id ile
+                await save_conversation(
+                    db, current_user.id, question, result["answer"],
+                    department=result["department"], session_id=session_id,
+                )
+                if session_id:
+                    await update_session_title(db, session_id, question)
+                await extract_and_save_culture(db, current_user.id, question, result["answer"])
                 await db.commit()
                 
                 return MultimodalResponse(
@@ -378,11 +393,19 @@ Lütfen paylaşılan dosya içeriklerini dikkate alarak soruyu cevapla."""
             memory_context=memory_ctx,
         )
         
-        # Konuşmayı kalıcı hafızaya kaydet (PostgreSQL)
+        # Konuşmayı kalıcı hafızaya kaydet (PostgreSQL) — session_id ile
         await save_conversation(
             db, current_user.id, question, result["answer"],
-            department=result.get("department"), intent=result.get("intent")
+            department=result.get("department"), intent=result.get("intent"),
+            session_id=session_id,
         )
+        
+        # Oturum başlığını ilk sorudan oluştur
+        if session_id:
+            await update_session_title(db, session_id, question)
+        
+        # Şirket kültürü sinyallerini çıkar ve kaydet
+        await extract_and_save_culture(db, current_user.id, question, result["answer"])
         
         processing_time = int((time.time() - start_time) * 1000)
         

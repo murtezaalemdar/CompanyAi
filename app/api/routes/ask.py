@@ -138,8 +138,8 @@ async def ask_ai(
         active_session = await get_active_session(db, current_user.id)
         session_id = active_session["id"] if active_session else None
         
-        # Kalıcı hafıza: PostgreSQL'den geçmiş yükle
-        session_history = await get_conversation_history(db, current_user.id, limit=MAX_HISTORY_FOR_LLM)
+        # Kalıcı hafıza: PostgreSQL'den geçmiş yükle (aktif oturuma göre)
+        session_history = await get_conversation_history(db, current_user.id, limit=MAX_HISTORY_FOR_LLM, session_id=session_id)
         memory_ctx = await build_memory_context(db, current_user.id)
         
         # Soruyu işle — kullanıcı bilgisi + oturum geçmişi + hafıza
@@ -327,9 +327,11 @@ async def ask_ai_stream(
             if few_shot:
                 system_prompt += few_shot
 
-    # Chat history — DB'den yükle
-    session_history = await get_conversation_history(db, current_user.id, limit=5)
-    chat_history = session_history[-5:] if session_history and intent != "sohbet" else None
+    # Chat history — DB'den yükle (aktif oturuma göre)
+    active_session = await get_active_session(db, current_user.id)
+    stream_session_id = active_session["id"] if active_session else None
+    session_history = await get_conversation_history(db, current_user.id, limit=10, session_id=stream_session_id)
+    chat_history = session_history[-5:] if session_history else None
 
     async def _event_generator():
         collected = []

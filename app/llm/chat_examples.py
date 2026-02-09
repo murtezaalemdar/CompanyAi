@@ -75,6 +75,18 @@ def _load_dataset() -> list:
     return _dataset_cache
 
 
+def _is_question(text: str) -> bool:
+    """Metin bir soru mu? (Soru kalıplarını LLM'e yönlendirmek için)"""
+    q = text.lower().strip()
+    # Soru ekleri veya soru işareti
+    if "?" in q:
+        return True
+    # Türkçe soru kalıpları
+    if re.search(r"\b(ne|nedir|nerede|nasıl|niçin|neden|niye|kaç|kim|hangi|mi|mı|mu|mü|mısın|misin)\b", q):
+        return True
+    return False
+
+
 def _match_pattern_category(question: str) -> Optional[str]:
     """Soruyu kalıp kategorisi ile eşle"""
     q = question.lower().strip()
@@ -83,15 +95,16 @@ def _match_pattern_category(question: str) -> Optional[str]:
     if re.search(r"(merhaba|selam|günaydın|iyi\s*(akşam|gece)|hey\b|selamün)", q):
         return "greetings"
     
-    # İsim tanıtma
-    if re.search(r"(benim\s*adım|adım\s+\w|ben\s+[A-ZÇĞİÖŞÜa-zçğıöşü]{2,}$|ismim)", q):
+    # İsim tanıtma — SORU DEĞİLSE ("benim ismim ne" gibi sorular LLM'e gitsin)
+    if not _is_question(q) and re.search(r"(benim\s*adım|adım\s+\w|ben\s+[A-ZÇĞİÖŞÜa-zçğıöşü]{2,}$|ismim)", q):
         return "introduction"
     
-    # Şirket/fabrika adı tanıtma
-    if re.search(r"(fabrikamız|şirketimiz|firmamız).*adı", q, re.IGNORECASE):
-        return "company_introduction"
-    if re.search(r"(adımız|biz\s+\w+.*olarak\s+(çalış|faaliyet))", q, re.IGNORECASE):
-        return "company_introduction"
+    # Şirket/fabrika adı tanıtma — SORU DEĞİLSE
+    if not _is_question(q):
+        if re.search(r"(fabrikamız|şirketimiz|firmamız).*adı", q, re.IGNORECASE):
+            return "company_introduction"
+        if re.search(r"(adımız|biz\s+\w+.*olarak\s+(çalış|faaliyet))", q, re.IGNORECASE):
+            return "company_introduction"
     
     # Nasılsın
     if re.search(r"(nasılsın|naber|ne\s*haber|iyi\s*misin|keyfin|keyifler)", q):

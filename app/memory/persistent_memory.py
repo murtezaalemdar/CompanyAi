@@ -289,18 +289,33 @@ async def get_conversation_history(
     db: AsyncSession,
     user_id: int,
     limit: int = 20,
+    session_id: int = None,
 ) -> list[dict]:
     """
     Kullanıcının son N konuşmasını getir (en eski → en yeni).
+    session_id verilmişse sadece o oturumun mesajları döner.
     Engine'in beklediği format: [{"q": "...", "a": "..."}, ...]
     """
     try:
-        stmt = (
-            select(ConversationMemory)
-            .where(ConversationMemory.user_id == user_id)
-            .order_by(desc(ConversationMemory.created_at))
-            .limit(limit)
-        )
+        if session_id:
+            # Aktif oturumun mesajları
+            stmt = (
+                select(ConversationMemory)
+                .where(
+                    ConversationMemory.user_id == user_id,
+                    ConversationMemory.session_id == session_id,
+                )
+                .order_by(desc(ConversationMemory.created_at))
+                .limit(limit)
+            )
+        else:
+            # Tüm konuşmalar (geriye uyumluluk)
+            stmt = (
+                select(ConversationMemory)
+                .where(ConversationMemory.user_id == user_id)
+                .order_by(desc(ConversationMemory.created_at))
+                .limit(limit)
+            )
         result = await db.execute(stmt)
         rows = result.scalars().all()
         

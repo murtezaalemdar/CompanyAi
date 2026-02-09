@@ -103,8 +103,8 @@ export default function Dashboard() {
     // Gerçek sorgu trafiği verisi (API'den) veya boş array
     const data = queryTraffic || []
 
-    const cpuPct = sysResources?.cpu_percent ?? 0
-    const memPct = sysResources?.memory_percent ?? 0
+    const cpuPct = sysResources?.cpu_percent != null ? Math.round(sysResources.cpu_percent) : null
+    const memPct = sysResources?.memory_percent != null ? Math.round(sysResources.memory_percent) : null
 
     return (
         <div className="space-y-6">
@@ -203,7 +203,7 @@ export default function Dashboard() {
                                 </div>
                                 <div>
                                     <p className="text-sm font-medium text-white">LLM Model</p>
-                                    <p className="text-xs text-dark-400">Mistral 7B</p>
+                                    <p className="text-xs text-dark-400">{llmStatus?.current_model || 'Yükleniyor...'}</p>
                                 </div>
                             </div>
                             <span className="px-2 py-1 text-xs font-medium bg-green-500/10 text-green-500 rounded-full">

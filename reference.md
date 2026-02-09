@@ -2,7 +2,7 @@
 
 > **Proje Adı:** Kurumsal Yapay Zeka Asistanı – LOCAL & ÖĞRENEN  
 > **Amaç:** Kurumsal kullanım için tasarlanmış, tamamen lokal çalışan ve öğrenen bir AI asistan sistemi.  
-> **Son Güncelleme:** 9 Şubat 2026 (Phase 18: Güvenlik & Kalite İyileştirmesi)
+> **Son Güncelleme:** 9 Şubat 2026 (Phase 19: Konuşma Hafızası & Session Persistence Düzeltmesi)
 
 ---
 
@@ -883,3 +883,36 @@ sudo systemctl restart nginx
 | Header | Değer | Açıklama |
 |--------|-------|----------|
 | `X-Request-ID` | UUID (8 char) | Her isteğe atanan korelasyon kimliği |
+
+---
+
+## Phase 19: Konusma Hafizasi & Session Persistence Duzeltmesi
+
+**Commit:** `9eaa829` | **Tarih:** Subat 2026
+
+### Tespit Edilen Sorunlar
+
+1. **Pattern Matching False Positive:** "benim ismim ne?" gibi soru cumleleri `_match_pattern_category()` regex'inde "ismim" kelimesini yakalarken "introduction" kategorisi donduruluyor, LLM cagrilmadan kalip yanit veriliyordu (44ms).
+
+2. **Multimodal Session Tracking Eksikligi:** Frontend her sorguyu `/ask/multimodal` uzerinden gonderiyor. Bu endpoint `save_conversation()` cagrisinda `session_id` parametresi gecmiyordu -> tum mesajlar NULL session_id ile kaydediliyordu.
+
+3. **Streaming Endpoint Sohbet Gecmisi Dusurme:** `/ask/stream`'de `intent == "sohbet"` oldugunda `chat_history = None` ataniyordu.
+
+4. **Cross-Session History Pollution:** `get_conversation_history()` session_id filtrelemesi yapmiyordu.
+
+### Yapilan Degisiklikler
+
+| Dosya | Degisiklik |
+|-------|-----------|
+| `app/llm/chat_examples.py` | `_is_question()` yardimci fonksiyonu eklendi. Pattern'ler soru kontrolu ile guncellendi |
+| `app/api/routes/multimodal.py` | Session tracking eklendi: aktif session alinip her kayitta `session_id` geciliyor |
+| `app/memory/persistent_memory.py` | `get_conversation_history()` fonksiyonuna `session_id` parametresi eklendi |
+| `app/api/routes/ask.py` | Streaming: `intent != "sohbet"` kosulu kaldirildi. Session-based history eklendi |
+
+### Test Sonuclari
+
+- Health check: PASSED
+- Isim tanıtma + hatırlama: PASSED (LLM "Isminiz Murteza" dedi)
+- Session mesajlari: PASSED (2 mesaj, session_id ile kaydedilmis)
+- Session switch: PASSED (dogru mesajlar yuklendi)
+- X-Request-ID: PASSED

@@ -17,6 +17,15 @@ from app.router.router import decide
 from app.llm.client import ollama_client
 from app.llm.prompts import build_prompt
 
+# Few-shot sohbet örnekleri
+try:
+    from app.llm.chat_examples import get_pattern_response, get_few_shot_examples
+    CHAT_EXAMPLES_AVAILABLE = True
+except ImportError:
+    CHAT_EXAMPLES_AVAILABLE = False
+    get_pattern_response = lambda q: None
+    get_few_shot_examples = lambda q, c=2: ""
+
 router = APIRouter()
 
 # ── Basit oturum hafızası (sunucu tarafı, kullanıcı bazlı) ────
@@ -210,6 +219,42 @@ async def ask_ai_stream(
     if department:
         dept = department
 
+    # ── HIZLI SOHBET YOLU ── Kalıp eşleşmesi varsa anında yanıt ver
+    if intent == "sohbet" and CHAT_EXAMPLES_AVAILABLE:
+        pattern_answer = get_pattern_response(request.question)
+        if pattern_answer:
+            user_name = current_user.full_name or current_user.email.split("@")[0]
+            # Kişiselleştirme
+            import random as _rnd
+            if user_name and _rnd.random() < 0.4:
+                first_name = user_name.split()[0]
+                if first_name:
+                    pattern_answer = f"{first_name}, {pattern_answer[0].lower()}{pattern_answer[1:]}"
+            
+            _add_to_session(current_user.id, request.question, pattern_answer)
+
+            async def _fast_event():
+                # Tüm cevabı tek token olarak gönder (anlık)
+                yield f"data: {_json.dumps({'token': pattern_answer})}\n\n"
+                processing_ms = int((time.time() - start_time) * 1000)
+                try:
+                    query = Query(
+                        user_id=current_user.id, question=request.question,
+                        answer=pattern_answer, department=dept, mode="Sohbet",
+                        risk_level=risk, confidence=0.95, processing_time_ms=processing_ms,
+                    )
+                    db.add(query)
+                    await db.commit()
+                except Exception:
+                    pass
+                yield f"data: {_json.dumps({'done': True, 'department': dept, 'mode': 'Sohbet', 'risk_level': risk, 'confidence': 0.95, 'processing_time_ms': processing_ms})}\n\n"
+
+            return StreamingResponse(
+                _fast_event(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+            )
+
     # Prompt oluştur
     system_prompt, user_prompt = build_prompt(
         question=request.question,
@@ -220,6 +265,12 @@ async def ask_ai_stream(
     user_name = current_user.full_name or current_user.email.split("@")[0]
     if user_name:
         system_prompt += f"\nKullanıcının adı: {user_name}. Gerekirse adıyla hitap et.\n"
+    
+    # Few-shot sohbet örnekleri (Sohbet/Bilgi modunda)
+    if CHAT_EXAMPLES_AVAILABLE and intent in ("sohbet", "bilgi"):
+        few_shot = get_few_shot_examples(request.question, count=2)
+        if few_shot:
+            system_prompt += few_shot
 
     async def _event_generator():
         collected = []

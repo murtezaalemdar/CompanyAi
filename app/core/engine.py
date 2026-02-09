@@ -11,6 +11,15 @@ from app.llm.client import ollama_client
 from app.llm.prompts import build_prompt, build_rag_prompt, build_analysis_prompt
 from app.memory.vector_memory import remember, recall, search_memory
 
+# Few-shot sohbet örnekleri
+try:
+    from app.llm.chat_examples import get_pattern_response, get_few_shot_examples
+    CHAT_EXAMPLES_AVAILABLE = True
+except ImportError:
+    CHAT_EXAMPLES_AVAILABLE = False
+    get_pattern_response = lambda q: None
+    get_few_shot_examples = lambda q, c=2: ""
+
 # RAG modülünü güvenli şekilde import et
 try:
     from app.rag.vector_store import search_documents, get_stats as get_rag_stats
@@ -69,6 +78,32 @@ async def process_question(
     logger.info("intent_detected", intent=intent, mode=context["mode"], 
                 dept=context["dept"], needs_web=needs_web)
     
+    # ── HIZLI SOHBET YOLU ── Kalıp eşleşmesi varsa LLM'e gitmeden cevapla
+    if intent == "sohbet" and CHAT_EXAMPLES_AVAILABLE:
+        pattern_answer = get_pattern_response(question)
+        if pattern_answer:
+            # Kişiselleştirme ekle
+            if user_name and "{name}" not in pattern_answer:
+                # İsimle hitap et (rastgele, her seferinde değil)
+                import random
+                if random.random() < 0.4:
+                    first_name = user_name.split()[0] if user_name else ""
+                    if first_name:
+                        pattern_answer = f"{first_name}, {pattern_answer[0].lower()}{pattern_answer[1:]}"
+            
+            logger.info("fast_pattern_response", pattern=True)
+            remember(question, pattern_answer, context)
+            return {
+                "answer": pattern_answer,
+                "department": context["dept"],
+                "mode": "Sohbet",
+                "risk": context["risk"],
+                "intent": "sohbet",
+                "confidence": 0.95,
+                "sources": ["Kalıp Eşleşmesi"],
+                "web_searched": False,
+            }
+    
     # 2. Semantik hafıza — soruya EN BENZER geçmiş konuşmalar
     similar_memories = []
     try:
@@ -126,6 +161,12 @@ async def process_question(
         system_prompt, user_prompt = build_analysis_prompt(question, context, effective_history)
     else:
         system_prompt, user_prompt = build_prompt(question, context)
+    
+    # Few-shot sohbet örnekleri ekle (Sohbet ve Bilgi modunda)
+    if CHAT_EXAMPLES_AVAILABLE and intent in ("sohbet", "bilgi"):
+        few_shot = get_few_shot_examples(question, count=2)
+        if few_shot:
+            system_prompt += few_shot
     
     # Kişiselleştirme ekle
     if user_name:

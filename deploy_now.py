@@ -42,6 +42,8 @@ BACKEND_FILES = [
     "app/llm/local_llm.py",
     "app/llm/prompts.py",
     "app/llm/web_search.py",
+    "app/llm/chat_examples.py",
+    "app/llm/chat_patterns.json",
     "app/memory/__init__.py",
     "app/memory/vector_memory.py",
     "app/rag/__init__.py",
@@ -59,6 +61,10 @@ ROOT_DOCS = [
     "reference.md",
     "NOTES.md",
     "README.md",
+]
+
+DATA_FILES = [
+    "data/turkish_chat_dataset.json",
 ]
 
 
@@ -136,6 +142,17 @@ def upload_files(ssh):
             if Path(doc).exists():
                 scp.put(doc, f"{REMOTE_DIR}/{doc}")
                 print(f"  📄 {doc}")
+
+        # Data dosyaları
+        for data_file in DATA_FILES:
+            local_path = Path(data_file)
+            if local_path.exists():
+                remote_path = f"{REMOTE_DIR}/{data_file}"
+                # data/ klasörünü oluştur
+                remote_dir = str(Path(remote_path).parent).replace("\\", "/")
+                run_cmd(ssh, f"mkdir -p {remote_dir}", check=False)
+                scp.put(str(local_path), remote_path)
+                print(f"  📄 {data_file}")
 
     print("  ✅ Dosya yükleme tamamlandı")
 

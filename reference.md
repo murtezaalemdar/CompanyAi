@@ -2,7 +2,7 @@
 
 > **Proje Adı:** Kurumsal Yapay Zeka Asistanı – LOCAL & ÖĞRENEN  
 > **Amaç:** Kurumsal kullanım için tasarlanmış, tamamen lokal çalışan ve öğrenen bir AI asistan sistemi.  
-> **Son Güncelleme:** 10 Şubat 2026
+> **Son Güncelleme:** 11 Şubat 2026
 
 ---
 
@@ -95,7 +95,7 @@ flowchart LR
     B --> C[FastAPI Backend]
     C --> D[Router - Departman Yönlendirme]
     D --> E[RAG - ChromaDB Doküman Arama]
-    D --> F[Ollama - Mistral LLM]
+    D --> F[Ollama - GPT-OSS-20B LLM]
     E --> F
     F --> G[Vektör Hafıza - ChromaDB]
     G --> H[PostgreSQL - Async]
@@ -130,7 +130,7 @@ flowchart LR
 |--------|--------|----------|
 | `/api/auth` | auth | JWT kimlik doğrulama |
 | `/api` | ask | AI soru-cevap + SSE streaming |
-| `/api/memory` | memory | Hafıza yönetimi |
+| `/api/memory` | memory | Hafıza yönetimi + oturum (session) API |
 | `/api/admin` | admin | Kullanıcı CRUD, dashboard, settings, audit |
 | `/api/rag` | documents | RAG doküman yönetimi |
 | `/api` | multimodal | Dosya + resim destekli AI (vision LLM) |
@@ -212,7 +212,49 @@ flowchart LR
 
 ---
 
-### 6. Vektör Hafıza (`app/memory/vector_memory.py`)
+### 6. Kalıcı Hafıza + Oturum + Kültür Öğrenimi (`app/memory/persistent_memory.py`)
+
+**Durum:** ✅ Tamamlandı  
+**Teknoloji:** PostgreSQL + AsyncPG + SQLAlchemy Async
+
+**Oturum Yönetimi:**
+| Fonksiyon | Açıklama |
+|-----------|----------|
+| `create_session(user_id)` | Yeni sohbet oturumu oluştur, eski aktif oturumları kapat |
+| `get_active_session(user_id)` | Kullanıcının aktif oturumunu getir |
+| `get_session_messages(session_id)` | Oturumdaki mesajları getir |
+| `list_user_sessions(user_id)` | Kullanıcının tüm oturumlarını listele |
+| `switch_to_session(session_id, user_id)` | Oturuma geçiş yap |
+| `update_session_title(session_id, title)` | Oturum başlığını güncelle |
+
+**Kültür Öğrenimi:**
+| Fonksiyon | Açıklama |
+|-----------|----------|
+| `extract_culture_signals(text)` | 20+ regex ile 5 kategoride kültür sinyali çıkar |
+| `extract_and_save_culture(text, user_id)` | Kültür sinyallerini DB'ye kaydet |
+| `save_culture_signal(category, key, value, user_id, source)` | Upsert — frequency artırarak kaydet |
+| `get_culture_context(user_id)` | Kültür bağlamını prompt'a eklemek için getir |
+
+**Kültür Kategorileri:**
+| Kategori | Algılama Örnekleri |
+|----------|--------------------|
+| `report_style` | "rapor hazırla", "haftalık özet" |
+| `comm_style` | "kanka", "hocam", "resmi dil" |
+| `tool_preference` | "excel kullan", "power bi", "python" |
+| `workflow` | "toplantı notları", "onay süreci" |
+| `terminology` | "hammadde", "fire oranı", "lot takip" |
+
+**Ek Fonksiyonlar:**
+| Fonksiyon | Açıklama |
+|-----------|----------|
+| `save_conversation(user_id, role, content, session_id)` | Konuşmayı session_id ile kaydet |
+| `get_conversation_history(user_id, limit)` | Son konuşma geçmişi |
+| `build_memory_context(user_id)` | Hafıza + kültür bağlamı (prompt için) |
+| `forget_everything(user_id)` | Tüm hafıza + oturumlar + tercihler sil |
+
+---
+
+### 7. Vektör Hafıza (`app/memory/vector_memory.py`)
 
 **Durum:** ✅ Tamamlandı  
 **Teknoloji:** ChromaDB + SentenceTransformers (`all-MiniLM-L6-v2`)
@@ -229,7 +271,7 @@ flowchart LR
 
 ---
 
-### 7. RAG Vektör Deposu (`app/rag/vector_store.py`)
+### 8. RAG Vektör Deposu (`app/rag/vector_store.py`)
 
 **Durum:** ✅ Tamamlandı  
 **Teknoloji:** ChromaDB + SentenceTransformers
@@ -263,7 +305,7 @@ flowchart LR
 
 ---
 
-### 8. Kimlik & Yetkilendirme
+### 9. Kimlik & Yetkilendirme
 
 #### JWT Handler (`app/auth/jwt_handler.py`) — ✅ Tamamlandı
 - `create_access_token()` — JWT oluşturma
@@ -279,7 +321,7 @@ flowchart LR
 
 ---
 
-### 9. Veritabanı (`app/db/`)
+### 10. Veritabanı (`app/db/`)
 
 #### database.py — ✅ Tamamlandı
 - Async SQLAlchemy engine + session factory
@@ -293,10 +335,14 @@ flowchart LR
 | `Query` | ✅ Aktif | AI sorgu kaydı |
 | `AuditLog` | ✅ Aktif | Denetim kaydı — login, query, admin işlemlerinde kullanılıyor |
 | `SystemSettings` | ✅ Aktif | Key-value ayarları — admin settings CRUD endpoint'leri mevcut |
+| `ChatSession` | ✅ Aktif | Sohbet oturumu — user_id, title, is_active, created_at, updated_at |
+| `ConversationMemory` | ✅ Aktif | Konuşma hafızası — session_id FK ile oturuma bağlı |
+| `UserPreference` | ✅ Aktif | Kullanıcı tercihleri |
+| `CompanyCulture` | ✅ Aktif | Şirket kültür öğrenimi — category, key, value, frequency, source |
 
 ---
 
-### 10. Multimodal AI (`app/api/routes/multimodal.py`)
+### 11. Multimodal AI (`app/api/routes/multimodal.py`)
 
 **Durum:** ✅ Tamamlandı
 
@@ -311,7 +357,7 @@ flowchart LR
 
 ---
 
-### 11. Sesli Saha Asistanı (`app/voice/field_assistant.py`)
+### 12. Sesli Saha Asistanı (`app/voice/field_assistant.py`)
 
 **Durum:** ✅ Tamamlandı
 
@@ -323,16 +369,16 @@ flowchart LR
 
 ---
 
-### 12. Frontend (`frontend/src/`)
+### 13. Frontend (`frontend/src/`)
 
 **Teknoloji:** React + TypeScript + Vite + Tailwind CSS
 
 | Sayfa | Durum | Açıklama |
 |-------|-------|----------|
 | `Login.tsx` | ✅ | JWT giriş |
-| `Ask.tsx` | ✅ | Chat + multimodal soru-cevap |
+| `Ask.tsx` | ✅ | Chat + multimodal soru-cevap + oturum geçmişi sidebar + session persistence |
 | `Documents.tsx` | ✅ | RAG doküman yönetimi — 4 sekmeli (Dosya/Bilgi/URL/Video), klasör ağacı, doküman tablosu |
-| `Dashboard.tsx` | ✅ | Grafik + CPU/Memory gerçek API'den (çekilmiş) |
+| `Dashboard.tsx` | ✅ | Grafik + CPU/Memory + LLM model bilgisi gerçek API'den |
 | `Queries.tsx` | ✅ | Sorgu geçmişi (departman filtreli) |
 | `Users.tsx` | ✅ | Kullanıcı CRUD (admin only) |
 | `Settings.tsx` | ✅ | Ayarlar |
@@ -382,7 +428,7 @@ sudo systemctl start companyai-backend
 | Katman | Teknoloji | Durum |
 |--------|-----------|-------|
 | API Framework | FastAPI + Uvicorn | ✅ Aktif |
-| LLM | Ollama + Mistral | ✅ Aktif |
+| LLM | Ollama + GPT-OSS-20B (20B parametre, 13GB) | ✅ Aktif |
 | Vector DB | ChromaDB + SentenceTransformers | ✅ Aktif |
 | Database | PostgreSQL + AsyncPG | ✅ Aktif |
 | Auth | JWT + pbkdf2_sha256 + RBAC | ✅ Aktif |
@@ -612,7 +658,7 @@ sudo systemctl restart nginx
     - Departman bazlı doküman erişim kontrolü sağlandı.
 
 ### 📝 Sonraki Adımlar
-- [ ] AI modelinin (Mistral) yanıt kalitesini test et
+- [x] AI modelinin yanıt kalitesini iyileştir — ✅ GPT-OSS-20B modeline yükseltildi
 - [x] Dashboard grafik verilerini gerçek API'den çek (mock data kaldır)
 - [x] `local_llm.py` ölü kodunu temizle
 - [x] `field_assistant.py` sesli asistanı implemente et
@@ -622,3 +668,78 @@ sudo systemctl restart nginx
 - [ ] Redis cache entegrasyonunu aktifleştir
 - [ ] Voice API endpoint'lerini oluştur (STT/TTS HTTP API)
 - [ ] Unit test suite'i oluştur
+
+---
+
+## 📅 Günlük Notlar: 11 Şubat 2026
+
+### ✅ Phase 17: Şirket Kültürü Öğrenimi + Sohbet Oturum Kalıcılığı
+
+**Commit:** `25ca55f`  
+**Durum:** ✅ Deploy edildi ve çalışıyor
+
+#### 1. Sohbet Oturumu Kalıcılığı (Chat Session Persistence)
+- **Sorun:** Sayfa yenilendiğinde tüm sohbet geçmişi kayboluyordu; sohbet sadece client-side state'te tutuluyordu.
+- **Çözüm:** PostgreSQL tabanlı `ChatSession` modeli oluşturuldu.
+  - Her kullanıcının aktif bir oturumu olur (`is_active=True`)
+  - Sayfa yenilendiğinde aktif oturum ve mesajları DB'den yüklenir
+  - Yeni sohbet başlatınca eski oturum kapanır, yeni oluşur
+  - Logout yapınca yeni oturum yaratılır (eski oturum kaydedilir)
+  - `ConversationMemory` tablosuna `session_id` FK eklendi
+
+**Değişen Dosyalar:**
+| Dosya | Değişiklik |
+|-------|------------|
+| `app/db/models.py` | `ChatSession`, `CompanyCulture` modelleri eklendi, `ConversationMemory`'ye `session_id` FK |
+| `app/memory/persistent_memory.py` | 6 oturum fonksiyonu + 4 kültür fonksiyonu eklendi |
+| `app/api/routes/ask.py` | Oturum desteği + kültür öğrenimi entegrasyonu, streaming _add_to_session bug fix |
+| `app/api/routes/memory.py` | 5 yeni session API endpoint'i |
+| `frontend/src/services/api.ts` | 5 yeni session API fonksiyonu |
+| `frontend/src/pages/Ask.tsx` | Session sidebar, loadActiveSession on mount, handleSwitchSession, handleNewChat |
+| `frontend/src/contexts/AuthContext.tsx` | Logout → async, yeni oturum oluşturma |
+| `create_tables.py` | ChatSession, CompanyCulture import'ları |
+| `add_session_id.sql` | ALTER TABLE conversation_memory ADD session_id |
+
+**Yeni API Endpoint'leri:**
+| Endpoint | Method | Açıklama |
+|----------|--------|----------|
+| `/api/memory/sessions/active` | GET | Aktif oturumu getir |
+| `/api/memory/sessions` | GET | Tüm oturumları listele |
+| `/api/memory/sessions/{id}/messages` | GET | Oturum mesajlarını getir |
+| `/api/memory/sessions/{id}/switch` | POST | Oturuma geçiş yap |
+| `/api/memory/sessions/new` | POST | Yeni oturum oluştur |
+
+#### 2. Şirket Kültürü Öğrenimi (Company Culture Learning)
+- **Amaç:** AI, tüm yazışmalardan şirketin çalışma kültürü, iletişim tarzı, kullanılan araçlar ve terminoloji hakkında bilgi edinir.
+- **Mekanizma:** Her AI yanıtından sonra `extract_and_save_culture()` çağrılır → 20+ regex pattern ile 5 kategoride sinyal aranır → `CompanyCulture` tablosuna upsert (frequency artırılır)
+- **Kategoriler:** report_style, comm_style, tool_preference, workflow, terminology
+- **Kullanım:** `build_memory_context()` → kültür verisi prompt bağlamına eklenir → AI yanıtlarını şirket tarzına uyarlar
+
+#### 3. Streaming Endpoint Bug Fix
+- **Sorun:** `ask.py` streaming endpoint'inde `_add_to_session()` ve `_get_session()` fonksiyonları çağrılıyordu ama tanımlı değildi (in-memory session yaklaşımından kalan ölü referanslar).
+- **Çözüm:** DB tabanlı `_stream_save_conv()` ve `_async_save_stream_conv()` helper fonksiyonları yazıldı.
+
+---
+
+### ✅ Dashboard Bilgi Düzeltmesi
+
+**Commit:** `8485082`  
+**Durum:** ✅ Deploy edildi
+
+| Sorun | Çözüm |
+|-------|-------|
+| LLM modeli "Mistral 7B" olarak hardcoded gösteriliyordu | `llmStatus?.current_model` API'den dinamik çekildi |
+| CPU ve Bellek %0 gösteriyordu | Sunucuya `psutil` paketi kuruldu (`pip3 install psutil`) |
+| CPU/Memory null olunca sayfa crash oluyordu | `Math.round()` ile null handling eklendi |
+
+---
+
+### ✅ Chat Pattern Düzeltmesi
+
+**Commit:** `7dd9cba`  
+**Durum:** ✅ Deploy edildi
+
+- **Sorun:** "teşekkürler kanka" mesajına AI "güzel soru sordun" yanıtı veriyordu (anlamsız).
+- **Sebep:** `chat_patterns.json` → `thanks` kategorisinde "Süpersin" entry'sinin yanıtı "güzel soru sordun" idi — bağlam dışı.
+- **Çözüm:** Tüm `thanks` kategorisi yanıtları bağlamdan bağımsız olacak şekilde güncellendi. "Teşekkürler kanka" ve "Sağ ol canım" pattern'ları eklendi.
+

@@ -1,6 +1,6 @@
 """Merkezi İşlem Motoru - Tüm AI sorgu işlemleri burada koordine edilir
 
-RAG (Retrieval Augmented Generation) entegrasyonu ile zenginleştirilmiş versiyon.
+RAG + Web Arama + Akıllı Hafıza entegrasyonu.
 """
 
 from typing import Optional
@@ -20,6 +20,14 @@ except ImportError:
     search_documents = lambda q, n=3: []
     get_rag_stats = lambda: {"available": False}
 
+# Web arama modülü
+try:
+    from app.llm.web_search import search_and_summarize
+    WEB_SEARCH_AVAILABLE = True
+except ImportError:
+    WEB_SEARCH_AVAILABLE = False
+    search_and_summarize = None
+
 logger = structlog.get_logger()
 
 
@@ -29,14 +37,16 @@ async def process_question(
     use_rag: bool = True
 ) -> dict:
     """
-    Ana soru işleme fonksiyonu.
+    Ana soru işleme fonksiyonu — Akıllı Pipeline.
     
     Akış:
-    1. Router ile departman ve mod belirleme
-    2. RAG ile ilgili dokümanları bulma (varsa)
-    3. Geçmiş sorguları hatırlama
-    4. LLM ile yanıt üretme
-    5. Yanıtı hafızaya kaydetme
+    1. Router ile niyet, departman, mod belirleme
+    2. Niyete göre bilgi kaynaklarını seç:
+       - Sohbet → direkt LLM (hafıza ile)
+       - İş → RAG dokümanları + hafıza
+       - Bilgi → Web arama + RAG + hafıza 
+    3. LLM ile yanıt üretme
+    4. Hafızaya kaydetme (öğrenme)
     
     Args:
         question: Kullanıcı sorusu
@@ -48,16 +58,24 @@ async def process_question(
     """
     logger.info("processing_question", question=question[:100])
     
-    # 1. Departman ve mod belirleme
+    # 1. Akıllı yönlendirme
     context = decide(question)
+    intent = context.get("intent", "sohbet")
+    needs_web = context.get("needs_web", False)
     
-    # Override varsa uygula
     if department_override:
         context["dept"] = department_override
     
-    # 2. RAG ile ilgili dokümanları bul
+    logger.info("intent_detected", intent=intent, mode=context["mode"], 
+                dept=context["dept"], needs_web=needs_web)
+    
+    # 2. Bilgi kaynaklarını topla
     relevant_docs = []
-    if use_rag and RAG_AVAILABLE:
+    web_results = None
+    history = recall()
+    
+    # RAG araması (sohbet dışı sorularda)
+    if use_rag and RAG_AVAILABLE and intent != "sohbet":
         try:
             relevant_docs = search_documents(question, n_results=3)
             if relevant_docs:
@@ -65,10 +83,22 @@ async def process_question(
         except Exception as e:
             logger.error("rag_search_error", error=str(e))
     
-    # 3. Geçmiş sorguları hatırla
-    history = recall()
+    # Web araması (bilgi sorularında veya RAG sonuç bulamadığında)
+    if WEB_SEARCH_AVAILABLE and search_and_summarize:
+        should_search_web = (
+            needs_web or 
+            (intent == "bilgi") or
+            (intent == "iş" and not relevant_docs)  # RAG boşsa web'e bak
+        )
+        if should_search_web:
+            try:
+                web_results = await search_and_summarize(question)
+                if web_results:
+                    logger.info("web_search_results_found")
+            except Exception as e:
+                logger.warning("web_search_error", error=str(e))
     
-    # 4. Prompt oluştur (RAG > Analysis > Basit sırasıyla)
+    # 3. Prompt oluştur
     if relevant_docs:
         system_prompt, user_prompt = build_rag_prompt(question, context, relevant_docs)
     elif history:
@@ -76,13 +106,16 @@ async def process_question(
     else:
         system_prompt, user_prompt = build_prompt(question, context)
     
-    # 5. LLM'e sor
+    # Web sonuçlarını prompt'a ekle
+    if web_results:
+        system_prompt += web_results
+    
+    # 4. LLM'e sor
     try:
-        # Ollama erişilebilir mi kontrol et
         if await ollama_client.is_available():
-            # Sıcaklık ayarı (Profesyonel modlar için düşük, yaratıcı modlar için yüksek)
-            temp = 0.3  # Varsayılan: Analitik ve tutarlı
-            if context.get("mode") in ["Öneri", "Beyin Fırtınası"]:
+            # Sıcaklık: Sohbet/bilgi → doğal, İş → tutarlı
+            temp = 0.3
+            if context.get("mode") in ["Sohbet", "Bilgi", "Öneri", "Beyin Fırtınası"]:
                 temp = 0.7
                 
             llm_answer = await ollama_client.generate(
@@ -91,30 +124,38 @@ async def process_question(
                 temperature=temp,
             )
         else:
-            # Fallback: Mock yanıt
             logger.warning("ollama_not_available", using_fallback=True)
             llm_answer = f"[Sistem Notu: LLM şu an erişilemez] Soru alındı: {question}"
     except Exception as e:
         logger.error("llm_error", error=str(e))
         llm_answer = f"[Hata] LLM yanıt üretemedi: {str(e)}"
     
-    # 6. Sonucu oluştur
+    # 5. Sonucu oluştur
+    sources = []
+    if relevant_docs:
+        sources.extend([doc.get("source") for doc in relevant_docs])
+    if web_results:
+        sources.append("İnternet Araması")
+    
     result = {
         "answer": llm_answer,
         "department": context["dept"],
         "mode": context["mode"],
         "risk": context["risk"],
-        "confidence": 0.85 if not relevant_docs else 0.92,  # RAG varsa daha yüksek güven
-        "sources": [doc.get("source") for doc in relevant_docs] if relevant_docs else [],
+        "intent": intent,
+        "confidence": 0.85 if not relevant_docs else 0.92,
+        "sources": sources,
+        "web_searched": web_results is not None,
     }
     
-    # 7. Hafızaya kaydet
+    # 6. Hafızaya kaydet (öğrenme!)
     remember(question, llm_answer, context)
     
     logger.info("question_processed", 
+                intent=intent,
                 department=context["dept"], 
-                risk=context["risk"],
-                rag_used=bool(relevant_docs))
+                rag_used=bool(relevant_docs),
+                web_used=web_results is not None)
     
     return result
 

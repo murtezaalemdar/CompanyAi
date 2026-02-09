@@ -41,6 +41,7 @@ BACKEND_FILES = [
     "app/llm/client.py",
     "app/llm/local_llm.py",
     "app/llm/prompts.py",
+    "app/llm/web_search.py",
     "app/memory/__init__.py",
     "app/memory/vector_memory.py",
     "app/rag/__init__.py",

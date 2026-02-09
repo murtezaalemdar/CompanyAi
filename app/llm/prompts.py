@@ -88,25 +88,18 @@ def build_prompt(question: str, context: dict) -> tuple[str, str]:
 
 def build_analysis_prompt(question: str, context: dict, history: list = None) -> tuple[str, str]:
     """
-    Geçmiş sorguları da dahil eden analiz prompt'u.
-    
-    Args:
-        question: Kullanıcı sorusu
-        context: Bağlam bilgisi
-        history: Son sorgu geçmişi
-    
-    Returns:
-        (system_prompt, user_prompt) tuple
+    Geçmiş konuşmaları dahil eden prompt.
+    history: Oturum geçmişi veya semantik hafızadan gelen benzer konuşmalar.
     """
     system, user = build_prompt(question, context)
     
-    # Geçmiş varsa ekle
     if history:
-        history_text = "\n## 📜 Önceki Konuşmalar:\n"
-        for h in history[-5:]:  # Son 5 sorgu
-            q = h.get('q', '')[:80]
-            a = h.get('a', '')[:100]
-            history_text += f"- **Soru**: {q}...\n  **Yanıt**: {a}...\n"
+        history_text = "\n## Önceki Konuşmalar (bunları hatırla):\n"
+        for h in history[-5:]:
+            q = h.get('q', '')[:100]
+            a = h.get('a', '')[:150]
+            history_text += f"- **Kullanıcı**: {q}\n  **Sen**: {a}\n"
+        history_text += "\nBu geçmişi bağlam olarak kullan. Aynı konudan devam ediliyorsa doğrudan devam et.\n"
         system += history_text
     
     return system, user

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 from app.db.database import get_db
 from app.db.models import User, Query
@@ -18,6 +18,26 @@ from app.llm.client import ollama_client
 from app.llm.prompts import build_prompt
 
 router = APIRouter()
+
+# ── Basit oturum hafızası (sunucu tarafı, kullanıcı bazlı) ────
+# Her kullanıcının son N mesajını tutar
+_user_sessions: dict[int, list] = {}
+MAX_SESSION_MESSAGES = 10
+
+
+def _get_session(user_id: int) -> list:
+    """Kullanıcının oturum geçmişini getir"""
+    return _user_sessions.get(user_id, [])
+
+
+def _add_to_session(user_id: int, question: str, answer: str):
+    """Konuşmayı oturuma ekle"""
+    if user_id not in _user_sessions:
+        _user_sessions[user_id] = []
+    _user_sessions[user_id].append({"q": question, "a": answer})
+    # Son N mesajı tut
+    if len(_user_sessions[user_id]) > MAX_SESSION_MESSAGES:
+        _user_sessions[user_id] = _user_sessions[user_id][-MAX_SESSION_MESSAGES:]
 
 
 class AskRequest(BaseModel):
@@ -69,8 +89,20 @@ async def ask_ai(
             request.department = user_departments[0] if user_departments else None
     
     try:
-        # Soruyu işle
-        result = await process_question(request.question, request.department)
+        # Oturum geçmişini al
+        session_history = _get_session(current_user.id)
+        
+        # Soruyu işle — kullanıcı bilgisi + oturum geçmişi ile
+        result = await process_question(
+            question=request.question, 
+            department_override=request.department,
+            user_name=current_user.full_name or current_user.email.split("@")[0],
+            user_department=request.department,
+            session_history=session_history,
+        )
+        
+        # Oturuma kaydet
+        _add_to_session(current_user.id, request.question, result["answer"])
         
         processing_time = int((time.time() - start_time) * 1000)
         
@@ -167,18 +199,27 @@ async def ask_ai_stream(
         elif not department:
             department = user_departments[0] if user_departments else None
 
-    # Router kararı
-    routing = await decide(request.question, department)
-    dept = routing.get("department", department or "genel")
-    mode = routing.get("mode", "genel")
-    risk = routing.get("risk", "low")
-    confidence = routing.get("confidence", 0.8)
+    # Router kararı (sync fonksiyon)
+    routing = decide(request.question)
+    dept = routing.get("dept", department or "Genel")
+    mode = routing.get("mode", "Sohbet")
+    risk = routing.get("risk", "Düşük")
+    intent = routing.get("intent", "sohbet")
+    confidence = 0.85
+
+    if department:
+        dept = department
 
     # Prompt oluştur
     system_prompt, user_prompt = build_prompt(
         question=request.question,
-        context={"dept": dept, "mode": mode, "risk": risk},
+        context={"dept": dept, "mode": mode},
     )
+    
+    # Kişiselleştirme
+    user_name = current_user.full_name or current_user.email.split("@")[0]
+    if user_name:
+        system_prompt += f"\nKullanıcının adı: {user_name}. Gerekirse adıyla hitap et.\n"
 
     async def _event_generator():
         collected = []
@@ -192,8 +233,11 @@ async def ask_ai_stream(
 
         processing_ms = int((time.time() - start_time) * 1000)
         full_answer = "".join(collected)
+        
+        # Oturuma kaydet
+        _add_to_session(current_user.id, request.question, full_answer)
 
-        # DB kaydet (fire & forget değil, await ediyoruz)
+        # DB kaydet
         try:
             query = Query(
                 user_id=current_user.id,

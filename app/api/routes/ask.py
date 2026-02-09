@@ -266,11 +266,13 @@ async def ask_ai_stream(
     if user_name:
         system_prompt += f"\nKullanıcının adı: {user_name}. Gerekirse adıyla hitap et.\n"
     
-    # Few-shot sohbet örnekleri (Sohbet/Bilgi modunda)
-    if CHAT_EXAMPLES_AVAILABLE and intent in ("sohbet", "bilgi"):
-        few_shot = get_few_shot_examples(request.question, count=2)
-        if few_shot:
-            system_prompt += few_shot
+    # Few-shot sohbet örnekleri (sadece uzun sohbet mesajlarında)
+    if CHAT_EXAMPLES_AVAILABLE and intent == "sohbet":
+        word_count = len(request.question.strip().split())
+        if word_count > 5:
+            few_shot = get_few_shot_examples(request.question, count=1)
+            if few_shot:
+                system_prompt += few_shot
 
     async def _event_generator():
         collected = []

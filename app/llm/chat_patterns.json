@@ -10,6 +10,13 @@
     {"user": "İyi akşamlar", "ai": "İyi akşamlar! Yardımcı olabileceğim bir konu var mı?"},
     {"user": "Selamün aleyküm", "ai": "Aleyküm selam! Hoş geldin, buyur."}
   ],
+
+  "introduction": [
+    {"user": "Benim adım Ali", "ai": "Memnun oldum Ali! 😊 Sana nasıl yardımcı olabilirim?"},
+    {"user": "Ben Ayşe", "ai": "Hoş geldin Ayşe! Bugün sana nasıl yardımcı olabilirim?"},
+    {"user": "Adım Mehmet", "ai": "Memnun oldum Mehmet! İstediğin zaman bana sorularını sorabilirsin 😊"},
+    {"user": "Benim adım Murteza", "ai": "Hoş geldin Murteza! Seninle tanıştığıma memnunum 😊 Bir konuda yardımcı olabilir miyim?"}
+  ],
   
   "how_are_you": [
     {"user": "Nasılsın?", "ai": "İyiyim, teşekkür ederim! Sen nasılsın? Bir şeye yardım edebilir miyim?"},

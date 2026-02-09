@@ -142,18 +142,21 @@ async def process_question(
                 logger.warning("web_search_error", error=str(e))
     
     # 4. Prompt oluştur
-    # Konuşma oturumu veya semantik hafızayı history olarak kullan
-    effective_history = session_history or []
+    # Sohbet niyetinde geçmiş EKLEMEYİ sınırla (kısa sorularda gereksiz)
+    effective_history = []
     
-    # Semantik hafızadan ilgili konuşmaları ekle
-    if similar_memories:
-        for mem in similar_memories:
-            score = mem.get("similarity_score", 0)
-            if score > 0.3:  # Benzerlik eşiği
-                effective_history.append({
-                    "q": mem.get("q", ""),
-                    "a": mem.get("a", ""),
-                })
+    # Sadece iş veya bilgi niyetinde geçmişi dahil et
+    if intent != "sohbet":
+        effective_history = session_history or []
+        # Semantik hafızadan ilgili konuşmaları ekle
+        if similar_memories:
+            for mem in similar_memories:
+                score = mem.get("similarity_score", 0)
+                if score > 0.4:  # Benzerlik eşiği yükseltildi
+                    effective_history.append({
+                        "q": mem.get("q", ""),
+                        "a": mem.get("a", ""),
+                    })
     
     if relevant_docs:
         system_prompt, user_prompt = build_rag_prompt(question, context, relevant_docs)
@@ -162,11 +165,14 @@ async def process_question(
     else:
         system_prompt, user_prompt = build_prompt(question, context)
     
-    # Few-shot sohbet örnekleri ekle (Sohbet ve Bilgi modunda)
-    if CHAT_EXAMPLES_AVAILABLE and intent in ("sohbet", "bilgi"):
-        few_shot = get_few_shot_examples(question, count=2)
-        if few_shot:
-            system_prompt += few_shot
+    # Few-shot sohbet örnekleri ekle (sadece kalıp eşleşmesi YOKSA)
+    if CHAT_EXAMPLES_AVAILABLE and intent == "sohbet":
+        # Kısa sohbet mesajlarında few-shot ekleme — gereksiz yere prompt'u şişirir
+        word_count = len(question.strip().split())
+        if word_count > 5:
+            few_shot = get_few_shot_examples(question, count=1)
+            if few_shot:
+                system_prompt += few_shot
     
     # Kişiselleştirme ekle
     if user_name:

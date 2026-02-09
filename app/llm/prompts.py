@@ -94,12 +94,12 @@ def build_analysis_prompt(question: str, context: dict, history: list = None) ->
     system, user = build_prompt(question, context)
     
     if history:
-        history_text = "\n## Önceki Konuşmalar (bunları hatırla):\n"
+        history_text = "\n## Bağlam (konuşma geçmişi — BUNLARI YANITINDA TEKRARLAMA, sadece bağlam olarak kullan):\n"
         for h in history[-5:]:
             q = h.get('q', '')[:100]
             a = h.get('a', '')[:150]
-            history_text += f"- **Kullanıcı**: {q}\n  **Sen**: {a}\n"
-        history_text += "\nBu geçmişi bağlam olarak kullan. Aynı konudan devam ediliyorsa doğrudan devam et.\n"
+            history_text += f"- Soru: {q} → Cevap: {a}\n"
+        history_text += "\nYukarıdaki geçmişi YANITINDA TEKRARLAMA. Sadece bağlam olarak kullan ve doğrudan yeni soruya cevap ver.\n"
         system += history_text
     
     return system, user

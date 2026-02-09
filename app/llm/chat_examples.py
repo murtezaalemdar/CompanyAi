@@ -83,6 +83,10 @@ def _match_pattern_category(question: str) -> Optional[str]:
     if re.search(r"(merhaba|selam|günaydın|iyi\s*(akşam|gece)|hey\b|selamün)", q):
         return "greetings"
     
+    # İsim tanıtma
+    if re.search(r"(benim\s*adım|adım\s+\w|ben\s+[A-ZÇĞİÖŞÜa-zçğıöşü]{2,}$|ismim)", q):
+        return "introduction"
+    
     # Nasılsın
     if re.search(r"(nasılsın|naber|ne\s*haber|iyi\s*misin|keyfin|keyifler)", q):
         return "how_are_you"
@@ -133,7 +137,23 @@ def get_pattern_response(question: str) -> Optional[str]:
     
     # Rastgele bir yanıt seç (çeşitlilik için)
     example = random.choice(examples)
-    return example.get("ai")
+    response = example.get("ai")
+    
+    # İsim tanıtma: yanıttaki örnek ismi gerçek isimle değiştir
+    if category == "introduction" and response:
+        q = question.strip()
+        # İsmi çıkar
+        name_match = re.search(
+            r"(?:benim\s*adım|adım|ben|ismim)\s+([A-ZÇĞİÖŞÜa-zçğıöşü]+)",
+            q, re.IGNORECASE
+        )
+        if name_match:
+            real_name = name_match.group(1).capitalize()
+            # Yanıttaki örnek isimleri gerçek isimle değiştir
+            for placeholder in ["Ali", "Ayşe", "Mehmet", "Murteza"]:
+                response = response.replace(placeholder, real_name)
+    
+    return response
 
 
 def get_few_shot_examples(question: str, count: int = 2) -> str:
@@ -179,13 +199,11 @@ def get_few_shot_examples(question: str, count: int = 2) -> str:
         return ""
     
     # Prompt formatla
-    text = "\n## Konuşma Tarzı Örnekleri:\n"
-    text += "Aşağıdaki örneklerdeki gibi doğal ve samimi bir şekilde konuş:\n\n"
+    text = "\n## Konuşma Tarzı Referansı (BUNLARI YANITINDA TEKRARLAMA):\n"
+    text += "Aşağıdaki örneklerdeki TARZ ve TONLA konuş ama bu örnekleri yanıtına KOPYALAMA:\n\n"
     for i, ex in enumerate(examples, 1):
-        text += f"**Örnek {i}:**\n"
-        text += f"Kullanıcı: {ex['user']}\n"
-        text += f"Sen: {ex['ai']}\n\n"
-    text += "Bu tarz doğal, Türkçe ve samimi bir şekilde yanıt ver.\n"
+        text += f"Örnek soru: {ex['user']}\nÖrnek cevap: {ex['ai']}\n\n"
+    text += "ÖNEMLİ: Bu örnekleri yanıtına ASLA dahil etme. Sadece tarzını benimse ve doğrudan kullanıcının sorusuna cevap ver.\n"
     
     return text
 

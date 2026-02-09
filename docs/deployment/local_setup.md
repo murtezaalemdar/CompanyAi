@@ -1,0 +1,3 @@
+- Ollama kurulumu
+- FAISS / Chroma
+- Offline çalışma

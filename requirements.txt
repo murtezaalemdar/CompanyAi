@@ -1,0 +1,44 @@
+# Core Framework
+fastapi>=0.109.0
+uvicorn>=0.27.0
+pydantic[email]>=2.7.0
+pydantic-settings>=2.1.0
+
+# Authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Database
+sqlalchemy>=2.0.25
+asyncpg>=0.29.0
+alembic>=1.13.1
+aiosqlite>=0.19.0
+
+# HTTP & Logging
+httpx>=0.26.0
+structlog>=24.1.0
+python-multipart>=0.0.6
+redis>=5.0.1
+
+# RAG (Retrieval Augmented Generation)
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+PyPDF2>=3.0.0
+python-docx>=0.8.0
+
+# Multimodal File Processing
+PyMuPDF>=1.23.0
+pandas>=2.0.0
+openpyxl>=3.1.0
+Pillow>=10.2.0
+
+# Web Scraping & URL Learning
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# YouTube Transcript Learning
+youtube-transcript-api>=0.6.0
+
+# Extended Format Support
+striprtf>=0.0.26
+python-pptx>=0.6.21

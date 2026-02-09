@@ -1,0 +1,94 @@
+# Kurumsal AI Asistanı - Docker Compose (Production)
+
+version: '3.8'
+
+services:
+  # FastAPI Backend
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: companyai-api
+    env_file: ../.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://companyai:${DB_PASSWORD}@db:5432/companyai
+      - REDIS_URL=redis://redis:6379
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: always
+    networks:
+      - companyai-network
+
+  # React Frontend
+  frontend:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    container_name: companyai-frontend
+    restart: always
+    networks:
+      - companyai-network
+
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: companyai-db
+    environment:
+      POSTGRES_USER: companyai
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_DB: companyai
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U companyai" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - companyai-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: companyai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - companyai-network
+
+  # Nginx Reverse Proxy (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: companyai-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - api
+    restart: always
+    networks:
+      - companyai-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+
+networks:
+  companyai-network:
+    driver: bridge

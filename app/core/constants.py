@@ -1,0 +1,32 @@
+
+# Departman Listesi
+DEPARTMENTS = [
+    "Yönetim",
+    "Yönetim Asistanı",
+    "Boyahane Planlama",
+    "Dokuma Planlama",
+    "Bilgi İşlem",
+    "Maliyet",
+    "Muhasebe",
+    "Finans",
+    "Desen Dairesi",
+    "Varyant Dairesi",
+    "Kartela",
+    "Personel",
+    "Pazarlama",
+    "Boyahane Baskı",
+    "Boyahane Yıkama",
+    "Boyahane Düzboya",
+    "Sevkiyat",
+    "Apre",
+    "Çiğdepo",
+    "Makina Enerji",
+    "Satınalma",
+    "Kalite Kontrol",
+    "Laboratuvar",
+    "Dokuma Kalite Kontrol",
+    "Şardon",
+    "Şablon",
+    "Örme",
+    "Genel"
+]

@@ -16,9 +16,9 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
-    # LLM (Ollama + Llama 3.1)
+    # LLM (Ollama + GPT-OSS-20B)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    LLM_MODEL: str = "llama3.1:8b"
+    LLM_MODEL: str = "gpt-oss:20b"
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379"

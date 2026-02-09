@@ -264,7 +264,7 @@ export default function Ask() {
         <>
             <div
                 className={clsx(
-                    "flex flex-col h-[calc(100vh-10rem)] bg-dark-900/50 rounded-2xl border overflow-hidden transition-all",
+                    "flex flex-col h-[calc(100vh-8rem)] md:h-[calc(100vh-10rem)] bg-dark-900/50 rounded-2xl border overflow-hidden transition-all",
                     isDragging ? "border-primary-400 bg-primary-500/5" : "border-dark-800"
                 )}
                 onDrop={handleDrop}
@@ -289,17 +289,17 @@ export default function Ask() {
                 {/* Messages Area */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-6">
                     {messages.length === 0 && (
-                        <div className="h-full flex flex-col items-center justify-center text-center p-8 opacity-50">
-                            <Bot className="w-16 h-16 text-dark-400 mb-4" />
-                            <h3 className="text-xl font-medium text-white">Kurumsal AI Asistan</h3>
-                            <p className="text-dark-400 mt-2 max-w-md">
-                                Profesyonel mod aktif. Departman analizi, risk değerlendirmesi veya stratejik sorularınız için hazırım.
+                        <div className="h-full flex flex-col items-center justify-center text-center p-4 md:p-8 opacity-50">
+                            <Bot className="w-12 h-12 md:w-16 md:h-16 text-dark-400 mb-3 md:mb-4" />
+                            <h3 className="text-lg md:text-xl font-medium text-white">AI Asistan</h3>
+                            <p className="text-dark-400 mt-2 max-w-md text-sm">
+                                Hoş geldiniz, bugün size nasıl yardımcı olabilirim?
                             </p>
-                            <div className="flex items-center gap-2 mt-4 text-sm text-primary-400">
+                            <div className="flex items-center gap-2 mt-3 text-xs md:text-sm text-primary-400">
                                 <Sparkles className="w-4 h-4" />
                                 <span>RAG destekli • Şirket verileriyle öğrenmiş</span>
                             </div>
-                            <div className="flex flex-wrap justify-center gap-3 mt-6">
+                            <div className="hidden sm:flex flex-wrap justify-center gap-3 mt-6">
                                 <div className="flex items-center gap-2 px-4 py-2 bg-dark-800/50 rounded-full text-sm text-dark-400">
                                     <ImageIcon className="w-4 h-4" />
                                     Resim yükleyin
@@ -320,26 +320,26 @@ export default function Ask() {
                         <div
                             key={msg.id}
                             className={clsx(
-                                'flex gap-4 max-w-3xl',
+                                'flex gap-2 sm:gap-4 max-w-full sm:max-w-3xl',
                                 msg.role === 'user' ? 'ml-auto flex-row-reverse' : ''
                             )}
                         >
                             <div
                                 className={clsx(
-                                    'w-8 h-8 rounded-full flex items-center justify-center shrink-0',
+                                    'w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center shrink-0',
                                     msg.role === 'user' ? 'bg-primary-500' : 'bg-dark-700'
                                 )}
                             >
                                 {msg.role === 'user' ? (
-                                    <UserIcon className="w-5 h-5 text-white" />
+                                    <UserIcon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                                 ) : (
-                                    <Bot className="w-5 h-5 text-primary-400" />
+                                    <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-primary-400" />
                                 )}
                             </div>
 
                             <div
                                 className={clsx(
-                                    'rounded-2xl px-5 py-3 text-sm leading-relaxed max-w-[85%]',
+                                    'rounded-2xl px-3 py-2 sm:px-5 sm:py-3 text-sm leading-relaxed max-w-[calc(100%-3rem)] sm:max-w-[85%]',
                                     msg.role === 'user'
                                         ? 'bg-primary-600 text-white rounded-tr-none'
                                         : 'bg-dark-800 text-dark-200 rounded-tl-none border border-dark-700'
@@ -465,16 +465,16 @@ export default function Ask() {
                 )}
 
                 {/* Input Area */}
-                <div className="p-4 border-t border-dark-800 bg-dark-900/50">
+                <div className="p-2 sm:p-4 border-t border-dark-800 bg-dark-900/50">
                     {/* Toolbar */}
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-2 sm:mb-3 px-1">
                         {/* Department Selector */}
-                        <div className="flex items-center gap-2">
-                            <Building2 className="w-4 h-4 text-dark-400" />
+                        <div className="flex items-center gap-1.5 sm:gap-2">
+                            <Building2 className="w-4 h-4 text-dark-400 hidden sm:block" />
                             <select
                                 value={selectedDepartment}
                                 onChange={(e) => setSelectedDepartment(e.target.value)}
-                                className="bg-dark-800 border border-dark-700 text-sm text-white rounded-lg px-3 py-1.5 focus:ring-primary-500 focus:border-primary-500"
+                                className="bg-dark-800 border border-dark-700 text-xs sm:text-sm text-white rounded-lg px-2 sm:px-3 py-1.5 focus:ring-primary-500 focus:border-primary-500"
                             >
                                 {availableDepartments.map((dept) => (
                                     <option key={dept} value={dept}>
@@ -489,60 +489,48 @@ export default function Ask() {
                             <button
                                 type="button"
                                 onClick={clearChat}
-                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-dark-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs text-dark-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                             >
                                 <Trash2 className="w-3.5 h-3.5" />
-                                Sohbeti Temizle
+                                <span className="hidden sm:inline">Sohbeti</span> Temizle
                             </button>
                         )}
                     </div>
 
-                    <form onSubmit={handleSubmit} className="flex items-end gap-3">
+                    <form onSubmit={handleSubmit} className="flex items-end gap-1.5 sm:gap-3">
                         {/* Attachment Buttons */}
-                        <div className="flex gap-1">
+                        <div className="flex gap-0.5 sm:gap-1 shrink-0">
                             {/* Full Upload Modal Button */}
                             <button
                                 type="button"
                                 onClick={() => setIsUploadModalOpen(true)}
-                                className="p-3 hover:bg-dark-800 rounded-xl transition-colors text-dark-400 hover:text-primary-400 relative group"
+                                className="p-2 sm:p-3 hover:bg-dark-800 rounded-xl transition-colors text-dark-400 hover:text-primary-400"
                                 title="Dosya Ekle"
                             >
                                 <Paperclip className="w-5 h-5" />
-                                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs bg-dark-800 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                                    Dosya Yükle
-                                </span>
                             </button>
 
-                            {/* Quick Image Button */}
+                            {/* Quick Image Button - hidden on small screens */}
                             <button
                                 type="button"
                                 onClick={() => {
                                     fileInputRef.current?.setAttribute('accept', 'image/*')
                                     fileInputRef.current?.click()
                                 }}
-                                className="p-3 hover:bg-dark-800 rounded-xl transition-colors text-dark-400 hover:text-green-400 relative group"
+                                className="hidden sm:block p-2 sm:p-3 hover:bg-dark-800 rounded-xl transition-colors text-dark-400 hover:text-green-400"
                                 title="Resim Ekle"
                             >
                                 <ImageIcon className="w-5 h-5" />
-                                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs bg-dark-800 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                                    Resim Ekle
-                                </span>
                             </button>
 
-                            {/* Camera Button */}
+                            {/* Camera Button - hidden on small screens */}
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setIsUploadModalOpen(true)
-                                    // Modal will open on camera tab
-                                }}
-                                className="p-3 hover:bg-dark-800 rounded-xl transition-colors text-dark-400 hover:text-blue-400 relative group"
+                                onClick={() => setIsUploadModalOpen(true)}
+                                className="hidden sm:block p-2 sm:p-3 hover:bg-dark-800 rounded-xl transition-colors text-dark-400 hover:text-blue-400"
                                 title="Kamera"
                             >
                                 <Camera className="w-5 h-5" />
-                                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-xs bg-dark-800 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                                    Fotoğraf Çek
-                                </span>
                             </button>
                         </div>
 
@@ -556,7 +544,7 @@ export default function Ask() {
                         />
 
                         {/* Text Input */}
-                        <div className="flex-1 relative">
+                        <div className="flex-1 min-w-0 relative">
                             <textarea
                                 ref={textareaRef}
                                 value={input}
@@ -566,11 +554,11 @@ export default function Ask() {
                                 disabled={askMutation.isPending}
                                 placeholder="Bir soru sorun veya dosya ekleyin..."
                                 rows={1}
-                                className="input w-full resize-none min-h-[48px] max-h-[200px] py-3 pr-12"
+                                className="input w-full resize-none min-h-[44px] sm:min-h-[48px] max-h-[200px] py-2.5 sm:py-3 pr-10 sm:pr-12 text-sm"
                             />
                             {attachedFiles.length > 0 && (
-                                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                                    <span className="flex items-center justify-center w-6 h-6 bg-primary-500 text-white text-xs font-medium rounded-full">
+                                <div className="absolute right-2 sm:right-3 top-1/2 -translate-y-1/2">
+                                    <span className="flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 bg-primary-500 text-white text-xs font-medium rounded-full">
                                         {attachedFiles.length}
                                     </span>
                                 </div>
@@ -581,7 +569,7 @@ export default function Ask() {
                         <button
                             type="submit"
                             disabled={(!input.trim() && attachedFiles.length === 0) || askMutation.isPending}
-                            className="btn-primary p-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="btn-primary p-2.5 sm:p-3 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {askMutation.isPending ? (
                                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -591,8 +579,8 @@ export default function Ask() {
                         </button>
                     </form>
 
-                    {/* Quick Tips */}
-                    <div className="flex items-center justify-center gap-4 mt-3 text-xs text-dark-500">
+                    {/* Quick Tips - hidden on mobile */}
+                    <div className="hidden sm:flex items-center justify-center gap-4 mt-2 text-xs text-dark-500">
                         <span>Ctrl+V ile yapıştır</span>
                         <span>•</span>
                         <span>Shift+Enter yeni satır</span>

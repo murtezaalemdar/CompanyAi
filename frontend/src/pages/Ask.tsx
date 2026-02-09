@@ -18,7 +18,9 @@ import {
     MicOff,
     Building2,
     Trash2,
-    Sparkles
+    Sparkles,
+    Brain,
+    ShieldX
 } from 'lucide-react'
 import clsx from 'clsx'
 import FileUploadModal from '../components/FileUploadModal'
@@ -71,6 +73,8 @@ export default function Ask() {
         : ['Genel', ...DEPARTMENTS]
 
     const [selectedDepartment, setSelectedDepartment] = useState<string>(availableDepartments[0] || 'Genel')
+    const [memoryCount, setMemoryCount] = useState<number>(0)
+    const [showForgetConfirm, setShowForgetConfirm] = useState(false)
 
     // Seçili departmanı güncelle (User değişiminde)
     useEffect(() => {
@@ -81,14 +85,28 @@ export default function Ask() {
         }
     }, [user, isRestricted])
 
+    // Hafıza sayısını yükle
+    useEffect(() => {
+        aiApi.getMemoryStatus()
+            .then((data) => setMemoryCount(data.conversation_count || 0))
+            .catch(() => {})
+    }, [])
+
+    // Yeni mesaj geldiğinde hafıza sayısını güncelle
+    useEffect(() => {
+        if (messages.length > 0) {
+            setMemoryCount((prev) => prev + 1)
+        }
+    }, [messages.length])
+
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     const askMutation = useMutation({
-        mutationFn: async ({ question, files, department, history }: { question: string; files: File[]; department?: string; history?: Array<{ role: string; content: string }> }) => {
-            // FormData ile gönderim — konuşma geçmişi dahil
-            return await aiApi.askWithFiles(question, files, department, history)
+        mutationFn: async ({ question, files, department }: { question: string; files: File[]; department?: string }) => {
+            // Konuşma geçmişi artık PostgreSQL'de kalıcı saklanıyor
+            return await aiApi.askWithFiles(question, files, department)
         },
         onSuccess: (data) => {
             const botMessage: Message = {
@@ -222,17 +240,10 @@ export default function Ask() {
         }
         setMessages((prev) => [...prev, userMessage])
 
-        // Konuşma geçmişini hazırla (mevcut mesajlar + yeni kullanıcı mesajı)
-        const chatHistory = [...messages, userMessage].map((m) => ({
-            role: m.role,
-            content: m.content,
-        }))
-
         askMutation.mutate({
             question: input,
             files: attachedFiles.map((f) => f.file),
             department: selectedDepartment !== 'Genel' ? selectedDepartment : undefined,
-            history: chatHistory,
         })
         setInput('')
         setAttachedFiles([])
@@ -240,6 +251,17 @@ export default function Ask() {
 
     const clearChat = () => {
         setMessages([])
+    }
+
+    const handleForgetMemory = async () => {
+        try {
+            await aiApi.forgetMemory()
+            setMessages([])
+            setMemoryCount(0)
+            setShowForgetConfirm(false)
+        } catch {
+            // hata durumunda sessizce geç
+        }
     }
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -492,17 +514,42 @@ export default function Ask() {
                             </select>
                         </div>
 
-                        {/* Clear Chat Button */}
-                        {messages.length > 0 && (
-                            <button
-                                type="button"
-                                onClick={clearChat}
-                                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs text-dark-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                            >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                <span className="hidden sm:inline">Sohbeti</span> Temizle
-                            </button>
-                        )}
+                        {/* Right side buttons */}
+                        <div className="flex items-center gap-1 sm:gap-2">
+                            {/* Memory indicator */}
+                            {memoryCount > 0 && (
+                                <div className="hidden sm:flex items-center gap-1 px-2 py-1.5 text-xs text-dark-500" title={`${memoryCount} konuşma hafızada`}>
+                                    <Brain className="w-3.5 h-3.5 text-primary-400" />
+                                    <span>{memoryCount}</span>
+                                </div>
+                            )}
+
+                            {/* Clear Chat Button — sadece ekranı temizler */}
+                            {messages.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={clearChat}
+                                    className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs text-dark-400 hover:text-yellow-400 hover:bg-yellow-500/10 rounded-lg transition-colors"
+                                    title="Ekranı temizle (hafıza korunur)"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span className="hidden sm:inline">Ekranı</span> Temizle
+                                </button>
+                            )}
+
+                            {/* Forget Memory Button */}
+                            {memoryCount > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowForgetConfirm(true)}
+                                    className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs text-dark-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                    title="Tüm hafızayı sil"
+                                >
+                                    <ShieldX className="w-3.5 h-3.5" />
+                                    <span className="hidden sm:inline">Beni</span> Unut
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     <form onSubmit={handleSubmit} className="flex items-end gap-1.5 sm:gap-3">
@@ -624,6 +671,40 @@ export default function Ask() {
                     >
                         <X className="w-6 h-6 text-white" />
                     </button>
+                </div>
+            )}
+
+            {/* Forget Confirmation Modal */}
+            {showForgetConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+                    <div className="bg-dark-900 border border-dark-700 rounded-2xl p-6 max-w-sm mx-4 shadow-xl">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 bg-red-500/20 rounded-full flex items-center justify-center">
+                                <ShieldX className="w-5 h-5 text-red-400" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-white">Beni Unut</h3>
+                        </div>
+                        <p className="text-dark-300 text-sm mb-1">
+                            Tum konusma gecmisini ve hatirlanan bilgileri (isim, tercihler vs.) kalici olarak silmek istediginize emin misiniz?
+                        </p>
+                        <p className="text-dark-500 text-xs mb-6">
+                            Bu islem geri alinamaz. {memoryCount} konusma silinecek.
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setShowForgetConfirm(false)}
+                                className="flex-1 px-4 py-2 text-sm bg-dark-800 hover:bg-dark-700 text-white rounded-lg transition-colors"
+                            >
+                                Vazgec
+                            </button>
+                            <button
+                                onClick={handleForgetMemory}
+                                className="flex-1 px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+                            >
+                                Evet, Unut
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </>

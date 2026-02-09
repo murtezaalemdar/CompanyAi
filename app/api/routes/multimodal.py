@@ -18,6 +18,11 @@ from app.api.routes.auth import get_current_user
 from app.core.engine import process_question
 from app.llm.client import ollama_client
 from app.config import settings
+from app.memory.persistent_memory import (
+    is_forget_command, forget_everything,
+    save_conversation, get_conversation_history,
+    extract_and_save_preferences, build_memory_context,
+)
 
 import structlog
 
@@ -196,68 +201,46 @@ async def process_document_content(file: UploadFile) -> dict:
     }
 
 
-# ── Basit oturum hafızası (sunucu tarafı, kullanıcı bazlı) ────
-_user_sessions: dict[int, list] = {}
-MAX_SESSION_MESSAGES = 10
-
-def _get_session(user_id: int) -> list:
-    return _user_sessions.get(user_id, [])
-
-def _add_to_session(user_id: int, question: str, answer: str):
-    if user_id not in _user_sessions:
-        _user_sessions[user_id] = []
-    _user_sessions[user_id].append({"q": question, "a": answer})
-    if len(_user_sessions[user_id]) > MAX_SESSION_MESSAGES:
-        _user_sessions[user_id] = _user_sessions[user_id][-MAX_SESSION_MESSAGES:]
+MAX_HISTORY_FOR_LLM = 20
 
 
 @router.post("/ask/multimodal", response_model=MultimodalResponse)
 async def ask_ai_multimodal(
     question: str = Form(...),
     department: Optional[str] = Form(None),
-    history: Optional[str] = Form(None),
     files: List[UploadFile] = File(default=[]),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Multimodal AI soru-cevap - Dosya ve resim desteği ile.
-    
-    - Resim dosyaları: JPEG, PNG, GIF, WEBP, BMP
-    - Doküman dosyaları: PDF, DOCX, XLSX, TXT, CSV, JSON
-    - Maksimum 10 dosya, her biri maksimum 50MB
-    - history: JSON string, konuşma geçmişi [{role, content}, ...]
+    Kalıcı hafıza: PostgreSQL'de saklanır, "unut" deyince silinir.
     """
     start_time = time.time()
     
-    # Konuşma geçmişini parse et
-    session_history = _get_session(current_user.id)  # Sunucu tarafı fallback
-    if history:
-        try:
-            parsed = json.loads(history)
-            # Frontend formatı: [{role: 'user', content: '...'}, {role: 'assistant', content: '...'}]
-            # Engine formatı: [{q: '...', a: '...'}, ...]
-            converted = []
-            i = 0
-            while i < len(parsed):
-                entry = {}
-                if parsed[i].get('role') == 'user':
-                    entry['q'] = parsed[i].get('content', '')
-                    # Sonraki mesaj assistant mı?
-                    if i + 1 < len(parsed) and parsed[i + 1].get('role') == 'assistant':
-                        entry['a'] = parsed[i + 1].get('content', '')
-                        i += 2
-                    else:
-                        i += 1
-                else:
-                    i += 1
-                    continue
-                if entry:
-                    converted.append(entry)
-            if converted:
-                session_history = converted[-MAX_SESSION_MESSAGES:]
-        except (json.JSONDecodeError, TypeError):
-            pass  # Sunucu tarafı session'ı kullan
+    # ── "Unut" komutu kontrolü ──
+    if is_forget_command(question):
+        stats = await forget_everything(db, current_user.id)
+        await db.commit()
+        processing_time = int((time.time() - start_time) * 1000)
+        return MultimodalResponse(
+            answer=f"Tamam, tüm konuşma geçmişini ve hatırladığım bilgileri sildim. "
+                   f"({stats['conversations_deleted']} konuşma, {stats['preferences_deleted']} bilgi silindi) "
+                   f"Artık temiz bir sayfa ile başlıyoruz!",
+            department="Genel",
+            mode="Sohbet",
+            risk_level="Düşük",
+            confidence=1.0,
+            processing_time_ms=processing_time,
+            files_processed=0,
+        )
+    
+    # Kullanıcı bilgilerini çıkar ve kaydet
+    await extract_and_save_preferences(db, current_user.id, question)
+    
+    # Kalıcı hafıza: PostgreSQL'den geçmiş yükle
+    session_history = await get_conversation_history(db, current_user.id, limit=MAX_HISTORY_FOR_LLM)
+    memory_ctx = await build_memory_context(db, current_user.id)
     
     # Departman yetki kontrolü
     import json
@@ -392,10 +375,14 @@ Lütfen paylaşılan dosya içeriklerini dikkate alarak soruyu cevapla."""
             user_name=current_user.full_name or current_user.email.split("@")[0],
             user_department=department,
             session_history=session_history,
+            memory_context=memory_ctx,
         )
         
-        # Oturuma kaydet
-        _add_to_session(current_user.id, question, result["answer"])
+        # Konuşmayı kalıcı hafızaya kaydet (PostgreSQL)
+        await save_conversation(
+            db, current_user.id, question, result["answer"],
+            department=result.get("department"), intent=result.get("intent")
+        )
         
         processing_time = int((time.time() - start_time) * 1000)
         

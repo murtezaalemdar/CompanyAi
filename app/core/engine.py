@@ -47,6 +47,7 @@ async def process_question(
     user_name: Optional[str] = None,
     user_department: Optional[str] = None,
     session_history: Optional[list] = None,
+    memory_context: Optional[str] = None,
 ) -> dict:
     """
     Ana soru işleme fonksiyonu — Akıllı Pipeline.
@@ -160,8 +161,10 @@ async def process_question(
     
     # Kişiselleştirme — tek satır
     if user_name:
-        system_prompt += f"\nKullanıcı: {user_name}"
-    
+        system_prompt += f"\nKullanıcı: {user_name}"    
+    # Kalıcı hafıza bağlamı — PostgreSQL'den gelen kullanıcı bilgileri + geçmiş
+    if memory_context:
+        system_prompt += f"\n\n{memory_context}"    
     # Web sonuçlarını KISA ekle
     if web_results:
         system_prompt += f"\nWeb bilgisi: {web_results[:300]}"

@@ -48,6 +48,7 @@ BACKEND_FILES = [
     "app/llm/chat_patterns.json",
     "app/memory/__init__.py",
     "app/memory/vector_memory.py",
+    "app/memory/persistent_memory.py",
     "app/rag/__init__.py",
     "app/rag/vector_store.py",
     "app/router/__init__.py",

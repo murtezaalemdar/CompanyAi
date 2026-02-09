@@ -71,3 +71,33 @@ class SystemSettings(Base):
     description = Column(String(255))
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_by = Column(Integer, ForeignKey("users.id"))
+
+
+class ConversationMemory(Base):
+    """Kalıcı konuşma hafızası — 'unut' denene kadar saklanır"""
+    __tablename__ = "conversation_memory"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    department = Column(String(100))
+    intent = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    user = relationship("User", backref="conversation_memories")
+
+
+class UserPreference(Base):
+    """Kullanıcı tercihleri ve bilgileri — AI'ın hatırlaması gereken şeyler"""
+    __tablename__ = "user_preferences"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    key = Column(String(100), nullable=False)       # Ör: "name", "favorite_topic", "style"
+    value = Column(Text, nullable=False)
+    source = Column(String(200))                     # Hangi konuşmadan çıkarıldı
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User", backref="preferences")

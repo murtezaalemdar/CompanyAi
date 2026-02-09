@@ -16,6 +16,12 @@ from app.core.audit import log_action
 from app.router.router import decide
 from app.llm.client import ollama_client
 from app.llm.prompts import build_prompt
+from app.memory.persistent_memory import (
+    is_forget_command, forget_everything,
+    save_conversation, get_conversation_history,
+    get_conversation_count, extract_and_save_preferences,
+    build_memory_context, get_preferences,
+)
 
 # Few-shot sohbet örnekleri
 try:
@@ -28,25 +34,7 @@ except ImportError:
 
 router = APIRouter()
 
-# ── Basit oturum hafızası (sunucu tarafı, kullanıcı bazlı) ────
-# Her kullanıcının son N mesajını tutar
-_user_sessions: dict[int, list] = {}
-MAX_SESSION_MESSAGES = 10
-
-
-def _get_session(user_id: int) -> list:
-    """Kullanıcının oturum geçmişini getir"""
-    return _user_sessions.get(user_id, [])
-
-
-def _add_to_session(user_id: int, question: str, answer: str):
-    """Konuşmayı oturuma ekle"""
-    if user_id not in _user_sessions:
-        _user_sessions[user_id] = []
-    _user_sessions[user_id].append({"q": question, "a": answer})
-    # Son N mesajı tut
-    if len(_user_sessions[user_id]) > MAX_SESSION_MESSAGES:
-        _user_sessions[user_id] = _user_sessions[user_id][-MAX_SESSION_MESSAGES:]
+MAX_HISTORY_FOR_LLM = 20  # LLM'e gönderilecek max konuşma
 
 
 class AskRequest(BaseModel):
@@ -98,20 +86,44 @@ async def ask_ai(
             request.department = user_departments[0] if user_departments else None
     
     try:
-        # Oturum geçmişini al
-        session_history = _get_session(current_user.id)
+        # ── "Unut" komutu kontrolü ──
+        if is_forget_command(request.question):
+            stats = await forget_everything(db, current_user.id)
+            await db.commit()
+            processing_time = int((time.time() - start_time) * 1000)
+            return AskResponse(
+                answer=f"Tamam, tüm konuşma geçmişini ve hatırladığım bilgileri sildim. "
+                       f"({stats['conversations_deleted']} konuşma, {stats['preferences_deleted']} bilgi silindi) "
+                       f"Artık temiz bir sayfa ile başlıyoruz!",
+                department="Genel",
+                mode="Sohbet",
+                risk_level="Düşük",
+                confidence=1.0,
+                processing_time_ms=processing_time,
+            )
         
-        # Soruyu işle — kullanıcı bilgisi + oturum geçmişi ile
+        # Kullanıcı bilgilerini çıkar ve kaydet (ad, departman, vs.)
+        await extract_and_save_preferences(db, current_user.id, request.question)
+        
+        # Kalıcı hafıza: PostgreSQL'den geçmiş yükle
+        session_history = await get_conversation_history(db, current_user.id, limit=MAX_HISTORY_FOR_LLM)
+        memory_ctx = await build_memory_context(db, current_user.id)
+        
+        # Soruyu işle — kullanıcı bilgisi + oturum geçmişi + hafıza
         result = await process_question(
             question=request.question, 
             department_override=request.department,
             user_name=current_user.full_name or current_user.email.split("@")[0],
             user_department=request.department,
             session_history=session_history,
+            memory_context=memory_ctx,
         )
         
-        # Oturuma kaydet
-        _add_to_session(current_user.id, request.question, result["answer"])
+        # Konuşmayı kalıcı hafızaya kaydet (PostgreSQL)
+        await save_conversation(
+            db, current_user.id, request.question, result["answer"],
+            department=result["department"], intent=result.get("intent")
+        )
         
         processing_time = int((time.time() - start_time) * 1000)
         

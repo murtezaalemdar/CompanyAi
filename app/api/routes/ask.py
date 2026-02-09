@@ -274,10 +274,14 @@ async def ask_ai_stream(
             if few_shot:
                 system_prompt += few_shot
 
+    # Chat history — stream de history desteklesin
+    session_history = _get_session(current_user.id)
+    chat_history = session_history[-5:] if session_history and intent != "sohbet" else None
+
     async def _event_generator():
         collected = []
         try:
-            async for token in ollama_client.stream(user_prompt, system_prompt=system_prompt):
+            async for token in ollama_client.stream(user_prompt, system_prompt=system_prompt, history=chat_history):
                 collected.append(token)
                 yield f"data: {_json.dumps({'token': token})}\n\n"
         except Exception as exc:

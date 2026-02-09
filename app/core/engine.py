@@ -8,7 +8,7 @@ import structlog
 
 from app.router.router import decide
 from app.llm.client import ollama_client
-from app.llm.prompts import build_prompt, build_rag_prompt, build_analysis_prompt
+from app.llm.prompts import build_prompt, build_rag_prompt
 from app.memory.vector_memory import remember, recall, search_memory
 
 # Few-shot sohbet örnekleri
@@ -141,46 +141,24 @@ async def process_question(
             except Exception as e:
                 logger.warning("web_search_error", error=str(e))
     
-    # 4. Prompt oluştur
-    # Sohbet niyetinde geçmiş EKLEMEYİ sınırla (kısa sorularda gereksiz)
-    effective_history = []
-    
-    # Sadece iş veya bilgi niyetinde geçmişi dahil et
-    if intent != "sohbet":
-        effective_history = session_history or []
-        # Semantik hafızadan ilgili konuşmaları ekle
-        if similar_memories:
-            for mem in similar_memories:
-                score = mem.get("similarity_score", 0)
-                if score > 0.4:  # Benzerlik eşiği yükseltildi
-                    effective_history.append({
-                        "q": mem.get("q", ""),
-                        "a": mem.get("a", ""),
-                    })
-    
+    # 4. Prompt oluştur (KISA tut — Mistral 7B CPU)
     if relevant_docs:
         system_prompt, user_prompt = build_rag_prompt(question, context, relevant_docs)
-    elif effective_history:
-        system_prompt, user_prompt = build_analysis_prompt(question, context, effective_history)
     else:
         system_prompt, user_prompt = build_prompt(question, context)
     
-    # Few-shot sohbet örnekleri ekle (sadece kalıp eşleşmesi YOKSA)
-    if CHAT_EXAMPLES_AVAILABLE and intent == "sohbet":
-        # Kısa sohbet mesajlarında few-shot ekleme — gereksiz yere prompt'u şişirir
-        word_count = len(question.strip().split())
-        if word_count > 5:
-            few_shot = get_few_shot_examples(question, count=1)
-            if few_shot:
-                system_prompt += few_shot
-    
-    # Kişiselleştirme ekle
+    # Kişiselleştirme — tek satır
     if user_name:
-        system_prompt += f"\nKullanıcının adı: {user_name}. Gerekirse adıyla hitap et.\n"
+        system_prompt += f"\nKullanıcı: {user_name}"
     
-    # Web sonuçlarını prompt'a ekle
+    # Web sonuçlarını KISA ekle
     if web_results:
-        system_prompt += web_results
+        system_prompt += f"\nWeb bilgisi: {web_results[:300]}"
+    
+    # Chat history — system prompt'a DEĞİL, client'a ayrı gönder
+    chat_history = []
+    if intent != "sohbet" and session_history:
+        chat_history = session_history[-5:]
     
     # 5. LLM'e sor
     try:
@@ -193,6 +171,7 @@ async def process_question(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=temp,
+                history=chat_history if chat_history else None,
             )
         else:
             logger.warning("ollama_not_available", using_fallback=True)

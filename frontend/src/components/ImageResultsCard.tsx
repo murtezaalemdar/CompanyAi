@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { X, ExternalLink, Search, ChevronLeft, ChevronRight, Download } from 'lucide-react'
+import { X, ExternalLink, Search, ChevronLeft, ChevronRight, Download, FolderDown, Check } from 'lucide-react'
+import JSZip from 'jszip'
 
 interface ImageItem {
     src: string
@@ -20,6 +21,54 @@ export default function ImageResultsCard({ data }: { data: ImageResultsData }) {
     const [lightbox, setLightbox] = useState<number | null>(null)
     const [imgErrors, setImgErrors] = useState<Set<number>>(new Set())
     const [downloading, setDownloading] = useState<number | null>(null)
+    const [zipProgress, setZipProgress] = useState<'idle' | 'downloading' | 'zipping' | 'done'>('idle')
+    const [zipCount, setZipCount] = useState({ done: 0, total: 0 })
+
+    const downloadAllAsZip = async () => {
+        const valid = data.images.filter((_, i) => !imgErrors.has(i))
+        if (valid.length === 0) return
+
+        setZipProgress('downloading')
+        setZipCount({ done: 0, total: valid.length })
+
+        const zip = new JSZip()
+        const folder = zip.folder(data.query.replace(/[^a-zA-Z0-9\u00C0-\u024F\s_-]/g, '').replace(/\s+/g, '_') || 'gorseller')!
+        let completed = 0
+
+        await Promise.allSettled(
+            valid.map(async (img, i) => {
+                try {
+                    const url = img.src || img.thumbnail
+                    const res = await fetch(url)
+                    const blob = await res.blob()
+                    const safeName = (img.title || `gorsel_${i + 1}`)
+                        .replace(/[^a-zA-Z0-9\u00C0-\u024F\s_-]/g, '')
+                        .replace(/\s+/g, '_')
+                        .substring(0, 50)
+                    const ext = blob.type?.includes('png') ? '.png' : blob.type?.includes('webp') ? '.webp' : '.jpg'
+                    folder.file(`${String(i + 1).padStart(2, '0')}_${safeName}${ext}`, blob)
+                } catch {
+                    // CORS — atla
+                } finally {
+                    completed++
+                    setZipCount({ done: completed, total: valid.length })
+                }
+            })
+        )
+
+        setZipProgress('zipping')
+        const content = await zip.generateAsync({ type: 'blob' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(content)
+        a.download = `${data.query.replace(/[^a-zA-Z0-9\u00C0-\u024F\s_-]/g, '').replace(/\s+/g, '_') || 'gorseller'}.zip`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(a.href)
+
+        setZipProgress('done')
+        setTimeout(() => setZipProgress('idle'), 3000)
+    }
 
     const downloadImage = async (img: ImageItem, index: number, e?: React.MouseEvent) => {
         if (e) e.stopPropagation()
@@ -75,7 +124,30 @@ export default function ImageResultsCard({ data }: { data: ImageResultsData }) {
                 <div className="flex items-center gap-2 mb-2 text-sm text-dark-400">
                     <Search className="w-3.5 h-3.5" />
                     <span>Görseller — <span className="text-dark-300">{data.query}</span></span>
-                    <span className="text-dark-600 ml-auto text-xs">{data.source}</span>
+                    <div className="ml-auto flex items-center gap-2">
+                        <button
+                            onClick={downloadAllAsZip}
+                            disabled={zipProgress !== 'idle'}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all
+                                bg-dark-700/60 hover:bg-dark-600 text-dark-300 hover:text-white border border-dark-600/50 hover:border-dark-500
+                                disabled:opacity-60 disabled:cursor-wait"
+                            title="Tüm görselleri ZIP olarak indir"
+                        >
+                            {zipProgress === 'idle' && (
+                                <><FolderDown className="w-3.5 h-3.5" /> Tümünü İndir ({visibleImages.length})  </>
+                            )}
+                            {zipProgress === 'downloading' && (
+                                <><div className="w-3.5 h-3.5 border-2 border-dark-400 border-t-blue-400 rounded-full animate-spin" /> {zipCount.done}/{zipCount.total} indiriliyor</>
+                            )}
+                            {zipProgress === 'zipping' && (
+                                <><div className="w-3.5 h-3.5 border-2 border-dark-400 border-t-emerald-400 rounded-full animate-spin" /> ZIP hazırlanıyor…</>
+                            )}
+                            {zipProgress === 'done' && (
+                                <><Check className="w-3.5 h-3.5 text-emerald-400" /> <span className="text-emerald-400">İndirildi</span></>
+                            )}
+                        </button>
+                        <span className="text-dark-600 text-xs">{data.source}</span>
+                    </div>
                 </div>
 
                 {/* Görsel Grid */}

@@ -127,6 +127,16 @@ export default function Login() {
                     </div>
                 </div>
             </div>
+
+            {/* Designer Signature */}
+            <div className="absolute bottom-6 left-0 right-0 flex justify-center">
+                <p className="text-[11px] tracking-[0.35em] uppercase text-dark-600/60 font-light select-none">
+                    Designed by{' '}
+                    <span className="font-medium text-dark-500/70 tracking-[0.25em]">
+                        Murteza ALEMDAR
+                    </span>
+                </p>
+            </div>
         </div>
     )
 }

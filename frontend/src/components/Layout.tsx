@@ -92,6 +92,15 @@ export default function Layout() {
                         <LogOut className="w-5 h-5" />
                         Çıkış Yap
                     </button>
+                    {/* Designer Signature */}
+                    <div className="mt-4 pt-3 border-t border-dark-800/50">
+                        <p className="text-[10px] tracking-[0.3em] uppercase text-dark-600/50 text-center font-light select-none">
+                            Designed by{' '}
+                            <span className="font-medium text-dark-500/60 tracking-[0.2em]">
+                                Murteza ALEMDAR
+                            </span>
+                        </p>
+                    </div>
                 </div>
             </aside>
 

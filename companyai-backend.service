@@ -13,7 +13,7 @@ RestartSec=3
 Environment=DATABASE_URL=postgresql+asyncpg://companyai:companyai@localhost:5433/companyai
 Environment=SECRET_KEY=your-production-secret-key-companyai-2026-very-long-random-string
 Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
-Environment=LLM_MODEL=qwen2.5:7b
+Environment=LLM_MODEL=qwen2.5:72b
 Environment=DEBUG=false
 Environment=PYTHONUNBUFFERED=1
 

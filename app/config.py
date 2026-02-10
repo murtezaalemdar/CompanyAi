@@ -22,9 +22,9 @@ class Settings(BaseSettings):
     # Admin
     ADMIN_DEFAULT_PASSWORD: str = "admin123"
     
-    # LLM (Ollama + GPT-OSS-20B)
+    # LLM (Ollama + Qwen2.5-72B)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    LLM_MODEL: str = "gpt-oss:20b"
+    LLM_MODEL: str = "qwen2.5:72b"
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379"

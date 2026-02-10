@@ -76,7 +76,7 @@ class OllamaClient:
         prompt: str,
         system_prompt: str = "",
         temperature: float = 0.7,
-        max_tokens: int = 2048,
+        max_tokens: int = 512,
         images: list[str] | None = None,
         history: list[dict] | None = None,
     ) -> str:
@@ -101,6 +101,7 @@ class OllamaClient:
                 "options": {
                     "temperature": temperature,
                     "num_predict": max_tokens,
+                    "num_thread": 16,
                 },
             }
 

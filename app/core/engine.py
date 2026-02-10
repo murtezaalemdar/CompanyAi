@@ -210,6 +210,7 @@ async def process_question(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=temp,
+                max_tokens=512,
                 history=chat_history if chat_history else None,
             )
         else:

@@ -11,7 +11,7 @@ import threading
 import time
 import sys
 import os
-import ssl
+import subprocess
 import urllib.request
 import urllib.error
 
@@ -25,11 +25,6 @@ MIN_WIDTH = 900
 MIN_HEIGHT = 600
 CHECK_INTERVAL = 2          # Sunucu kontrol aralığı (sn)
 MAX_RETRIES = 0             # 0 = sınırsız deneme
-
-# SSL sertifika doğrulamayı devre dışı bırak (self-signed cert)
-_ssl_ctx = ssl.create_default_context()
-_ssl_ctx.check_hostname = False
-_ssl_ctx.verify_mode = ssl.CERT_NONE
 
 
 # ── Yükleme / Hata HTML ─────────────────────────────────
@@ -148,27 +143,42 @@ ERROR_HTML = """
 """
 
 
-def check_server(url: str, timeout: int = 5) -> str | None:
-    """Sunucunun erişilebilir olup olmadığını kontrol et.
-    Başarılıysa gerçek final URL'yi döndür (redirect sonrası), yoksa None.
-    HTTP → HTTPS redirect'leri otomatik takip edilir.
-    """
-    # Denenecek URL'ler: verilen URL + HTTPS versiyonu
-    candidates = [url]
-    if url.startswith("http://"):
-        candidates.append(url.replace("http://", "https://", 1))
+def create_desktop_shortcut():
+    """İlk çalıştırmada masaüstüne kısayol oluştur"""
+    try:
+        if not getattr(sys, 'frozen', False):
+            return  # Sadece exe olarak çalışırken
+        exe_path = os.path.abspath(sys.executable)
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        shortcut_path = os.path.join(desktop, "CompanyAI.lnk")
+        if os.path.exists(shortcut_path):
+            return  # Zaten var
+        ps = (
+            f'$ws = New-Object -ComObject WScript.Shell; '
+            f'$sc = $ws.CreateShortcut("{shortcut_path}"); '
+            f'$sc.TargetPath = "{exe_path}"; '
+            f'$sc.WorkingDirectory = "{os.path.dirname(exe_path)}"; '
+            f'$sc.Description = "CompanyAI Kurumsal AI Asistanı"; '
+            f'$sc.Save()'
+        )
+        subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps],
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        pass  # Kısayol oluşturulamazsa sessizce geç
 
-    for base in candidates:
-        try:
-            health = base.rstrip("/") + "/api/health"
-            req = urllib.request.Request(health, method="GET")
-            resp = urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx)
-            if resp.status == 200:
-                # Final URL'nin base kısmını al
-                final = resp.url.replace("/api/health", "")
-                return final or base
-        except Exception:
-            continue
+
+def check_server(url: str, timeout: int = 5) -> str | None:
+    """Sunucunun erişilebilir olup olmadığını kontrol et (HTTP)."""
+    try:
+        health = url.rstrip("/") + "/api/health"
+        req = urllib.request.Request(health, method="GET")
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        if resp.status == 200:
+            return url
+    except Exception:
+        pass
     return None
 
 
@@ -197,6 +207,9 @@ def wait_and_navigate(window: webview.Window):
 
 
 def main():
+    # İlk çalıştırmada masaüstüne kısayol oluştur
+    create_desktop_shortcut()
+
     # Ana pencereyi oluştur (loading ekranıyla)
     window = webview.create_window(
         title=f"{APP_TITLE}  v{APP_VERSION}",

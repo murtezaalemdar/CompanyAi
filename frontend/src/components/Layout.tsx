@@ -156,6 +156,18 @@ export default function Layout() {
                             Çıkış Yap
                         </button>
                     </nav>
+                    {/* Mobile Designer Signature + Version */}
+                    <div className="absolute bottom-8 left-0 right-0 flex flex-col items-center gap-1.5">
+                        <p className="text-[11px] tracking-[0.3em] uppercase text-dark-600/50 font-light select-none">
+                            Designed by{' '}
+                            <span className="font-medium text-dark-500/60 tracking-[0.2em]">
+                                Murteza ALEMDAR
+                            </span>
+                        </p>
+                        <span className="text-[10px] font-mono text-dark-600/35 tracking-wider select-none">
+                            v{APP_VERSION}
+                        </span>
+                    </div>
                 </div>
             )}
 

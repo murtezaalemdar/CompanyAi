@@ -137,7 +137,7 @@ export default function Login() {
                         Murteza ALEMDAR
                     </span>
                 </p>
-                <span className="text-[10px] font-mono text-dark-600/40 tracking-wider select-none">
+                <span className="text-[11px] font-mono text-dark-400/70 tracking-wide select-none px-2.5 py-0.5 rounded-full border border-dark-700/40 bg-dark-800/30">
                     v{APP_VERSION}
                 </span>
             </div>

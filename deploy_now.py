@@ -4,6 +4,8 @@ import paramiko
 import os
 import sys
 import time
+import subprocess
+import glob
 from pathlib import Path
 from scp import SCPClient
 
@@ -160,6 +162,52 @@ def upload_files(ssh):
     print("  ✅ Dosya yükleme tamamlandı")
 
 
+def build_and_deploy_frontend(ssh):
+    """Frontend'i lokal olarak build edip sunucuya yükle."""
+    frontend_dir = Path("frontend")
+    dist_dir = frontend_dir / "dist"
+    
+    if not (frontend_dir / "package.json").exists():
+        print("\n⚠️ Frontend klasörü bulunamadı, atlanıyor...")
+        return
+    
+    print("\n🏗️  Frontend build ediliyor...")
+    result = subprocess.run(
+        ["npm", "run", "build"],
+        cwd=str(frontend_dir),
+        capture_output=True, text=True, shell=True,
+    )
+    if result.returncode != 0:
+        print(f"  ⚠️ Frontend build hatası: {result.stderr[:300]}")
+        return
+    print("  ✅ Frontend build başarılı")
+    
+    # Sunucudaki eski dosyaları temizle
+    print("  📤 Frontend dosyaları sunucuya yükleniyor...")
+    run_cmd(ssh, "rm -rf /var/www/html/assets/* && rm -f /var/www/html/index.html", check=False)
+    
+    # Yeni dosyaları yükle
+    with SCPClient(ssh.get_transport()) as scp:
+        # index.html
+        index_file = dist_dir / "index.html"
+        if index_file.exists():
+            scp.put(str(index_file), "/var/www/html/index.html")
+            print("  📄 index.html")
+        
+        # assets/
+        assets_dir = dist_dir / "assets"
+        if assets_dir.exists():
+            run_cmd(ssh, "mkdir -p /var/www/html/assets", check=False)
+            for f in assets_dir.iterdir():
+                if f.is_file():
+                    scp.put(str(f), f"/var/www/html/assets/{f.name}")
+                    print(f"  📄 assets/{f.name}")
+    
+    # İzinleri düzelt
+    run_cmd(ssh, "chmod 644 /var/www/html/assets/* && chmod 755 /var/www/html/assets", check=False)
+    print("  ✅ Frontend deploy tamamlandı")
+
+
 def install_dependencies(ssh):
     """Sunucuda pip bağımlılıklarını güncelle."""
     print("\n📥 Bağımlılıklar yükleniyor (requirements.txt)...")
@@ -242,6 +290,9 @@ def main():
 
     # 4. Dosyaları yükle
     upload_files(ssh)
+
+    # 4.5. Frontend build & deploy
+    build_and_deploy_frontend(ssh)
 
     # 5. Bağımlılıkları yükle
     install_dependencies(ssh)

@@ -13,7 +13,7 @@ bulmasını sağlar.
 import httpx
 import structlog
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from app.config import settings
 
@@ -44,14 +44,18 @@ def _google_configured() -> bool:
 # SerpAPI — Google Arama Sonuçları
 # ──────────────────────────────────────────────
 
-async def _search_serpapi(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+async def _search_serpapi(query: str, max_results: int = 5) -> Tuple[List[Dict[str, str]], Optional[Dict]]:
     """
     SerpAPI ile Google arama sonuçlarını çeker.
     
-    Ücretsiz plan: 100 arama/ay, kredi kartı gerektirmez.
+    Ücretsiz plan: 250 arama/ay, kredi kartı gerektirmez.
     Döküman: https://serpapi.com/search-api
+    
+    Returns:
+        (results, rich_data) — rich_data hava durumu gibi yapısal veri içerir
     """
     results = []
+    rich_data = None
     
     try:
         async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
@@ -80,16 +84,24 @@ async def _search_serpapi(query: str, max_results: int = 5) -> List[Dict[str, st
                 "source": "Google (SerpAPI)",
             })
         
-        # Answer box varsa en başa ekle
+        # Answer box — yapısal veri çıkarma
         answer_box = data.get("answer_box", {})
-        if answer_box and answer_box.get("snippet") or answer_box.get("answer"):
-            answer_text = answer_box.get("snippet") or answer_box.get("answer", "")
-            results.insert(0, {
-                "title": answer_box.get("title", "Google Yanıt"),
-                "snippet": answer_text[:500],
-                "url": answer_box.get("link", ""),
-                "source": "Google Answer Box",
-            })
+        if answer_box:
+            # Hava durumu sonucu
+            ab_type = answer_box.get("type", "")
+            if ab_type == "weather_result" or "temperature" in answer_box:
+                rich_data = _extract_weather_data(answer_box, data)
+                logger.info("serpapi_weather_detected", location=rich_data.get("location", ""))
+            
+            # Metin answer box
+            if answer_box.get("snippet") or answer_box.get("answer"):
+                answer_text = answer_box.get("snippet") or answer_box.get("answer", "")
+                results.insert(0, {
+                    "title": answer_box.get("title", "Google Yanıt"),
+                    "snippet": answer_text[:500],
+                    "url": answer_box.get("link", ""),
+                    "source": "Google Answer Box",
+                })
         
         # Knowledge graph varsa ekle
         knowledge = data.get("knowledge_graph", {})
@@ -101,7 +113,8 @@ async def _search_serpapi(query: str, max_results: int = 5) -> List[Dict[str, st
                 "source": "Google Knowledge Graph",
             })
         
-        logger.info("serpapi_search_ok", query=query[:80], results=len(results))
+        logger.info("serpapi_search_ok", query=query[:80], results=len(results),
+                    has_rich_data=rich_data is not None)
         
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
@@ -115,7 +128,78 @@ async def _search_serpapi(query: str, max_results: int = 5) -> List[Dict[str, st
     except Exception as e:
         logger.error("serpapi_error", error=str(e))
     
-    return results
+    return results, rich_data
+
+
+def _extract_weather_data(answer_box: dict, full_data: dict) -> Dict:
+    """SerpAPI answer_box'tan hava durumu verisini yapısal olarak çıkar."""
+    # Hava durumu koşulunu Türkçeye çevir
+    WEATHER_TR = {
+        "Sunny": "Güneşli", "Clear": "Açık", "Partly cloudy": "Parçalı Bulutlu",
+        "Cloudy": "Bulutlu", "Overcast": "Kapalı", "Rainy": "Yağmurlu",
+        "Light rain": "Hafif Yağmur", "Heavy rain": "Şiddetli Yağmur",
+        "Thunderstorm": "Gök Gürültülü Fırtına", "Snowy": "Karlı",
+        "Light snow": "Hafif Kar", "Heavy snow": "Yoğun Kar",
+        "Foggy": "Sisli", "Windy": "Rüzgarlı", "Haze": "Puslu",
+        "Mist": "Sisli", "Drizzle": "Çisenti", "Sleet": "Sulu Kar",
+        # Türkçe gelen değerler (SerpAPI hl=tr)
+        "Güneşli": "Güneşli", "Açık": "Açık", "Parçalı bulutlu": "Parçalı Bulutlu",
+        "Bulutlu": "Bulutlu", "Kapalı": "Kapalı", "Yağmurlu": "Yağmurlu",
+        "Hafif yağmurlu": "Hafif Yağmurlu", "Çok bulutlu": "Çok Bulutlu",
+        "Şiddetli yağmurlu": "Şiddetli Yağmur", "Gök gürültülü fırtına": "Gök Gürültülü Fırtına",
+        "Karlı": "Karlı", "Hafif kar": "Hafif Kar", "Yoğun kar": "Yoğun Kar",
+        "Sisli": "Sisli", "Rüzgarlı": "Rüzgarlı", "Puslu": "Puslu",
+        "Çisenti": "Çisenti", "Sulu kar": "Sulu Kar",
+    }
+    
+    # Hava durumu ikonunu belirle
+    WEATHER_ICONS = {
+        "Sunny": "☀️", "Clear": "☀️", "Partly cloudy": "⛅",
+        "Cloudy": "☁️", "Overcast": "☁️", "Rainy": "🌧️",
+        "Light rain": "🌦️", "Heavy rain": "🌧️", "Thunderstorm": "⛈️",
+        "Snowy": "🌨️", "Light snow": "🌨️", "Heavy snow": "❄️",
+        "Foggy": "🌫️", "Windy": "💨", "Haze": "🌫️",
+        "Mist": "🌫️", "Drizzle": "🌦️", "Sleet": "🌨️",
+        # Türkçe gelen değerler (SerpAPI hl=tr)
+        "Güneşli": "☀️", "Açık": "☀️", "Parçalı bulutlu": "⛅",
+        "Bulutlu": "☁️", "Kapalı": "☁️", "Yağmurlu": "🌧️",
+        "Hafif yağmurlu": "🌦️", "Çok bulutlu": "☁️",
+        "Şiddetli yağmurlu": "🌧️", "Gök gürültülü fırtına": "⛈️",
+        "Karlı": "🌨️", "Hafif kar": "🌨️", "Yoğun kar": "❄️",
+        "Sisli": "🌫️", "Rüzgarlı": "💨", "Puslu": "🌫️",
+        "Çisenti": "🌦️", "Sulu kar": "🌨️",
+    }
+    
+    weather_en = answer_box.get("weather", "")
+    condition_tr = WEATHER_TR.get(weather_en, weather_en)
+    icon = WEATHER_ICONS.get(weather_en, "🌡️")
+    
+    # Haftalık tahmin
+    forecast = []
+    for day in answer_box.get("forecast", []):
+        day_weather = day.get("weather", "")
+        forecast.append({
+            "day": day.get("day", ""),
+            "high": day.get("temperature", {}).get("high", day.get("high", "")),
+            "low": day.get("temperature", {}).get("low", day.get("low", "")),
+            "condition": WEATHER_TR.get(day_weather, day_weather),
+            "icon": WEATHER_ICONS.get(day_weather, "🌡️"),
+        })
+    
+    return {
+        "type": "weather",
+        "location": answer_box.get("location", ""),
+        "temperature": answer_box.get("temperature", ""),
+        "unit": answer_box.get("unit", "Celsius"),
+        "condition": condition_tr,
+        "condition_icon": icon,
+        "precipitation": answer_box.get("precipitation", ""),
+        "humidity": answer_box.get("humidity", ""),
+        "wind": answer_box.get("wind", ""),
+        "date": answer_box.get("date", ""),
+        "forecast": forecast,
+        "source": "Google Hava Durumu",
+    }
 
 
 # ──────────────────────────────────────────────
@@ -259,21 +343,25 @@ async def _search_ddg_html(query: str, max_results: int = 3) -> List[Dict[str, s
 # Ana Arama Fonksiyonu
 # ──────────────────────────────────────────────
 
-async def search_web(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+async def search_web(query: str, max_results: int = 5) -> Tuple[List[Dict[str, str]], Optional[Dict]]:
     """
     Web araması yapar. Öncelik sırasına göre dener:
     
-    1. SerpAPI (Google sonuçları — ücretsiz 100/ay)
+    1. SerpAPI (Google sonuçları — ücretsiz 250/ay)
     2. Google Custom Search API (billing gerektirir)
     3. DuckDuckGo Instant API (ücretsiz fallback)
     4. DuckDuckGo HTML scraping (son çare)
+    
+    Returns:
+        (results, rich_data) — rich_data hava durumu gibi görsel kart verisi
     """
     results = []
+    rich_data = None
     search_engine = "none"
     
     # 1) SerpAPI — Google sonuçları (en kaliteli)
     if _serpapi_configured():
-        results = await _search_serpapi(query, max_results)
+        results, rich_data = await _search_serpapi(query, max_results)
         if results:
             search_engine = "serpapi"
     
@@ -305,19 +393,23 @@ async def search_web(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     logger.info("web_search_complete", 
                 query=query[:80], 
                 engine=search_engine,
-                results_count=len(results))
+                results_count=len(results),
+                has_rich_data=rich_data is not None)
     
-    return results[:max_results]
+    return results[:max_results], rich_data
 
 
-async def search_and_summarize(query: str) -> Optional[str]:
+async def search_and_summarize(query: str) -> Tuple[Optional[str], Optional[Dict]]:
     """
     Arama yap ve sonuçları LLM prompt'una eklenecek formatta döndür.
+    
+    Returns:
+        (text_summary, rich_data) — rich_data hava durumu gibi görsel kart verisi
     """
-    results = await search_web(query, max_results=5)
+    results, rich_data = await search_web(query, max_results=5)
     
     if not results:
-        return None
+        return None, rich_data
     
     # Hangi motor kullanıldı?
     engine = results[0].get("source", "Web")
@@ -332,4 +424,4 @@ async def search_and_summarize(query: str) -> Optional[str]:
     
     text += "Bu bilgileri kullanarak yanıt ver. Kaynağın internetten geldiğini belirt.\n"
     
-    return text
+    return text, rich_data

@@ -147,9 +147,9 @@ async def process_question(
         )
         if should_search_web:
             try:
-                web_results = await search_and_summarize(question)
+                web_results, web_rich_data = await search_and_summarize(question)
                 if web_results:
-                    logger.info("web_search_results_found")
+                    logger.info("web_search_results_found", has_rich_data=web_rich_data is not None)
             except Exception as e:
                 logger.warning("web_search_error", error=str(e))
     
@@ -211,6 +211,7 @@ async def process_question(
         "confidence": 0.85 if not relevant_docs else 0.92,
         "sources": sources,
         "web_searched": web_results is not None,
+        "rich_data": web_rich_data,
     }
     
     # 7. Hafızaya kaydet (öğrenme)

@@ -7,7 +7,7 @@ import base64
 import tempfile
 import io
 from PIL import Image
-from typing import List, Optional
+from typing import List, Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -56,6 +56,7 @@ class MultimodalResponse(BaseModel):
     confidence: float
     processing_time_ms: int
     files_processed: int
+    rich_data: Optional[dict] = None
 
 
 def get_file_type(content_type: str) -> str:
@@ -438,6 +439,7 @@ Lütfen paylaşılan dosya içeriklerini dikkate alarak soruyu cevapla."""
             confidence=result["confidence"],
             processing_time_ms=processing_time,
             files_processed=len(processed_files),
+            rich_data=result.get("rich_data"),
         )
         
     except Exception as e:

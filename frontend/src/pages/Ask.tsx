@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import FileUploadModal from '../components/FileUploadModal'
+import WeatherCard from '../components/WeatherCard'
 import { useAuth } from '../contexts/AuthContext'
 import { DEPARTMENTS }  from '../constants'
 
@@ -42,6 +43,7 @@ interface Message {
     role: 'user' | 'assistant'
     content: string
     attachments?: AttachedFile[]
+    rich_data?: any
     metadata?: {
         department?: string
         risk_level?: string
@@ -220,6 +222,7 @@ export default function Ask() {
                 id: Date.now().toString(),
                 role: 'assistant',
                 content: data.answer,
+                rich_data: data.rich_data || null,
                 metadata: {
                     department: data.department,
                     risk_level: data.risk_level,
@@ -517,6 +520,11 @@ export default function Ask() {
                                 )}
 
                                 <div className="whitespace-pre-wrap">{msg.content}</div>
+
+                                {/* Rich Data — Hava Durumu Kartı vb. */}
+                                {msg.rich_data && msg.rich_data.type === 'weather' && (
+                                    <WeatherCard data={msg.rich_data} />
+                                )}
 
                                 {msg.role === 'assistant' && msg.metadata && (
                                     <div className="mt-3 pt-3 border-t border-dark-700/50 flex flex-wrap gap-2 text-xs">

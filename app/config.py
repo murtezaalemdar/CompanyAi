@@ -38,8 +38,9 @@ class Settings(BaseSettings):
     PASSWORD_MIN_LENGTH: int = 8
     RATE_LIMIT_PER_MINUTE: int = 30
     
-    # Google Custom Search API
-    GOOGLE_API_KEY: str = ""
+    # Web Search APIs
+    SERPAPI_KEY: str = ""  # serpapi.com — ücretsiz 100 arama/ay
+    GOOGLE_API_KEY: str = ""  # Google Custom Search (billing gerektirir)
     GOOGLE_CSE_ID: str = ""
     
     # CORS

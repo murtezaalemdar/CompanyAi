@@ -1,10 +1,4 @@
-
-// ╔═════════════════════════════════════════════════════════════════╗
-// ║  DEPLOY ÖNCESİ BU VERSİYONU GÜNCELLE!                         ║
-// ║  Format: MAJOR.MINOR.PATCH (Semantic Versioning)               ║
-// ║  Örn: 2.5.0 → büyük özellik, 2.5.1 → bug fix                 ║
-// ║  Backend tarafı: app/config.py → APP_VERSION                   ║
-// ╚═════════════════════════════════════════════════════════════════╝
+// Versiyon — app/config.py ile eşleşmeli
 export const APP_VERSION = '2.6.0'
 
 export const DEPARTMENTS = [

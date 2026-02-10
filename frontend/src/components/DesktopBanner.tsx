@@ -50,14 +50,13 @@ export default function DesktopBanner() {
                 </div>
 
                 {/* Download Button */}
-                <a
-                    href="/downloads/CompanyAI.exe"
-                    download
-                    className="shrink-0 flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition-colors"
+                <button
+                    onClick={() => window.open('/downloads/CompanyAI.exe', '_blank')}
+                    className="shrink-0 flex items-center gap-1.5 bg-primary-600 hover:bg-primary-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl transition-colors cursor-pointer"
                 >
                     <Download className="w-3.5 h-3.5" />
                     İndir
-                </a>
+                </button>
 
                 {/* Close */}
                 <button

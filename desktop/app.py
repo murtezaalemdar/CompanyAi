@@ -72,9 +72,15 @@ LOADING_HTML = """
         75%  { content: '...'; }
         100% { content: ''; }
     }
-    .version {
+    .footer {
         position: absolute; bottom: 16px;
-        color: #475569; font-size: 0.75rem;
+        display: flex; flex-direction: column; align-items: center; gap: 6px;
+    }
+    .sig { color: #334155; font-size: 0.65rem; letter-spacing: 0.25em; text-transform: uppercase; }
+    .sig b { color: #475569; letter-spacing: 0.18em; font-weight: 500; }
+    .ver {
+        color: #475569; font-size: 0.65rem; font-family: monospace;
+        padding: 2px 10px; border: 1px solid #1e293b; border-radius: 99px;
     }
 </style>
 </head>
@@ -83,7 +89,10 @@ LOADING_HTML = """
     <div class="spinner"></div>
     <p class="status">Sunucuya bağlanılıyor<span class="dots"></span></p>
     <p class="sub" id="timer"></p>
-    <div class="version">v""" + APP_VERSION + """</div>
+    <div class="footer">
+        <span class="sig">Designed by <b>Murteza ALEMDAR</b></span>
+        <span class="ver">v""" + APP_VERSION + """</span>
+    </div>
     <script>
         var start = Date.now();
         setInterval(function() {
@@ -117,6 +126,12 @@ ERROR_HTML = """
         border: none; border-radius: 8px; font-size: 0.95rem; cursor: pointer;
     }
     .btn:hover { background: #4f46e5; }
+    .footer {
+        position: absolute; bottom: 16px;
+        display: flex; flex-direction: column; align-items: center; gap: 6px;
+    }
+    .sig { color: #334155; font-size: 0.65rem; letter-spacing: 0.25em; text-transform: uppercase; }
+    .sig b { color: #475569; letter-spacing: 0.18em; font-weight: 500; }
 </style>
 </head>
 <body>
@@ -125,6 +140,9 @@ ERROR_HTML = """
     <p>CompanyAI sunucusu (""" + SERVER_URL + """) yanıt vermiyor.<br>
     Lütfen sunucunun çalıştığından ve ağ bağlantınızdan emin olun.</p>
     <button class="btn" onclick="location.reload()">Tekrar Dene</button>
+    <div class="footer">
+        <span class="sig">Designed by <b>Murteza ALEMDAR</b></span>
+    </div>
 </body>
 </html>
 """

@@ -1,11 +1,6 @@
 """Konfigürasyon Yönetimi"""
 
-# ╔═════════════════════════════════════════════════════════════════╗
-# ║  DEPLOY ÖNCESİ BU VERSİYONU GÜNCELLE!                         ║
-# ║  Format: MAJOR.MINOR.PATCH (Semantic Versioning)               ║
-# ║  Örn: 2.5.0 → büyük özellik, 2.5.1 → bug fix                 ║
-# ║  Frontend tarafı: frontend/src/constants.ts → APP_VERSION       ║
-# ╚═════════════════════════════════════════════════════════════════╝
+# Versiyon — frontend/src/constants.ts ile eşleşmeli
 APP_VERSION = "2.6.0"
 
 from pydantic_settings import BaseSettings

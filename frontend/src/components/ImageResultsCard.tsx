@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, ExternalLink, Search, ChevronLeft, ChevronRight } from 'lucide-react'
+import { X, ExternalLink, Search, ChevronLeft, ChevronRight, Download } from 'lucide-react'
 
 interface ImageItem {
     src: string
@@ -19,6 +19,34 @@ interface ImageResultsData {
 export default function ImageResultsCard({ data }: { data: ImageResultsData }) {
     const [lightbox, setLightbox] = useState<number | null>(null)
     const [imgErrors, setImgErrors] = useState<Set<number>>(new Set())
+    const [downloading, setDownloading] = useState<number | null>(null)
+
+    const downloadImage = async (img: ImageItem, index: number, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation()
+        setDownloading(index)
+        try {
+            const url = img.src || img.thumbnail
+            const response = await fetch(url)
+            const blob = await response.blob()
+            const safeName = (img.title || `gorsel_${index + 1}`)
+                .replace(/[^a-zA-Z0-9\u00C0-\u024F\s_-]/g, '')
+                .replace(/\s+/g, '_')
+                .substring(0, 60)
+            const ext = blob.type?.includes('png') ? '.png' : blob.type?.includes('webp') ? '.webp' : '.jpg'
+            const a = document.createElement('a')
+            a.href = URL.createObjectURL(blob)
+            a.download = `${safeName}${ext}`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(a.href)
+        } catch {
+            // CORS engeli — yeni sekmede aç
+            window.open(img.src || img.thumbnail, '_blank')
+        } finally {
+            setTimeout(() => setDownloading(null), 1000)
+        }
+    }
 
     const handleImgError = (index: number) => {
         setImgErrors((prev) => new Set(prev).add(index))
@@ -69,6 +97,18 @@ export default function ImageResultsCard({ data }: { data: ImageResultsData }) {
                                 />
                                 {/* Hover overlay */}
                                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                                    {/* İndir butonu */}
+                                    <button
+                                        className="absolute top-1.5 right-1.5 p-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white/80 hover:text-white transition-colors z-10"
+                                        onClick={(e) => downloadImage(img, i, e)}
+                                        title="Görseli indir"
+                                    >
+                                        {downloading === i ? (
+                                            <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                        ) : (
+                                            <Download className="w-3.5 h-3.5" />
+                                        )}
+                                    </button>
                                     <div className="absolute bottom-0 left-0 right-0 p-2">
                                         <p className="text-white text-[10px] leading-tight line-clamp-2 font-medium">
                                             {img.title}
@@ -92,13 +132,33 @@ export default function ImageResultsCard({ data }: { data: ImageResultsData }) {
                     className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
                     onClick={() => setLightbox(null)}
                 >
-                    {/* Kapat */}
-                    <button
-                        className="absolute top-4 right-4 text-white/70 hover:text-white p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors z-10"
-                        onClick={() => setLightbox(null)}
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
+                    {/* Üst butonlar */}
+                    <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+                        {/* İndir */}
+                        <button
+                            className="text-white/70 hover:text-white p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                if (lightbox !== null && data.images[lightbox]) {
+                                    downloadImage(data.images[lightbox], lightbox)
+                                }
+                            }}
+                            title="Görseli indir"
+                        >
+                            {downloading === lightbox ? (
+                                <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                            ) : (
+                                <Download className="w-5 h-5" />
+                            )}
+                        </button>
+                        {/* Kapat */}
+                        <button
+                            className="text-white/70 hover:text-white p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+                            onClick={() => setLightbox(null)}
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
 
                     {/* Sol ok */}
                     <button

@@ -1,5 +1,43 @@
 # Şirket AI Asistanı - Günlük Notlar
 
+## 📅 Tarih: 10 Şubat 2026 (Güncelleme 6)
+
+### 🏷️ Versiyon Numaralama Sistemi — v2.5.0
+
+Her deploy öncesi versiyon numarası güncellenmeli. **Semantic Versioning** kullanılıyor:
+- `MAJOR.MINOR.PATCH` → Örn: `2.5.0`
+- `MAJOR` — Büyük mimari değişiklik (API kırılması)
+- `MINOR` — Yeni özellik (geriye uyumlu)
+- `PATCH` — Bug fix, küçük düzeltme
+
+#### Versiyon Tanımlanan Dosyalar (2 yer, her ikisi de eşit olmalı!)
+
+| Dosya | Sabit | Konum |
+|-------|-------|-------|
+| `app/config.py` | `APP_VERSION = "2.5.0"` | Backend — tek kaynak |
+| `frontend/src/constants.ts` | `APP_VERSION = '2.5.0'` | Frontend — tek kaynak |
+
+#### Versiyonun Gösterildiği Yerler
+
+| Konum | Görünüm |
+|-------|---------|
+| Login sayfası (alt kısım) | `v2.5.0` — imzanın altında |
+| Sidebar (nav altı) | `v2.5.0` — imzanın altında |
+| `/api/health` endpoint | `{"version": "2.5.0", ...}` |
+| `/` root endpoint | `{"version": "2.5.0", ...}` |
+| FastAPI docs başlığı | OpenAPI spec version |
+| Uygulama başlangıç logu | `app_starting version=2.5.0` |
+
+#### Deploy Script Otomatik Kontrol
+
+`deploy_now.py` çalıştığında:
+1. Backend ve Frontend versiyon dosyalarını **otomatik okur**
+2. Versiyonları **karşılaştırır**
+3. Eşit değilse **uyarı verir** ve onay ister
+4. Eşitse `✅ Versiyonlar eşleşiyor: v2.5.0` gösterir
+
+---
+
 ## 📅 Tarih: 11 Şubat 2026 (Güncelleme 5)
 
 ### 🧠 Qwen2.5:72B Model Yükseltmesi & 64GB RAM

@@ -15,6 +15,7 @@ import {
     BarChart3,
 } from 'lucide-react'
 import clsx from 'clsx'
+import { APP_VERSION } from '../constants'
 
 export default function Layout() {
     const { user, logout } = useAuth()
@@ -92,13 +93,16 @@ export default function Layout() {
                         <LogOut className="w-5 h-5" />
                         Çıkış Yap
                     </button>
-                    {/* Designer Signature */}
-                    <div className="mt-4 pt-3 border-t border-dark-800/50">
+                    {/* Designer Signature + Version */}
+                    <div className="mt-4 pt-3 border-t border-dark-800/50 space-y-1">
                         <p className="text-[10px] tracking-[0.3em] uppercase text-dark-600/50 text-center font-light select-none">
                             Designed by{' '}
                             <span className="font-medium text-dark-500/60 tracking-[0.2em]">
                                 Murteza ALEMDAR
                             </span>
+                        </p>
+                        <p className="text-[9px] font-mono text-dark-600/35 text-center select-none">
+                            v{APP_VERSION}
                         </p>
                     </div>
                 </div>

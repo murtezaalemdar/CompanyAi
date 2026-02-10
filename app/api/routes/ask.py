@@ -211,7 +211,8 @@ async def ask_ai(
 @router.get("/health")
 async def health_check():
     """Servis sağlık kontrolü"""
-    return {"status": "healthy", "service": "Kurumsal AI Asistanı"}
+    from app.config import APP_VERSION
+    return {"status": "healthy", "service": "Kurumsal AI Asistanı", "version": APP_VERSION}
 
 
 @router.get("/llm/status")

@@ -274,7 +274,32 @@ def verify_deployment(ssh):
 
 
 def main():
-    print("=" * 60)
+    # ── VERSİYON KONTROLÜ ──────────────────────────────────────
+    # ÖNEMLI: Deploy öncesi versiyon numarasını güncellemeyi unutma!
+    #   Backend:  app/config.py → APP_VERSION
+    #   Frontend: frontend/src/constants.ts → APP_VERSION
+    # Her iki dosyadaki versiyon aynı olmalı!
+    try:
+        import re
+        config_path = Path("app/config.py")
+        const_path = Path("frontend/src/constants.ts")
+        be_ver = re.search(r'APP_VERSION\s*=\s*["\'](.+?)["\']', config_path.read_text()).group(1)
+        fe_ver = re.search(r'APP_VERSION\s*=\s*["\'](.+?)["\']', const_path.read_text()).group(1)
+        print(f"\n📋 Versiyon Kontrolü:")
+        print(f"   Backend  (config.py):    v{be_ver}")
+        print(f"   Frontend (constants.ts): v{fe_ver}")
+        if be_ver != fe_ver:
+            print(f"   ⚠️  UYARI: Backend ve Frontend versiyonları FARKLI!")
+            ans = input("   Devam etmek istiyor musunuz? (e/h): ").strip().lower()
+            if ans != 'e':
+                print("   ❌ Deploy iptal edildi. Versiyonları eşitleyin.")
+                return 1
+        else:
+            print(f"   ✅ Versiyonlar eşleşiyor: v{be_ver}")
+    except Exception as e:
+        print(f"   ⚠️  Versiyon okunamadı: {e}")
+
+    print("\n" + "=" * 60)
     print("  🚀 CompanyAi Deploy — 192.168.0.12")
     print("=" * 60)
 

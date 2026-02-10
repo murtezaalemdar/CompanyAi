@@ -12,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 import structlog
 
 from app.config import settings
+from app.config import APP_VERSION
 from app.db.database import engine, init_db
 from app.db.models import Base
 from app.api.routes import auth, ask, admin, documents, multimodal, memory, analyze, export
@@ -52,7 +53,7 @@ class CorrelationIDMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Uygulama başlangıç ve kapanış işlemleri"""
-    logger.info("app_starting", version="2.0.0")
+    logger.info("app_starting", version=APP_VERSION)
     
     # Veritabanı tablolarını oluştur
     async with engine.begin() as conn:
@@ -98,7 +99,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Kurumsal AI Asistanı",
     description="Local LLM tabanlı kurumsal yapay zeka asistanı",
-    version="2.1.0",
+    version=APP_VERSION,
     lifespan=lifespan,
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
@@ -159,7 +160,7 @@ async def root():
     """API ana sayfa"""
     return {
         "name": "Kurumsal AI Asistanı",
-        "version": "2.1.0",
+        "version": APP_VERSION,
         "status": "running",
         "docs": "/docs" if settings.DEBUG else "Disabled in production",
     }
@@ -170,7 +171,7 @@ async def health():
     """Gelişmiş sağlık kontrolü — DB, LLM, ChromaDB durumu"""
     from app.llm.client import ollama_client
     
-    checks = {"status": "healthy"}
+    checks = {"status": "healthy", "version": APP_VERSION}
     
     # DB kontrolü
     try:

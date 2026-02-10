@@ -1,5 +1,76 @@
 # Şirket AI Asistanı - Günlük Notlar
 
+## 📅 Tarih: 11 Şubat 2026 (Güncelleme 5)
+
+### 🧠 Qwen2.5:72B Model Yükseltmesi & 64GB RAM
+
+**Sunucu RAM:** 32GB → **64GB** yükseltildi.
+**Model:** `qwen2.5:72b` (47GB) — tamamen RAM'de çalışıyor, swap kullanımı 0.
+**Performans:** CPU-only (Intel Xeon 4316, 16-core), ~2 token/s, pattern yanıtlar <0.1s.
+
+| Parametre | Eski | Yeni | Neden |
+|-----------|------|------|-------|
+| `max_tokens` | 2048 | **512** | CPU'da gereksiz uzun yanıt üretimi engellemek (100s → ~25-30s) |
+| `num_thread` | default | **16** | 16 fiziksel çekirdek tam kullanım |
+| `swappiness` | 60 | **10** | Model'in swap'a düşmesini engellemek |
+| `timeout` | 120s | **900s** | CPU inference uzun sürdüğü için |
+
+**Değişen dosyalar:**
+- `app/llm/client.py` — max_tokens=512, num_thread=16, timeout=900
+- `app/core/engine.py` — explicit max_tokens=512
+- `app/config.py` — LLM_MODEL="qwen2.5:72b"
+- `companyai-backend.service` — Environment=LLM_MODEL=qwen2.5:72b
+- **Commit:** `7cb1148`
+
+### 🐛 "ismimle hitap et" Pattern Bug Düzeltmesi
+
+**Sorun:** Kullanıcı "bana ismimle hitap edersen sevinirim" deyince sistem "Murteza, memnun oldum Mehmet!" diye cevap veriyordu.
+**Kök neden:**
+1. `ismim` kelimesi "ismimle" içinde eşleşiyor → `introduction` kategorisine yönlendiriyordu
+2. `random.choice()` placeholder isimlerden "Mehmet"i getiriyordu
+**Çözüm:**
+1. Regex negative lookahead: `ismim\b(?!le|i|e|den|in)` — Türkçe ekleri geçiriyor
+2. "hitap/söyle/seslen/çağır" kelimeleri varsa pattern'i skip et
+3. Eğer gerçek isim bulunamazsa `None` dön → LLM'e yönlendir
+**Değişen dosya:** `app/llm/chat_examples.py`
+**Commit:** `e1bf035`
+
+### 📊 Analiz Sayfası RecursionError Düzeltmesi
+
+**Sorun:** Analiz sayfasında dosya keşfetme "pandas/openpyxl yüklü değil" hatası veriyordu.
+**Gerçek hata:** `RecursionError: maximum recursion depth exceeded` in `discover_data(df)`
+**Kök neden:** `parse_file_to_dataframe()` içinde `df.attrs['_sheets_data'] = sheets` satırı DataFrame nesnelerini attrs dict'ine koyuyordu. pandas 2.3.x'te `__finalize__` → `deepcopy(other.attrs)` sonsuz döngüye giriyordu.
+**Çözüm:**
+1. `_sheets_data` attrs'tan kaldırıldı
+2. `discover_data()` başında `df.attrs = {}` eklendi (güvenlik katmanı)
+3. `xlrd>=2.0.1` kuruldu (.xls desteği için)
+**Değişen dosyalar:**
+- `app/core/document_analyzer.py`
+- `requirements.txt` (xlrd eklendi)
+**Commit:** `6a1d0b6`
+
+### 🗄️ Veritabanı Şeması Yedeklendi
+
+DB şeması `docs/db_schema.sql` olarak export edildi (`pg_dump --schema-only`).
+**8 tablo:** users, audit_logs, chat_sessions, company_culture, conversation_memory, queries, system_settings, user_preferences
+**İlişkiler:** Tüm FK'lar `users(id)` referans alıyor.
+
+### 📈 Sunucu Durum Özeti (11 Şubat 2026)
+
+| Kaynak | Değer |
+|--------|-------|
+| RAM | 62Gi total, ~47Gi used (model), ~14Gi available |
+| Disk | 489GB, 137GB used, 331GB free (%30) |
+| Swap | 40GB (8+32), 263MB used (minimal) |
+| Ollama modelleri | qwen2.5:72b (47GB), gpt-oss:20b (13GB), llama3.1:8b (5GB), qwen2.5:7b (5GB), mistral (4GB) |
+| Servisler | companyai-backend ✅, ollama ✅, nginx ✅, postgresql ✅ |
+
+### ⚠️ Bilinen Sorun — ChromaDB Boyut Uyumsuzluğu
+
+ChromaDB koleksiyonu eski `MiniLM` modelle 384-dim olarak oluşturulmuş, ancak şu an `paraphrase-multilingual-mpnet-base-v2` 768-dim üretiyor. Koleksiyon yeniden oluşturulmalı.
+
+---
+
 ## 📅 Tarih: 10 Şubat 2026 (Güncelleme 4)
 
 ### ⏱️ LLM Timeout 15 Dakikaya Uzatıldı

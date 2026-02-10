@@ -3,6 +3,19 @@
 /api/chat endpoint'i kullanır (generate yerine).
 Bu, Mistral'in chat template'ini otomatik uygular ve
 çok daha iyi talimat takibi sağlar.
+
+╔═══════════════════════════════════════════════════════════════════╗
+║  ÖNEMLİ NOTLAR — Performans Parametreleri (11 Şubat 2026)       ║
+║                                                                   ║
+║  • timeout = 900s: GPU yok, CPU-only qwen2.5:72b (~2 tok/s).     ║
+║    GPU eklenirse 120s'ye geri çekilebilir.                        ║
+║  • max_tokens = 512: 2048'den düşürüldü. CPU'da gereksiz uzun    ║
+║    yanıt üretimi engelleniyor (100s→~25s kazanım).                ║
+║  • num_thread = 16: Intel Xeon 4316 16 fiziksel çekirdek.         ║
+║    CPU çekirdek sayısı DEĞİŞİRSE bu değer güncellenmelidir.      ║
+║  • connection_pooling: Her istekte yeni HTTP client oluşturmak    ║
+║    yerine tek persistent client kullanılıyor (max 10 conn).       ║
+╚═══════════════════════════════════════════════════════════════════╝
 """
 
 import httpx
@@ -100,8 +113,8 @@ class OllamaClient:
                 "stream": False,
                 "options": {
                     "temperature": temperature,
-                    "num_predict": max_tokens,
-                    "num_thread": 16,
+                    "num_predict": max_tokens,        # ÖNEMLİ: 512 → CPU'da kısa yanıt → hız artışı
+                    "num_thread": 16,                  # ÖNEMLİ: Xeon 4316 16-core, CPU değişirse güncelle
                 },
             }
 

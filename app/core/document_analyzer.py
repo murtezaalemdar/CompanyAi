@@ -104,7 +104,11 @@ def discover_data(df: pd.DataFrame) -> dict:
     """
     DataFrame'i otomatik keşfet — sütun tipleri, istatistikler, ilişkiler.
     """
-    # pandas 2.3.x deepcopy recursion bug'ını önle
+    # ÖNEMLİ BUG FIX (commit 6a1d0b6): pandas 2.3.x deepcopy recursion bug
+    # pandas 2.3.x'te DataFrame.__finalize__() deepcopy(other.attrs) çağırıyor.
+    # Eğer attrs içinde başka DataFrame nesneleri varsa (ör: _sheets_data)
+    # sonsuz döngüye girer → RecursionError. Bu satır attrs'u TEMİZLER.
+    # parse_file_to_dataframe() sheets bilgisini artık attrs'a koymaz.
     df.attrs = {}
     
     info = {

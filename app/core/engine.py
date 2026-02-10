@@ -89,7 +89,9 @@ async def process_question(
                 dept=context["dept"], needs_web=needs_web)
     
     # ── HIZLI SOHBET YOLU ── Kalıp eşleşmesi varsa LLM'e gitmeden cevapla
-    # NOT: Kullanıcı kimliği/hafıza soruları hızlı yoldan çıkarılır → LLM'e gider
+    # ÖNEMLİ: Kimlik/hafıza soruları ("beni tanıyor musun", "ismimi biliyor musun")
+    # pattern matcher'a girmeden LLM'e yönlendirilir. Çünkü pattern matcher kullanıcı
+    # ismi hafızasına erişemez, sadece LLM context'inde user_name bilgisi var.
     _is_identity_question = bool(re.search(
         r"(beni\s*tanı|ismimi|adımı|hatırlıyor|biliyor\s*mu|kim\s*olduğ|tanıyor\s*mu)",
         question.lower()

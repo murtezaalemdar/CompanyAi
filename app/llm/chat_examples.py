@@ -100,6 +100,11 @@ def _match_pattern_category(question: str) -> Optional[str]:
     
     # İsim tanıtma — SORU DEĞİLSE ("benim ismim ne" gibi sorular LLM'e gitsin)
     # "ismimle hitap et" gibi ricalar DA hariç — bunlar LLM'e gitmeli
+    # ÖNEMLİ BUG FIX (commit e1bf035):
+    #   - ismim\b(?!le|i|e|den|in) → Türkçe eklerini negative lookahead ile hariç tutar
+    #     Örn: "ismimle" → match ETMEZ, "ismim Murteza" → match EDER
+    #   - "hitap/söyle/seslen/çağır" → rica cümleleri LLM'e yönlendirilir
+    #   - Eğer regex match ederse ama isim parse edilemezse → None döner (LLM'e gider)
     if not _is_question(q) and not re.search(r"(hitap|söyle|seslen|çağır)", q):
         if re.search(r"(benim\s*adım|adım\s+\w|ben\s+[A-ZÇĞİÖŞÜa-zçğıöşü]{2,}$|ismim\b(?!le|i|e|den|in))", q):
             return "introduction"

@@ -29,6 +29,8 @@ import clsx from 'clsx'
 import FileUploadModal from '../components/FileUploadModal'
 import WeatherCard from '../components/WeatherCard'
 import ImageResultsCard from '../components/ImageResultsCard'
+import ExportCard from '../components/ExportCard'
+import QuickExportButtons from '../components/QuickExportButtons'
 import { useAuth } from '../contexts/AuthContext'
 import { DEPARTMENTS }  from '../constants'
 
@@ -527,6 +529,7 @@ export default function Ask() {
                                     <div key={cardIdx}>
                                         {card.type === 'weather' && <WeatherCard data={card} />}
                                         {card.type === 'images' && <ImageResultsCard data={card} />}
+                                        {card.type === 'export' && <ExportCard data={card} />}
                                     </div>
                                 ))}
 
@@ -547,6 +550,11 @@ export default function Ask() {
                                             </span>
                                         )}
                                     </div>
+                                )}
+
+                                {/* Her assistant mesajında export butonları */}
+                                {msg.role === 'assistant' && msg.content && msg.content.length > 50 && (
+                                    <QuickExportButtons content={msg.content} />
                                 )}
                             </div>
                         </div>

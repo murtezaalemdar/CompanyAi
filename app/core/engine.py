@@ -37,6 +37,14 @@ except ImportError:
     WEB_SEARCH_AVAILABLE = False
     search_and_summarize = None
 
+# Export modülü
+try:
+    from app.core.export_service import detect_export_request, generate_export, FORMAT_LABELS
+    EXPORT_AVAILABLE = True
+except ImportError:
+    EXPORT_AVAILABLE = False
+    detect_export_request = lambda q: None
+
 logger = structlog.get_logger()
 
 
@@ -202,6 +210,36 @@ async def process_question(
     if web_results:
         sources.append("İnternet Araması")
     
+    # Rich data listesi
+    rich_data = web_rich_data if web_rich_data else []
+    if not isinstance(rich_data, list):
+        rich_data = [rich_data]
+    
+    # 6b. Export talebi varsa dosya üret
+    export_format = None
+    if EXPORT_AVAILABLE:
+        export_format = detect_export_request(question)
+    
+    if export_format and llm_answer and not llm_answer.startswith("[Hata]"):
+        try:
+            # Başlığı sorudan çıkar
+            export_title = question.strip()[:60].rstrip("?.!")
+            export_result = generate_export(llm_answer, export_format, export_title)
+            if export_result:
+                fmt_info = FORMAT_LABELS.get(export_format, {})
+                rich_data.append({
+                    "type": "export",
+                    "file_id": export_result["file_id"],
+                    "filename": export_result["filename"],
+                    "format": export_format,
+                    "format_label": fmt_info.get("label", export_format),
+                    "format_icon": fmt_info.get("icon", "📄"),
+                    "download_url": f"/api/export/download/{export_result['file_id']}",
+                })
+                logger.info("export_auto_generated", format=export_format, file_id=export_result["file_id"])
+        except Exception as e:
+            logger.warning("export_auto_failed", error=str(e))
+    
     result = {
         "answer": llm_answer,
         "department": context["dept"],
@@ -211,7 +249,7 @@ async def process_question(
         "confidence": 0.85 if not relevant_docs else 0.92,
         "sources": sources,
         "web_searched": web_results is not None,
-        "rich_data": web_rich_data,
+        "rich_data": rich_data if rich_data else None,
     }
     
     # 7. Hafızaya kaydet (öğrenme)

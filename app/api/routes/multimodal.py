@@ -56,7 +56,7 @@ class MultimodalResponse(BaseModel):
     confidence: float
     processing_time_ms: int
     files_processed: int
-    rich_data: Optional[dict] = None
+    rich_data: Optional[list] = None
 
 
 def get_file_type(content_type: str) -> str:

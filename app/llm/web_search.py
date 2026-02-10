@@ -44,7 +44,7 @@ def _google_configured() -> bool:
 # SerpAPI — Google Arama Sonuçları
 # ──────────────────────────────────────────────
 
-async def _search_serpapi(query: str, max_results: int = 5) -> Tuple[List[Dict[str, str]], Optional[Dict]]:
+async def _search_serpapi(query: str, max_results: int = 5) -> Tuple[List[Dict[str, str]], Optional[List[Dict]]]:
     """
     SerpAPI ile Google arama sonuçlarını çeker.
     
@@ -52,10 +52,10 @@ async def _search_serpapi(query: str, max_results: int = 5) -> Tuple[List[Dict[s
     Döküman: https://serpapi.com/search-api
     
     Returns:
-        (results, rich_data) — rich_data hava durumu gibi yapısal veri içerir
+        (results, rich_data) — rich_data hava durumu, görseller gibi yapısal veri listesi içerir
     """
     results = []
-    rich_data = None
+    rich_data = []
     
     try:
         async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
@@ -90,8 +90,9 @@ async def _search_serpapi(query: str, max_results: int = 5) -> Tuple[List[Dict[s
             # Hava durumu sonucu
             ab_type = answer_box.get("type", "")
             if ab_type == "weather_result" or "temperature" in answer_box:
-                rich_data = _extract_weather_data(answer_box, data)
-                logger.info("serpapi_weather_detected", location=rich_data.get("location", ""))
+                weather = _extract_weather_data(answer_box, data)
+                rich_data.append(weather)
+                logger.info("serpapi_weather_detected", location=weather.get("location", ""))
             
             # Metin answer box
             if answer_box.get("snippet") or answer_box.get("answer"):
@@ -114,7 +115,25 @@ async def _search_serpapi(query: str, max_results: int = 5) -> Tuple[List[Dict[s
             })
         
         logger.info("serpapi_search_ok", query=query[:80], results=len(results),
-                    has_rich_data=rich_data is not None)
+                    has_rich_data=len(rich_data) > 0)
+        
+        # Inline görseller — Google görsel sonuçları (normal aramada varsa)
+        inline_images = data.get("inline_images", [])
+        if inline_images:
+            images_card = _extract_image_results(inline_images, query)
+            if images_card:
+                rich_data.append(images_card)
+                logger.info("serpapi_images_detected", count=len(images_card.get("images", [])))
+        
+        # Eğer inline görseller yoksa ve sorgu görsele uygunsa, Google Images engine dene
+        if not inline_images and _query_needs_images(query):
+            try:
+                images_card = await _search_serpapi_images(query)
+                if images_card:
+                    rich_data.append(images_card)
+                    logger.info("serpapi_images_secondary", count=len(images_card.get("images", [])))
+            except Exception as img_err:
+                logger.warning("serpapi_images_fallback_error", error=str(img_err))
         
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
@@ -128,7 +147,115 @@ async def _search_serpapi(query: str, max_results: int = 5) -> Tuple[List[Dict[s
     except Exception as e:
         logger.error("serpapi_error", error=str(e))
     
-    return results, rich_data
+    return results, rich_data if rich_data else None
+
+
+# ──────────────────────────────────────────────
+# Görsel Arama Yardımcıları
+# ──────────────────────────────────────────────
+
+# Görsel arama tetikleyen kelimeler
+_IMAGE_KEYWORDS = {
+    "örnek", "örnekleri", "örneği", "görseli", "görselleri", "görsel",
+    "resim", "resimleri", "fotoğraf", "fotoğrafları", "model", "modelleri",
+    "desen", "desenleri", "kalıp", "kalıpları", "çizim", "çizimleri",
+    "tasarım", "tasarımları", "numune", "numuneleri", "katalog", "kataloğu",
+    "renk", "renkleri", "baskı", "baskıları", "kumaş", "kumaşları",
+    "nasıl görünür", "göster", "nedir", "şekil", "şekilleri",
+}
+
+
+def _query_needs_images(query: str) -> bool:
+    """Sorgunun görsel sonuçlara ihtiyaç duyup duymadığını belirler."""
+    query_lower = query.lower()
+    # Hava durumu sorgularında görsele gerek yok
+    weather_words = {"hava", "sıcaklık", "derece", "yağmur", "kar", "rüzgar"}
+    if any(w in query_lower for w in weather_words):
+        return False
+    # Görsel tetikleyici kelimeler
+    return any(kw in query_lower for kw in _IMAGE_KEYWORDS)
+
+
+async def _search_serpapi_images(query: str, max_images: int = 12) -> Optional[Dict]:
+    """SerpAPI Google Images engine ile görsel arama yapar.
+    
+    Bu fonksiyon ayrı bir API çağrısı yapar (kota kullanır).
+    Sadece sorgu görsele uygun olduğunda çağrılmalı.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+            response = await client.get(
+                SERPAPI_URL,
+                params={
+                    "api_key": settings.SERPAPI_KEY,
+                    "engine": "google_images",
+                    "q": query,
+                    "num": max_images,
+                    "hl": "tr",
+                    "gl": "tr",
+                    "safe": "active",
+                    "no_cache": "false",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+        
+        images_results = data.get("images_results", [])
+        if not images_results:
+            return None
+        
+        images = []
+        for img in images_results[:max_images]:
+            src = img.get("original") or img.get("thumbnail", "")
+            if not src:
+                continue
+            images.append({
+                "src": src,
+                "thumbnail": img.get("thumbnail", src),
+                "title": img.get("title", ""),
+                "source": img.get("source", ""),
+                "link": img.get("link", ""),
+            })
+        
+        if not images:
+            return None
+        
+        logger.info("serpapi_google_images_ok", query=query[:60], count=len(images))
+        return {
+            "type": "images",
+            "query": query,
+            "images": images,
+            "source": "Google Görseller",
+        }
+    except Exception as e:
+        logger.warning("serpapi_google_images_error", error=str(e))
+        return None
+
+
+def _extract_image_results(inline_images: list, query: str) -> Optional[Dict]:
+    """SerpAPI inline_images verilerinden görsel kart verisi çıkar."""
+    images = []
+    for img in inline_images[:12]:  # Max 12 görsel
+        src = img.get("original") or img.get("thumbnail", "")
+        if not src:
+            continue
+        images.append({
+            "src": src,
+            "thumbnail": img.get("thumbnail", src),
+            "title": img.get("title", ""),
+            "source": img.get("source", ""),
+            "link": img.get("link", ""),
+        })
+    
+    if not images:
+        return None
+    
+    return {
+        "type": "images",
+        "query": query,
+        "images": images,
+        "source": "Google Görseller",
+    }
 
 
 def _extract_weather_data(answer_box: dict, full_data: dict) -> Dict:
@@ -343,7 +470,7 @@ async def _search_ddg_html(query: str, max_results: int = 3) -> List[Dict[str, s
 # Ana Arama Fonksiyonu
 # ──────────────────────────────────────────────
 
-async def search_web(query: str, max_results: int = 5) -> Tuple[List[Dict[str, str]], Optional[Dict]]:
+async def search_web(query: str, max_results: int = 5) -> Tuple[List[Dict[str, str]], Optional[List[Dict]]]:
     """
     Web araması yapar. Öncelik sırasına göre dener:
     
@@ -353,7 +480,7 @@ async def search_web(query: str, max_results: int = 5) -> Tuple[List[Dict[str, s
     4. DuckDuckGo HTML scraping (son çare)
     
     Returns:
-        (results, rich_data) — rich_data hava durumu gibi görsel kart verisi
+        (results, rich_data) — rich_data hava durumu/görseller gibi görsel kart verisi listesi
     """
     results = []
     rich_data = None
@@ -399,12 +526,12 @@ async def search_web(query: str, max_results: int = 5) -> Tuple[List[Dict[str, s
     return results[:max_results], rich_data
 
 
-async def search_and_summarize(query: str) -> Tuple[Optional[str], Optional[Dict]]:
+async def search_and_summarize(query: str) -> Tuple[Optional[str], Optional[List[Dict]]]:
     """
     Arama yap ve sonuçları LLM prompt'una eklenecek formatta döndür.
     
     Returns:
-        (text_summary, rich_data) — rich_data hava durumu gibi görsel kart verisi
+        (text_summary, rich_data) — rich_data görsel kart verisi listesi
     """
     results, rich_data = await search_web(query, max_results=5)
     

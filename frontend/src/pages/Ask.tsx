@@ -28,6 +28,7 @@ import {
 import clsx from 'clsx'
 import FileUploadModal from '../components/FileUploadModal'
 import WeatherCard from '../components/WeatherCard'
+import ImageResultsCard from '../components/ImageResultsCard'
 import { useAuth } from '../contexts/AuthContext'
 import { DEPARTMENTS }  from '../constants'
 
@@ -521,10 +522,13 @@ export default function Ask() {
 
                                 <div className="whitespace-pre-wrap">{msg.content}</div>
 
-                                {/* Rich Data — Hava Durumu Kartı vb. */}
-                                {msg.rich_data && msg.rich_data.type === 'weather' && (
-                                    <WeatherCard data={msg.rich_data} />
-                                )}
+                                {/* Rich Data — Hava Durumu, Görsel Arama Kartları vb. */}
+                                {msg.rich_data && Array.isArray(msg.rich_data) && msg.rich_data.map((card: any, cardIdx: number) => (
+                                    <div key={cardIdx}>
+                                        {card.type === 'weather' && <WeatherCard data={card} />}
+                                        {card.type === 'images' && <ImageResultsCard data={card} />}
+                                    </div>
+                                ))}
 
                                 {msg.role === 'assistant' && msg.metadata && (
                                     <div className="mt-3 pt-3 border-t border-dark-700/50 flex flex-wrap gap-2 text-xs">

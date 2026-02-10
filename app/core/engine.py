@@ -147,6 +147,8 @@ async def process_question(
             logger.error("rag_search_error", error=str(e))
     
     # Web araması
+    web_results = None
+    web_rich_data = None
     if WEB_SEARCH_AVAILABLE and search_and_summarize:
         should_search_web = (
             needs_web or 

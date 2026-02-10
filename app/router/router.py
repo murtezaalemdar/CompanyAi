@@ -90,6 +90,12 @@ KNOWLEDGE_PATTERNS = [
     r"\b(fiyat|döviz|kur|borsa|altın|bitcoin)\b",
     r"\b(dünya|hava\s*durumu|spor|futbol|maç)\b",
     r"\b(araştır|bul|internet|web|google)\b",
+    # Örnek / görsek / bilgi talepleri
+    r"\b(örnek|örneği|örnekleri|numune)\b",
+    r"\b(göster|gösterir\s*misin|görebilir\s*miyim)\b",
+    r"\b(nasıl\s*yapılır|nasıl\s*olur|ne\s*işe\s*yarar)\b",
+    r"\bver(ir\s*misin|ebilir\s*misin|sene|\s*bana)\b",
+    r"\b(baskı|matbaa|tasarım|desen|model|çeşit|tür)\b",
 ]
 
 

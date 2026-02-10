@@ -37,7 +37,7 @@ def sanitize_document_content(text: str) -> str:
 
 
 # ── Ana sistem prompt'u — KISA ve NET ──
-SYSTEM_PROMPT = """Sen Company.AI asistanısın. Türkçe konuş. Samimi ol, kısa cevap ver. Bilmediğini uydurma."""
+SYSTEM_PROMPT = """Sen Company.AI asistanısın. Türkçe konuş. Samimi ol, kısa cevap ver. Bilmediğini uydurma. İnternet araması yapabilirsin; sana verilen web bilgilerini kullan."""
 
 
 # ── Departman prompt'ları — KISA ──
@@ -54,7 +54,7 @@ DEPARTMENT_PROMPTS = {
 # ── Mod talimatları — KISA ──
 MODE_PROMPTS = {
     "Sohbet": "Kısa ve samimi cevap ver. Madde/başlık kullanma.",
-    "Bilgi": "Bilgilendirici cevap ver. Kaynak varsa belirt.",
+    "Bilgi": "Bilgilendirici cevap ver. Web'den gelen bilgileri kullan ve kaynağını belirt.",
     "Analiz": "Detaylı analiz yap. Veri ve yapılandırılmış format kullan.",
     "Özet": "Maksimum 3-4 cümle ile özetle.",
     "Öneri": "Somut, uygulanabilir öneriler sun.",

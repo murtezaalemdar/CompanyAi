@@ -165,9 +165,9 @@ async def process_question(
     # Kalıcı hafıza bağlamı — PostgreSQL'den gelen kullanıcı bilgileri + geçmiş
     if memory_context:
         system_prompt += f"\n\n{memory_context}"    
-    # Web sonuçlarını KISA ekle
+    # Web sonuçlarını prompt'a ekle
     if web_results:
-        system_prompt += f"\nWeb bilgisi: {web_results[:300]}"
+        system_prompt += f"\n\nAşağıda internetten bulunan güncel bilgiler var. Bu bilgileri kullanarak yanıt ver:\n{web_results[:1500]}"
     
     # Chat history — system prompt'a DEĞİL, client'a ayrı gönder
     # Her intent'te (sohbet dahil) geçmişi gönder — "biraz daha basit anlat" gibi takip soruları için

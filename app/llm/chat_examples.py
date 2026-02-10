@@ -160,8 +160,24 @@ def get_pattern_response(question: str) -> Optional[str]:
     if not examples:
         return None
     
-    # Rastgele bir yanıt seç (çeşitlilik için)
-    example = random.choice(examples)
+    # Selamlaşma: kullanıcının selamına uygun yanıtı seç (merhaba→merhaba, selam→selam)
+    if category == "greetings":
+        q = question.lower().strip()
+        # Önce en iyi eşleşmeyi bul
+        best = None
+        for ex in examples:
+            ex_user = ex.get("user", "").lower()
+            if ex_user in q or q in ex_user:
+                best = ex
+                break
+        if not best:
+            # "Selamün aleyküm" yanıtını hariç tut, genel selamlardan seç
+            safe = [ex for ex in examples if "aleyküm" not in ex.get("ai", "").lower()]
+            best = random.choice(safe) if safe else random.choice(examples)
+        example = best
+    else:
+        # Diğer kategoriler: rastgele bir yanıt seç (çeşitlilik için)
+        example = random.choice(examples)
     response = example.get("ai")
     
     # İsim tanıtma: yanıttaki örnek ismi gerçek isimle değiştir

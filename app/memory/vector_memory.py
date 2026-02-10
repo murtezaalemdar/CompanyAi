@@ -298,7 +298,7 @@ class VectorMemory:
                     "total_entries": count,
                     "by_department": departments,
                     "persist_directory": self.persist_directory,
-                    "embedding_model": "all-MiniLM-L6-v2" if self._embedding_model else "chromadb_default",
+                    "embedding_model": "paraphrase-multilingual-mpnet-base-v2" if self._embedding_model else "chromadb_default",
                 }
             except Exception as e:
                 logger.error("chromadb_stats_failed", error=str(e))

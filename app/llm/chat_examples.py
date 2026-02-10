@@ -99,8 +99,10 @@ def _match_pattern_category(question: str) -> Optional[str]:
         return "greetings"
     
     # İsim tanıtma — SORU DEĞİLSE ("benim ismim ne" gibi sorular LLM'e gitsin)
-    if not _is_question(q) and re.search(r"(benim\s*adım|adım\s+\w|ben\s+[A-ZÇĞİÖŞÜa-zçğıöşü]{2,}$|ismim)", q):
-        return "introduction"
+    # "ismimle hitap et" gibi ricalar DA hariç — bunlar LLM'e gitmeli
+    if not _is_question(q) and not re.search(r"(hitap|söyle|seslen|çağır)", q):
+        if re.search(r"(benim\s*adım|adım\s+\w|ben\s+[A-ZÇĞİÖŞÜa-zçğıöşü]{2,}$|ismim\b(?!le|i|e|den|in))", q):
+            return "introduction"
     
     # Şirket/fabrika adı tanıtma — SORU DEĞİLSE
     if not _is_question(q):
@@ -191,6 +193,9 @@ def get_pattern_response(question: str) -> Optional[str]:
             real_name = name_match.group(1).capitalize()
             for placeholder in ["Ali", "Ayşe", "Mehmet", "Murteza"]:
                 response = response.replace(placeholder, real_name)
+        else:
+            # İsim bulunamadıysa placeholder kalır — LLM'e yönlendir
+            return None
     
     # Şirket/fabrika adı tanıtma: ismi çıkar ve yerleştir
     if category == "company_introduction" and response:

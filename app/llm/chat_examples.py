@@ -81,8 +81,11 @@ def _is_question(text: str) -> bool:
     # Soru ekleri veya soru işareti
     if "?" in q:
         return True
-    # Türkçe soru kalıpları
-    if re.search(r"\b(ne|nedir|nerede|nasıl|niçin|neden|niye|kaç|kim|hangi|mi|mı|mu|mü|mısın|misin)\b", q):
+    # Türkçe soru kalıpları (ayrık ve bitişik yazım)
+    if re.search(r"\b(ne|nedir|nerede|nasıl|niçin|neden|niye|kaç|kim|hangi)\b", q):
+        return True
+    # Soru ekleri — ayrık ve bitişik (biliyormusun, tanıyormusun, hatırlıyormusun)
+    if re.search(r"(m[iıuü]s[iıuü]n|m[iıuü]y[iıuü][mz]|\bm[iıuü]\b)", q):
         return True
     return False
 
@@ -110,8 +113,11 @@ def _match_pattern_category(question: str) -> Optional[str]:
     if re.search(r"(nasılsın|naber|ne\s*haber|iyi\s*misin|keyfin|keyifler)", q):
         return "how_are_you"
     
-    # Kimlik
+    # Kimlik — "sen kimsin" gibi AI hakkında sorular (kullanıcı İSMİ soruları HERİÇ)
     if re.search(r"(sen\s*kim|adın\s*ne|ne\s*yapabilir|robot\s*mu|yapay\s*zeka)", q):
+        # "beni tanıyor musun", "ismimi biliyor musun" gibi sorular PATTERNSIZ — LLM'e gitsin
+        if re.search(r"(beni|ismimi|adımı|hatırl|tanı|biliy)", q):
+            return None
         return "identity"
     
     # Teşekkür

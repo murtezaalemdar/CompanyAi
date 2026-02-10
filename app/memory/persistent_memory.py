@@ -17,11 +17,22 @@ from app.db.models import ConversationMemory, UserPreference, ChatSession, Compa
 logger = structlog.get_logger()
 
 # ── Kullanıcı bilgi çıkarma kalıpları ──
+
+# Soru cümlelerinde geçen kelimeler — isim OLARAK kaydedilmemeli
+_QUESTION_WORDS = {
+    "ne", "kim", "nasıl", "nere", "nerede", "neden", "niçin", "hangi",
+    "kaç", "niye", "mi", "mı", "mu", "mü", "hayır", "evet", "yok",
+    "var", "bu", "şu", "o", "sen", "ben", "biz", "siz", "onlar",
+    "benim", "senin", "kendi", "da", "de", "ki", "ama", "fakat",
+    "beni", "seni", "tamam", "peki", "acaba", "galiba",
+}
+
 PREFERENCE_PATTERNS = [
-    # İsim bildirme
-    (r"(?:benim\s+)?ad[ıi]m\s+([A-ZÇĞİÖŞÜa-zçğıöşü]+)", "user_name", "İsmini söyledi"),
-    (r"ben\s+([A-ZÇĞİÖŞÜ][a-zçğıöşü]+)\b", "user_name", "Kendini tanıttı"),
-    (r"ismim\s+([A-ZÇĞİÖŞÜa-zçğıöşü]+)", "user_name", "İsmini söyledi"),
+    # İsim bildirme — soru kalıplarını dışla
+    (r"(?:benim\s+)?ad[\u0131i]m\s+([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+)?)", "user_name", "İsmini söyledi"),
+    (r"bana\s+([A-ZÇĞİÖŞÜ][a-zçğıöşü]+)\s+(?:de|diye|diyebilirsin|derler)", "user_name", "İsmini söyledi"),
+    (r"ismim\s+([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+)?)", "user_name", "İsmini söyledi"),
+    (r"ben\s+([A-ZÇĞİÖŞÜ][a-zçğıöşü]{2,}(?:\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]{2,})?)\b(?!\s*(?:mi|mı|mu|mü|de|da|\?))", "user_name", "Kendini tanıttı"),
     # Departman bildirme
     (r"(?:ben\s+)?([A-ZÇĞİÖŞÜa-zçğıöşü]+)\s+departmanında(?:yım|çalışıyorum)", "user_department", "Departman söyledi"),
     (r"(?:ben\s+)?([A-ZÇĞİÖŞÜa-zçğıöşü]+)\s+bölümünde(?:yim|çalışıyorum)", "user_department", "Departman söyledi"),
@@ -91,8 +102,16 @@ def extract_preferences(text: str) -> list[dict]:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             value = match.group(1).strip()
-            if len(value) >= 2:  # Çok kısa eşleşmeleri atla
-                found.append({"key": key, "value": value, "source": source})
+            # Soru kelimeleri ve çok kısa değerleri filtrele
+            if len(value) < 2:
+                continue
+            if value.lower() in _QUESTION_WORDS:
+                continue
+            # "adım ne" / "ismim ne" gibi soruları atla
+            remaining = text[match.end():].strip()[:20].lower()
+            if remaining.startswith("?") or value.lower().endswith("mi") or value.lower().endswith("mı"):
+                continue
+            found.append({"key": key, "value": value, "source": source})
     return found
 
 

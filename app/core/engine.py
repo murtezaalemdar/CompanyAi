@@ -4,6 +4,7 @@ RAG + Web Arama + Semantik Hafıza + Kişiselleştirme
 """
 
 from typing import Optional
+import re
 import structlog
 
 from app.router.router import decide
@@ -88,7 +89,13 @@ async def process_question(
                 dept=context["dept"], needs_web=needs_web)
     
     # ── HIZLI SOHBET YOLU ── Kalıp eşleşmesi varsa LLM'e gitmeden cevapla
-    if intent == "sohbet" and CHAT_EXAMPLES_AVAILABLE:
+    # NOT: Kullanıcı kimliği/hafıza soruları hızlı yoldan çıkarılır → LLM'e gider
+    _is_identity_question = bool(re.search(
+        r"(beni\s*tanı|ismimi|adımı|hatırlıyor|biliyor\s*mu|kim\s*olduğ|tanıyor\s*mu)",
+        question.lower()
+    ))
+    
+    if intent == "sohbet" and CHAT_EXAMPLES_AVAILABLE and not _is_identity_question:
         pattern_answer = get_pattern_response(question)
         if pattern_answer:
             # Kişiselleştirme ekle
@@ -169,12 +176,19 @@ async def process_question(
     else:
         system_prompt, user_prompt = build_prompt(question, context)
     
-    # Kişiselleştirme — tek satır
+    # Kişiselleştirme — kullanıcı kimliği (LLM bunun üzerinden hitap eder)
     if user_name:
-        system_prompt += f"\nKullanıcı: {user_name}"    
+        system_prompt += (f"\n\nÖNEMLİ: Şu an seninle konuşan kullanıcının adı '{user_name}'.\n"
+                         f"Kullanıcı sana adını veya kim olduğunu sorarsa kesinlikle '{user_name}' olarak cevap ver.\n"
+                         f"Her zaman kullanıcıya '{user_name.split()[0]}' diye hitap edebilirsin.")    
     # Kalıcı hafıza bağlamı — PostgreSQL'den gelen kullanıcı bilgileri + geçmiş
     if memory_context:
-        system_prompt += f"\n\n{memory_context}"    
+        system_prompt += f"\n\nKullanıcı Hafızası (geçmiş konusmalardan öğrenilen bilgiler):\n{memory_context}"    
+    
+    # Kullanıcı kimliği tekrar (LLM recency bias — son gelen bilgi güçlü)
+    if user_name:
+        system_prompt += f"\n\nHATIRLATMA: Kullanıcının adı kesinlikle '{user_name}'. Geçmiş konuşmalardaki farklı isimler BAŞKA kişilere aittir."
+    
     # Web sonuçlarını prompt'a ekle
     if web_results:
         system_prompt += f"\n\nAşağıda internetten bulunan güncel bilgiler var. Bu bilgileri kullanarak yanıt ver:\n{web_results[:1500]}"

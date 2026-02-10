@@ -6,7 +6,7 @@
 # ║  Örn: 2.5.0 → büyük özellik, 2.5.1 → bug fix                 ║
 # ║  Frontend tarafı: frontend/src/constants.ts → APP_VERSION       ║
 # ╚═════════════════════════════════════════════════════════════════╝
-APP_VERSION = "2.5.0"
+APP_VERSION = "2.6.0"
 
 from pydantic_settings import BaseSettings
 from typing import List

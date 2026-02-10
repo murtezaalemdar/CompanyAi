@@ -14,7 +14,7 @@ from app.memory.persistent_memory import (
     get_conversation_history, get_conversation_count,
     get_preferences, forget_everything, save_preference,
     get_active_session, get_session_messages, list_user_sessions,
-    switch_to_session, create_session,
+    switch_to_session, create_session, delete_session,
 )
 
 router = APIRouter()
@@ -212,3 +212,17 @@ async def create_new_chat_session(
     session_id = await create_session(db, current_user.id)
     await db.commit()
     return {"session_id": session_id, "title": "Yeni Sohbet"}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_chat_session(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Belirli bir sohbet oturumunu sil (mesajlarıyla birlikte)"""
+    success = await delete_session(db, current_user.id, session_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Oturum bulunamadı veya silinemedi")
+    await db.commit()
+    return {"success": True, "deleted_session_id": session_id}

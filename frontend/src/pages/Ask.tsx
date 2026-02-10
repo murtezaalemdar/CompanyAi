@@ -59,6 +59,8 @@ interface ChatSessionInfo {
     title: string
     is_active?: boolean
     created_at: string
+    updated_at?: string
+    message_count?: number
 }
 
 export default function Ask() {
@@ -167,6 +169,34 @@ export default function Ask() {
         }
     }
 
+    // Oturumları tarih gruplarına ayır
+    const groupSessionsByDate = (sessionList: ChatSessionInfo[]) => {
+        const now = new Date()
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const yesterday = new Date(today.getTime() - 86400000)
+        const weekAgo = new Date(today.getTime() - 7 * 86400000)
+        const monthAgo = new Date(today.getTime() - 30 * 86400000)
+
+        const groups: { label: string; sessions: ChatSessionInfo[] }[] = [
+            { label: 'Bugün', sessions: [] },
+            { label: 'Dün', sessions: [] },
+            { label: 'Bu Hafta', sessions: [] },
+            { label: 'Bu Ay', sessions: [] },
+            { label: 'Daha Eski', sessions: [] },
+        ]
+
+        for (const s of sessionList) {
+            const d = new Date(s.updated_at || s.created_at)
+            if (d >= today) groups[0].sessions.push(s)
+            else if (d >= yesterday) groups[1].sessions.push(s)
+            else if (d >= weekAgo) groups[2].sessions.push(s)
+            else if (d >= monthAgo) groups[3].sessions.push(s)
+            else groups[4].sessions.push(s)
+        }
+
+        return groups.filter(g => g.sessions.length > 0)
+    }
+
     // Oturum değiştir
     const handleSwitchSession = async (sessionId: number) => {
         try {
@@ -192,6 +222,24 @@ export default function Ask() {
                 setMessages([])
             }
             setShowSessions(false)
+        } catch {
+            // sessiz geç
+        }
+    }
+
+    // Tekil oturumu sil
+    const handleDeleteSession = async (e: React.MouseEvent, sessionId: number) => {
+        e.stopPropagation()
+        try {
+            await aiApi.deleteSession(sessionId)
+            // Eğer silinen oturum aktif ise yeni sohbet başlat
+            if (sessionId === currentSessionId) {
+                const data = await aiApi.createNewSession()
+                setCurrentSessionId(data.session_id)
+                setMessages([])
+            }
+            // Listeyi güncelle
+            setSessions(prev => prev.filter(s => s.id !== sessionId))
         } catch {
             // sessiz geç
         }
@@ -233,6 +281,8 @@ export default function Ask() {
                 },
             }
             setMessages((prev) => [...prev, botMessage])
+            // Mesaj gönderildikten sonra oturum listesini yenile (başlık güncellenmesi için)
+            loadSessions()
         },
         onError: (error) => {
             const errorMessage: Message = {
@@ -646,7 +696,7 @@ export default function Ask() {
                             {/* Session History Button */}
                             <button
                                 type="button"
-                                onClick={() => { setShowSessions(!showSessions); if (!sessionsLoaded) loadSessions(); }}
+                                onClick={() => { setShowSessions(!showSessions); loadSessions(); }}
                                 className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs text-dark-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors"
                                 title="Sohbet geçmişi"
                             >
@@ -813,58 +863,102 @@ export default function Ask() {
             {/* Session History Sidebar */}
             {showSessions && (
                 <div className="fixed inset-0 z-50 flex" onClick={() => setShowSessions(false)}>
-                    <div className="absolute inset-0 bg-black/50" />
+                    <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
                     <div
-                        className="relative ml-auto w-80 max-w-[85vw] h-full bg-dark-900 border-l border-dark-700 shadow-xl overflow-y-auto"
+                        className="relative ml-auto w-80 max-w-[85vw] h-full bg-dark-900 border-l border-dark-700 shadow-2xl flex flex-col"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="sticky top-0 bg-dark-900 border-b border-dark-700 p-4 flex items-center justify-between">
+                        {/* Header */}
+                        <div className="shrink-0 bg-dark-900/95 backdrop-blur border-b border-dark-700 p-4 flex items-center justify-between">
                             <h3 className="text-white font-semibold flex items-center gap-2">
-                                <History className="w-4 h-4 text-primary-400" />
+                                <History className="w-5 h-5 text-primary-400" />
                                 Sohbet Geçmişi
                             </h3>
                             <button
                                 onClick={() => setShowSessions(false)}
-                                className="p-1 hover:bg-dark-800 rounded-lg transition-colors"
+                                className="p-1.5 hover:bg-dark-800 rounded-lg transition-colors"
                             >
                                 <X className="w-5 h-5 text-dark-400" />
                             </button>
                         </div>
 
-                        <div className="p-3">
+                        {/* New Chat Button */}
+                        <div className="shrink-0 p-3 pb-0">
                             <button
                                 onClick={handleNewChat}
-                                className="w-full flex items-center gap-2 px-4 py-3 mb-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-sm font-medium transition-colors"
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-primary-600/20"
                             >
                                 <MessageSquarePlus className="w-4 h-4" />
                                 Yeni Sohbet Başlat
                             </button>
-
-                            <div className="space-y-1">
-                                {sessions.map((s) => (
-                                    <button
-                                        key={s.id}
-                                        onClick={() => handleSwitchSession(s.id)}
-                                        className={clsx(
-                                            "w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors",
-                                            s.id === currentSessionId
-                                                ? "bg-primary-500/20 text-primary-300 border border-primary-500/30"
-                                                : "text-dark-300 hover:bg-dark-800 hover:text-white"
-                                        )}
-                                    >
-                                        <p className="truncate font-medium">{s.title || 'Yeni Sohbet'}</p>
-                                        <p className="text-xs text-dark-500 mt-0.5">
-                                            {new Date(s.created_at).toLocaleDateString('tr-TR', {
-                                                day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-                                            })}
-                                        </p>
-                                    </button>
-                                ))}
-                                {sessions.length === 0 && sessionsLoaded && (
-                                    <p className="text-center text-dark-500 text-sm py-8">Henüz sohbet yok</p>
-                                )}
-                            </div>
                         </div>
+
+                        {/* Session List - Scrollable */}
+                        <div className="flex-1 overflow-y-auto p-3 space-y-1">
+                            {groupSessionsByDate(sessions).map((group) => (
+                                <div key={group.label} className="mb-3">
+                                    <p className="text-[11px] font-semibold text-dark-500 uppercase tracking-wider px-2 py-2">
+                                        {group.label}
+                                    </p>
+                                    <div className="space-y-0.5">
+                                        {group.sessions.map((s) => (
+                                            <div
+                                                key={s.id}
+                                                onClick={() => handleSwitchSession(s.id)}
+                                                className={clsx(
+                                                    "group w-full text-left px-3 py-2.5 rounded-xl text-sm transition-all cursor-pointer relative",
+                                                    s.id === currentSessionId
+                                                        ? "bg-primary-500/15 text-primary-200 ring-1 ring-primary-500/30"
+                                                        : "text-dark-300 hover:bg-dark-800/80 hover:text-white"
+                                                )}
+                                            >
+                                                <div className="flex items-start gap-2">
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="truncate font-medium leading-snug">
+                                                            {s.title || 'Yeni Sohbet'}
+                                                        </p>
+                                                        <div className="flex items-center gap-2 mt-1">
+                                                            <span className="text-[11px] text-dark-500">
+                                                                {new Date(s.updated_at || s.created_at).toLocaleDateString('tr-TR', {
+                                                                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                                                                })}
+                                                            </span>
+                                                            {(s.message_count ?? 0) > 0 && (
+                                                                <span className="text-[10px] bg-dark-700/60 text-dark-400 px-1.5 py-0.5 rounded-full">
+                                                                    {s.message_count} mesaj
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    {/* Delete Button */}
+                                                    <button
+                                                        onClick={(e) => handleDeleteSession(e, s.id)}
+                                                        className="shrink-0 p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-red-500/20 hover:text-red-400 text-dark-600 transition-all"
+                                                        title="Sohbeti sil"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                            {sessions.length === 0 && sessionsLoaded && (
+                                <div className="flex flex-col items-center justify-center py-12 text-dark-500">
+                                    <History className="w-10 h-10 mb-3 opacity-30" />
+                                    <p className="text-sm">Henüz sohbet yok</p>
+                                    <p className="text-xs mt-1">Yeni bir sohbet başlatın</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer - Session Count */}
+                        {sessions.length > 0 && (
+                            <div className="shrink-0 border-t border-dark-700 px-4 py-2.5 text-center">
+                                <span className="text-[11px] text-dark-500">{sessions.length} sohbet kayıtlı</span>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

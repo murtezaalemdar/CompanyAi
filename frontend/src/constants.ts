@@ -5,7 +5,7 @@
 // ║  Örn: 2.5.0 → büyük özellik, 2.5.1 → bug fix                 ║
 // ║  Backend tarafı: app/config.py → APP_VERSION                   ║
 // ╚═════════════════════════════════════════════════════════════════╝
-export const APP_VERSION = '2.5.0'
+export const APP_VERSION = '2.6.0'
 
 export const DEPARTMENTS = [
     "Yönetim",

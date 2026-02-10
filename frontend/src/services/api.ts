@@ -119,6 +119,11 @@ export const aiApi = {
         return response.data
     },
 
+    deleteSession: async (sessionId: number) => {
+        const response = await api.delete(`/memory/sessions/${sessionId}`)
+        return response.data
+    },
+
     uploadDocument: async (file: File, category?: string) => {
         const formData = new FormData()
         formData.append('file', file)

@@ -209,16 +209,24 @@ async def get_session_messages(db: AsyncSession, session_id: int) -> list[dict]:
 
 
 async def list_user_sessions(db: AsyncSession, user_id: int, limit: int = 30) -> list[dict]:
-    """Kullanıcının sohbet oturumlarını listele (en yeni önce)"""
+    """Kullanıcının sohbet oturumlarını listele (en yeni önce, mesaj sayısı + önizleme dahil)"""
     try:
+        # Mesaj sayısı subquery
+        msg_count_sq = (
+            select(func.count(ConversationMemory.id))
+            .where(ConversationMemory.session_id == ChatSession.id)
+            .correlate(ChatSession)
+            .scalar_subquery()
+            .label("message_count")
+        )
         stmt = (
-            select(ChatSession)
+            select(ChatSession, msg_count_sq)
             .where(ChatSession.user_id == user_id)
-            .order_by(desc(ChatSession.created_at))
+            .order_by(desc(ChatSession.updated_at))
             .limit(limit)
         )
         result = await db.execute(stmt)
-        sessions = result.scalars().all()
+        rows = result.all()
         return [
             {
                 "id": s.id,
@@ -226,12 +234,41 @@ async def list_user_sessions(db: AsyncSession, user_id: int, limit: int = 30) ->
                 "is_active": s.is_active,
                 "created_at": s.created_at.isoformat(),
                 "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+                "message_count": msg_count or 0,
             }
-            for s in sessions
+            for s, msg_count in rows
         ]
     except Exception as e:
         logger.error("list_sessions_failed", error=str(e))
         return []
+
+
+async def delete_session(db: AsyncSession, user_id: int, session_id: int) -> bool:
+    """Tekil sohbet oturumunu ve mesajlarını sil"""
+    try:
+        # Oturumun bu kullanıcıya ait olduğunu doğrula
+        stmt = select(ChatSession).where(
+            and_(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        )
+        result = await db.execute(stmt)
+        session = result.scalar_one_or_none()
+        if not session:
+            return False
+
+        # Önce mesajları sil
+        await db.execute(
+            delete(ConversationMemory).where(ConversationMemory.session_id == session_id)
+        )
+        # Sonra oturumu sil
+        await db.execute(
+            delete(ChatSession).where(ChatSession.id == session_id)
+        )
+        await db.flush()
+        logger.info("session_deleted", user_id=user_id, session_id=session_id)
+        return True
+    except Exception as e:
+        logger.error("session_delete_failed", error=str(e))
+        return False
 
 
 async def switch_to_session(db: AsyncSession, user_id: int, session_id: int) -> bool:

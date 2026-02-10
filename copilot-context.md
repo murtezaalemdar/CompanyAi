@@ -5,12 +5,14 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 ## 🏢 Proje Özeti
 - **Proje:** Kurumsal AI Asistanı (tamamen lokal, öğrenen)
 - **Backend:** FastAPI + Uvicorn, async SQLAlchemy (asyncpg), structlog
-- **LLM:** Ollama + Mistral (`localhost:11434`), vision: LLaVA
-- **Vector DB:** ChromaDB + SentenceTransformers (`all-MiniLM-L6-v2`)
-- **RAG Embedding:** `paraphrase-multilingual-mpnet-base-v2`
-- **DB:** PostgreSQL port 5433, user `companyai`, db `companyai`
+- **LLM:** Ollama + qwen2.5:72b (48GB RAM), CPU-only ~2 tok/s
+- **Vector DB:** ChromaDB + SentenceTransformers
+- **RAG Embedding:** `paraphrase-multilingual-mpnet-base-v2` (768-dim)
+- **DB:** PostgreSQL 14.20, port 5433, user `companyai`, db `companyai`
 - **Auth:** JWT (HS256) + pbkdf2_sha256 + RBAC (Admin/Manager/User)
 - **Frontend:** React + TypeScript + Vite + Tailwind CSS + TanStack Query
+- **Desktop:** pywebview + PyInstaller → CompanyAI.exe (12MB)
+- **Versiyon:** v2.6.0
 - **Proje dizini (lokal):** `C:\Users\murteza.KARAKOC\Desktop\Python\CompanyAi`
 - **Proje dizini (sunucu):** `/opt/companyai`
 
@@ -32,22 +34,16 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 
 ## 🏷️ VERSİYON KURALI — HER DEPLOY'İN ÖNCESİNDE ZORUNLU!
 
-> **⚠️ BU KURALI ASLA UNUTMA:** Her deploy yapan commit'te versiyon numarası artırılmalı!
+Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VERSION` eşleşecek şekilde artır.
+(PATCH=bugfix, MINOR=özellik, MAJOR=kırılma)
 
-| Dosya | Sabit | Konum |
-|-------|-------|-------|
-| `app/config.py` | `APP_VERSION = "X.Y.Z"` | Backend (tek kaynak) |
-| `frontend/src/constants.ts` | `APP_VERSION = 'X.Y.Z'` | Frontend (tek kaynak) |
-
-**Versiyon formatı:** Semantic Versioning (MAJOR.MINOR.PATCH)
-- **PATCH** (+0.0.1): Bug fix, küçük düzeltme
-- **MINOR** (+0.1.0): Yeni özellik (geriye uyumlu)
-- **MAJOR** (+1.0.0): Büyük mimari değişiklik, API kırılması
-
-**Deploy öncesi yapman gereken:**
-1. `app/config.py` içindeki `APP_VERSION` değerini artır
-2. `frontend/src/constants.ts` içindeki `APP_VERSION` değerini AYNI şekilde artır
-3. İki dosyadaki versiyon AYNI olmalı!
+## 🖥️ Desktop Uygulaması
+- **Dosya:** `desktop/app.py` → pywebview native pencere
+- **Build:** `desktop/build.bat` veya `pyinstaller desktop/companyai.spec`
+- **Exe:** `dist/CompanyAI.exe` (~12MB tek dosya)
+- **Sunucu download:** `https://192.168.0.12/downloads/CompanyAI.exe`
+- **Özellikler:** HTTPS redirect desteği, self-signed cert, loading sayaç, imza
+- **Web banner:** `DesktopBanner.tsx` — tarayıcıdan girince "İndir" bildirimi (7 gün dismiss)
 4. `deploy_now.py` otomatik kontrol eder, farklıysa uyarı verir
 
 ## 📄 Doküman Yönetimi v2 (Güncel)
@@ -86,8 +82,11 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 | `app/api/routes/export.py` | Export API endpoint'leri |
 | `app/api/routes/multimodal.py` | Ana AI soru-cevap endpoint'i (Form-data) |
 | `app/main.py` | FastAPI app + tüm router kayıtları |
-| `frontend/src/pages/Ask.tsx` | Ana sohbet sayfası (~900 satır) |
+| `frontend/src/pages/Ask.tsx` | Ana sohbet sayfası (~1000 satır) |
+| `frontend/src/components/DesktopBanner.tsx` | Desktop app indirme banner'ı |
 | `frontend/src/services/api.ts` | Axios API client |
+| `desktop/app.py` | Masaüstü uygulaması (pywebview) |
+| `desktop/companyai.spec` | PyInstaller build config |
 | `deploy_now.py` | Otomatik deploy script |
 
 ## Kod Prensipleri

@@ -19,11 +19,16 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 - **URL:** `https://192.168.0.12`
 - **User:** `root` — **Şifre:** `435102`
 - **SSH Key:** `keys/companyai_key` (Ed25519)
-- **Fingerprint:** `SHA256:avkGBtNyqcbRQxfMZR+0IpS0W3Eb6gMgcbmVc9E9kD0`
 - **Bağlantı:** `ssh -i keys/companyai_key root@192.168.0.12`
 - **Backend servis:** `systemctl restart companyai-backend`
 - **Frontend:** `/var/www/html/` (Nginx)
-- **Deploy:** `python deploy_now.py` (backend) / `cd frontend && npm run build` + SCP (frontend)
+- **Deploy:** `python deploy_now.py` (backend + frontend otomatik)
+
+## 🚀 Deploy Süreci
+- `deploy_now.py` — Backend dosyaları SCP + frontend npm build + SCP to /var/www/html/
+- **ÖNEMLİ:** `BACKEND_FILES` listesi statik — yeni dosya eklendiğinde güncelle!
+- Frontend build: `cd frontend && npm run build`
+- Deploy komutu: `cd CompanyAi; $env:PYTHONIOENCODING='utf-8'; python deploy_now.py`
 
 ## 📄 Doküman Yönetimi v2 (Güncel)
 - **Desteklenen format:** 65+ dosya formatı (metin, office, kod, e-posta, görüntü OCR)
@@ -32,7 +37,38 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 - **Klasör desteği:** webkitdirectory ile klasör seçimi + alt klasör ağacı görünümü
 - **Doküman kütüphanesi:** Tablo görünümü (kaynak, tür, departman, ekleyen, tarih, parça)
 - **Pip bağımlılıkları:** beautifulsoup4, youtube-transcript-api, striprtf, lxml
-- **Yeni endpoint'ler:** `/rag/learn-url`, `/rag/learn-video`, `/rag/capabilities`
+- **Endpoint'ler:** `/rag/learn-url`, `/rag/learn-video`, `/rag/capabilities`
+
+## 🌐 Web Arama (Phase 20)
+- **SerpAPI:** Ücretsiz 250 arama/ay, key `.env`'de
+- **Engine:** `google` (normal) + `google_images` (görsel arama)
+- **Akıllı tetikleme:** Soruda "örnek, desen, baskı" → otomatik görsel arama
+- **Rich data:** `rich_data: Optional[list]` — her kart bir dict: `{type, ...}`
+  - `type: "weather"` → WeatherCard.tsx
+  - `type: "images"` → ImageResultsCard.tsx (lightbox + grid)
+  - `type: "export"` → ExportCard.tsx (indirme kartı)
+
+## 📥 Export Sistemi (Phase 20c)
+- **Formatlar:** Excel (.xlsx), PDF, PowerPoint (.pptx), Word (.docx), CSV
+- **Servis:** `app/core/export_service.py`
+- **API:** `POST /api/export/generate` + `GET /api/export/download/{file_id}`
+- **Otomatik:** `engine.py` soruda "excel olarak", "sunum hazırla" → otomatik dosya üretimi
+- **Manuel:** `QuickExportButtons.tsx` — her mesajdan export
+- **Kütüphaneler:** openpyxl, fpdf2, python-pptx, python-docx
+- **TTL:** Temp dizinde 1 saat
+
+## 🔑 Önemli Dosyalar
+| Dosya | Açıklama |
+|---|---|
+| `app/core/engine.py` | Merkezi işlem motoru — RAG + Web + Hafıza + Export |
+| `app/llm/web_search.py` | SerpAPI + Google Images + DuckDuckGo fallback |
+| `app/core/export_service.py` | Excel/PDF/PPTX/Word/CSV üretici |
+| `app/api/routes/export.py` | Export API endpoint'leri |
+| `app/api/routes/multimodal.py` | Ana AI soru-cevap endpoint'i (Form-data) |
+| `app/main.py` | FastAPI app + tüm router kayıtları |
+| `frontend/src/pages/Ask.tsx` | Ana sohbet sayfası (~900 satır) |
+| `frontend/src/services/api.ts` | Axios API client |
+| `deploy_now.py` | Otomatik deploy script |
 
 ## Kod Prensipleri
 - Clean code

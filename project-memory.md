@@ -14,6 +14,13 @@ Tekstil sektörü odaklı, her bölümün kendi bilgi tabanı ve yetkilendirmesi
 - Frontend deploy: Nginx `/var/www/html/` — `deploy_now.py` ile otomatik
 - JWT Auth + RBAC (Admin/Manager/User) + departman bazlı erişim
 
+## 🏷️ VERSİYON KURALI (HER DEPLOY'İN ÖNCESİNDE ZORUNLU!)
+- **Her deploy öncesi `APP_VERSION` artırılmalı!**
+- Backend: `app/config.py` → `APP_VERSION`
+- Frontend: `frontend/src/constants.ts` → `APP_VERSION`
+- İki dosyadaki versiyon her zaman AYNI olmalı
+- Format: Semantic Versioning (MAJOR.MINOR.PATCH)
+
 ## Notlar
 - Sunucu: 192.168.0.12, 32GB RAM, 16-core Xeon Silver 4316, NO GPU
 - SerpAPI ücretsiz plan: 250 arama/ay

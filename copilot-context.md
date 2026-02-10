@@ -30,6 +30,26 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 - Frontend build: `cd frontend && npm run build`
 - Deploy komutu: `cd CompanyAi; $env:PYTHONIOENCODING='utf-8'; python deploy_now.py`
 
+## 🏷️ VERSİYON KURALI — HER DEPLOY'İN ÖNCESİNDE ZORUNLU!
+
+> **⚠️ BU KURALI ASLA UNUTMA:** Her deploy yapan commit'te versiyon numarası artırılmalı!
+
+| Dosya | Sabit | Konum |
+|-------|-------|-------|
+| `app/config.py` | `APP_VERSION = "X.Y.Z"` | Backend (tek kaynak) |
+| `frontend/src/constants.ts` | `APP_VERSION = 'X.Y.Z'` | Frontend (tek kaynak) |
+
+**Versiyon formatı:** Semantic Versioning (MAJOR.MINOR.PATCH)
+- **PATCH** (+0.0.1): Bug fix, küçük düzeltme
+- **MINOR** (+0.1.0): Yeni özellik (geriye uyumlu)
+- **MAJOR** (+1.0.0): Büyük mimari değişiklik, API kırılması
+
+**Deploy öncesi yapman gereken:**
+1. `app/config.py` içindeki `APP_VERSION` değerini artır
+2. `frontend/src/constants.ts` içindeki `APP_VERSION` değerini AYNI şekilde artır
+3. İki dosyadaki versiyon AYNI olmalı!
+4. `deploy_now.py` otomatik kontrol eder, farklıysa uyarı verir
+
 ## 📄 Doküman Yönetimi v2 (Güncel)
 - **Desteklenen format:** 65+ dosya formatı (metin, office, kod, e-posta, görüntü OCR)
 - **Öğrenme kaynakları:** Dosya yükleme, metin girişi, URL scraping, YouTube altyazı

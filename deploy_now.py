@@ -1,4 +1,15 @@
-"""Deploy script — CompanyAi → 192.168.0.12"""
+"""Deploy script — CompanyAi → 192.168.0.12
+
+╔═══════════════════════════════════════════════════════════════════╗
+║  ⚠️  DEPLOY ÖNCESİ VERSİYON NUMARASINI GÜNCELLE!                ║
+║                                                                   ║
+║  1. app/config.py             → APP_VERSION = "X.Y.Z"            ║
+║  2. frontend/src/constants.ts → APP_VERSION = 'X.Y.Z'            ║
+║                                                                   ║
+║  İki dosyadaki versiyon AYNI olmalı!                              ║
+║  Semantic Versioning: PATCH=bugfix, MINOR=özellik, MAJOR=kırılma  ║
+╚═══════════════════════════════════════════════════════════════════╝
+"""
 
 import paramiko
 import os

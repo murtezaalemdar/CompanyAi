@@ -11,6 +11,7 @@ import threading
 import time
 import sys
 import os
+import ssl
 import urllib.request
 import urllib.error
 
@@ -24,6 +25,11 @@ MIN_WIDTH = 900
 MIN_HEIGHT = 600
 CHECK_INTERVAL = 2          # Sunucu kontrol aralığı (sn)
 MAX_RETRIES = 0             # 0 = sınırsız deneme
+
+# SSL sertifika doğrulamayı devre dışı bırak (self-signed cert)
+_ssl_ctx = ssl.create_default_context()
+_ssl_ctx.check_hostname = False
+_ssl_ctx.verify_mode = ssl.CERT_NONE
 
 
 # ── Yükleme / Hata HTML ─────────────────────────────────
@@ -53,15 +59,19 @@ LOADING_HTML = """
         margin-bottom: 1.5rem;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .status { color: #94a3b8; font-size: 0.95rem; }
-    .status.error { color: #f87171; }
-    .retry-btn {
-        margin-top: 1.2rem; padding: 0.6rem 1.8rem;
-        background: #6366f1; color: white; border: none;
-        border-radius: 8px; font-size: 0.95rem; cursor: pointer;
-        display: none;
+    .status { color: #94a3b8; font-size: 0.95rem; margin-bottom: 0.3rem; }
+    .sub { color: #475569; font-size: 0.8rem; }
+    .dots::after {
+        content: '';
+        animation: dots 1.5s steps(4, end) infinite;
     }
-    .retry-btn:hover { background: #4f46e5; }
+    @keyframes dots {
+        0%   { content: ''; }
+        25%  { content: '.'; }
+        50%  { content: '..'; }
+        75%  { content: '...'; }
+        100% { content: ''; }
+    }
     .version {
         position: absolute; bottom: 16px;
         color: #475569; font-size: 0.75rem;
@@ -70,10 +80,17 @@ LOADING_HTML = """
 </head>
 <body>
     <div class="logo">Company<span>AI</span></div>
-    <div class="spinner" id="spinner"></div>
-    <p class="status" id="status">Sunucuya bağlanılıyor...</p>
-    <button class="retry-btn" id="retryBtn" onclick="location.reload()">Tekrar Dene</button>
+    <div class="spinner"></div>
+    <p class="status">Sunucuya bağlanılıyor<span class="dots"></span></p>
+    <p class="sub" id="timer"></p>
     <div class="version">v""" + APP_VERSION + """</div>
+    <script>
+        var start = Date.now();
+        setInterval(function() {
+            var s = Math.floor((Date.now() - start) / 1000);
+            document.getElementById('timer').textContent = s + ' saniye bekleniyor...';
+        }, 1000);
+    </script>
 </body>
 </html>
 """
@@ -113,31 +130,45 @@ ERROR_HTML = """
 """
 
 
-def check_server(url: str, timeout: int = 5) -> bool:
-    """Sunucunun erişilebilir olup olmadığını kontrol et"""
-    try:
-        req = urllib.request.Request(url + "/api/health", method="GET")
-        resp = urllib.request.urlopen(req, timeout=timeout)
-        return resp.status == 200
-    except Exception:
-        return False
+def check_server(url: str, timeout: int = 5) -> str | None:
+    """Sunucunun erişilebilir olup olmadığını kontrol et.
+    Başarılıysa gerçek final URL'yi döndür (redirect sonrası), yoksa None.
+    HTTP → HTTPS redirect'leri otomatik takip edilir.
+    """
+    # Denenecek URL'ler: verilen URL + HTTPS versiyonu
+    candidates = [url]
+    if url.startswith("http://"):
+        candidates.append(url.replace("http://", "https://", 1))
+
+    for base in candidates:
+        try:
+            health = base.rstrip("/") + "/api/health"
+            req = urllib.request.Request(health, method="GET")
+            resp = urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx)
+            if resp.status == 200:
+                # Final URL'nin base kısmını al
+                final = resp.url.replace("/api/health", "")
+                return final or base
+        except Exception:
+            continue
+    return None
 
 
 def wait_and_navigate(window: webview.Window):
     """Arka planda sunucuyu kontrol et, hazır olunca yönlendir"""
     retries = 0
     while True:
-        if check_server(SERVER_URL):
+        final_url = check_server(SERVER_URL)
+        if final_url:
             # Sunucu hazır — ana sayfaya yönlendir
             try:
-                window.load_url(SERVER_URL)
+                window.load_url(final_url)
             except Exception:
                 pass
             return
 
         retries += 1
         if MAX_RETRIES > 0 and retries >= MAX_RETRIES:
-            # Maksimum deneme aşıldı — hata göster
             try:
                 window.load_html(ERROR_HTML)
             except Exception:

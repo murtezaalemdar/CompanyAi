@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { BrainCircuit, Loader2, AlertCircle } from 'lucide-react'
 import { APP_VERSION } from '../constants'
+import DesktopBanner from '../components/DesktopBanner'
 
 export default function Login() {
     const [email, setEmail] = useState('')
@@ -128,6 +129,9 @@ export default function Login() {
                     </div>
                 </div>
             </div>
+
+            {/* Desktop App Banner */}
+            <DesktopBanner />
 
             {/* Designer Signature + Version */}
             <div className="absolute bottom-6 left-0 right-0 flex flex-col items-center gap-1.5">

@@ -1,56 +1,97 @@
-"""Web Arama Modülü — İnternetten bilgi çekme yeteneği
+"""Web Arama Modülü — Google Custom Search API + DuckDuckGo Fallback
 
-DuckDuckGo arama API'si kullanarak, AI asistanın bilmediği konularda
-internetten güncel bilgi bulmasını sağlar.
+Kurumsal AI asistanın bilmediği konularda internetten güncel bilgi
+bulmasını sağlar.
+
+Öncelik sırası:
+1. Google Custom Search API (GOOGLE_API_KEY + GOOGLE_CSE_ID varsa)
+2. DuckDuckGo Instant Answer API (ücretsiz fallback)
+3. DuckDuckGo HTML scraping (son çare)
 """
 
 import httpx
 import structlog
+import re
 from typing import List, Dict, Optional
+
+from app.config import settings
 
 logger = structlog.get_logger()
 
-# DuckDuckGo Instant Answer API (ücretsiz, API key gereksiz)
-DDG_API_URL = "https://api.duckduckgo.com/"
+# Google Custom Search API
+GOOGLE_SEARCH_URL = "https://www.googleapis.com/customsearch/v1"
 
-# DuckDuckGo HTML arama (daha zengin sonuçlar)
+# DuckDuckGo (fallback)
+DDG_API_URL = "https://api.duckduckgo.com/"
 DDG_HTML_URL = "https://html.duckduckgo.com/html/"
 
 
-async def search_web(query: str, max_results: int = 3) -> List[Dict[str, str]]:
+def _google_configured() -> bool:
+    """Google API anahtarları yapılandırılmış mı?"""
+    return bool(settings.GOOGLE_API_KEY and settings.GOOGLE_CSE_ID)
+
+
+# ──────────────────────────────────────────────
+# Google Custom Search API
+# ──────────────────────────────────────────────
+
+async def _search_google(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     """
-    DuckDuckGo ile web araması yapar.
+    Google Custom Search JSON API ile arama yapar.
     
-    Args:
-        query: Aranacak metin
-        max_results: Maksimum sonuç sayısı
-    
-    Returns:
-        [{"title": str, "snippet": str, "url": str}, ...]
+    Ücretsiz kota: 100 sorgu/gün
+    Döküman: https://developers.google.com/custom-search/v1/overview
     """
     results = []
     
-    # Yöntem 1: DuckDuckGo Instant Answer API
     try:
-        instant = await _search_instant(query)
-        if instant:
-            results.extend(instant[:max_results])
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+            response = await client.get(
+                GOOGLE_SEARCH_URL,
+                params={
+                    "key": settings.GOOGLE_API_KEY,
+                    "cx": settings.GOOGLE_CSE_ID,
+                    "q": query,
+                    "num": min(max_results, 10),  # Google max 10
+                    "lr": "lang_tr",  # Türkçe sonuçları tercih et
+                    "gl": "tr",  # Türkiye bölgesi
+                    "safe": "active",  # Güvenli arama
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+        
+        for item in data.get("items", []):
+            results.append({
+                "title": item.get("title", ""),
+                "snippet": item.get("snippet", ""),
+                "url": item.get("link", ""),
+                "source": "Google",
+            })
+        
+        logger.info("google_search_ok", query=query[:80], results=len(results))
+        
+    except httpx.HTTPStatusError as e:
+        # 429 = kota aşıldı, 403 = API key geçersiz
+        status = e.response.status_code
+        if status == 429:
+            logger.warning("google_quota_exceeded", query=query[:60])
+        elif status == 403:
+            logger.error("google_api_key_invalid")
+        else:
+            logger.error("google_search_http_error", status=status)
+        
     except Exception as e:
-        logger.warning("ddg_instant_failed", error=str(e))
+        logger.error("google_search_error", error=str(e))
     
-    # Yöntem 2: DuckDuckGo HTML arama (daha çok sonuç)
-    if len(results) < max_results:
-        try:
-            html_results = await _search_html(query, max_results - len(results))
-            results.extend(html_results)
-        except Exception as e:
-            logger.warning("ddg_html_failed", error=str(e))
-    
-    logger.info("web_search_complete", query=query[:80], results_count=len(results))
-    return results[:max_results]
+    return results
 
 
-async def _search_instant(query: str) -> List[Dict[str, str]]:
+# ──────────────────────────────────────────────
+# DuckDuckGo (Fallback)
+# ──────────────────────────────────────────────
+
+async def _search_ddg_instant(query: str) -> List[Dict[str, str]]:
     """DuckDuckGo Instant Answer API ile arama"""
     results = []
     
@@ -90,7 +131,7 @@ async def _search_instant(query: str) -> List[Dict[str, str]]:
     return results
 
 
-async def _search_html(query: str, max_results: int = 3) -> List[Dict[str, str]]:
+async def _search_ddg_html(query: str, max_results: int = 3) -> List[Dict[str, str]]:
     """DuckDuckGo HTML araması ile sonuç çekme"""
     results = []
     
@@ -106,11 +147,6 @@ async def _search_html(query: str, max_results: int = 3) -> List[Dict[str, str]]
             response.raise_for_status()
             html = response.text
         
-        # Basit HTML parsing (beautifulsoup olmadan da çalışır)
-        # DuckDuckGo HTML sayfasındaki sonuçları yakala
-        import re
-        
-        # Sonuç bloklarını bul
         result_blocks = re.findall(
             r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
             r'class="result__snippet"[^>]*>(.*?)</(?:a|span|div)',
@@ -118,7 +154,6 @@ async def _search_html(query: str, max_results: int = 3) -> List[Dict[str, str]]
         )
         
         for url, title, snippet in result_blocks[:max_results]:
-            # HTML etiketlerini temizle
             title_clean = re.sub(r'<[^>]+>', '', title).strip()
             snippet_clean = re.sub(r'<[^>]+>', '', snippet).strip()
             
@@ -136,23 +171,68 @@ async def _search_html(query: str, max_results: int = 3) -> List[Dict[str, str]]
     return results
 
 
+# ──────────────────────────────────────────────
+# Ana Arama Fonksiyonu
+# ──────────────────────────────────────────────
+
+async def search_web(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+    """
+    Web araması yapar. Önce Google, sonra DuckDuckGo dener.
+    
+    Strateji:
+    1. Google API key varsa → Google Custom Search (hızlı, kaliteli)
+    2. Google yoksa / kota aşıldıysa → DuckDuckGo Instant API
+    3. DuckDuckGo Instant yetersizse → DuckDuckGo HTML scraping
+    """
+    results = []
+    search_engine = "none"
+    
+    # 1) Google Custom Search
+    if _google_configured():
+        results = await _search_google(query, max_results)
+        if results:
+            search_engine = "google"
+    
+    # 2) DuckDuckGo Instant (fallback)
+    if not results:
+        try:
+            results = await _search_ddg_instant(query)
+            if results:
+                search_engine = "duckduckgo_instant"
+        except Exception as e:
+            logger.warning("ddg_instant_failed", error=str(e))
+    
+    # 3) DuckDuckGo HTML (son çare)
+    if len(results) < 2:
+        try:
+            html_results = await _search_ddg_html(query, max_results - len(results))
+            results.extend(html_results)
+            if html_results and search_engine == "none":
+                search_engine = "duckduckgo_html"
+        except Exception as e:
+            logger.warning("ddg_html_failed", error=str(e))
+    
+    logger.info("web_search_complete", 
+                query=query[:80], 
+                engine=search_engine,
+                results_count=len(results))
+    
+    return results[:max_results]
+
+
 async def search_and_summarize(query: str) -> Optional[str]:
     """
-    Arama yap ve sonuçları tek bir metin olarak özetle.
-    Prompt'a eklenecek formatta döner.
-    
-    Args:
-        query: Aranacak metin
-    
-    Returns:
-        Formatlanmış arama sonuçları veya None
+    Arama yap ve sonuçları LLM prompt'una eklenecek formatta döndür.
     """
-    results = await search_web(query, max_results=3)
+    results = await search_web(query, max_results=5)
     
     if not results:
         return None
     
-    text = "\n## 🌐 İnternet Araması Sonuçları:\n"
+    # Hangi motor kullanıldı?
+    engine = results[0].get("source", "Web")
+    
+    text = f"\n## 🌐 İnternet Araması Sonuçları ({engine}):\n"
     for i, r in enumerate(results, 1):
         text += f"**{i}. {r['title']}**\n"
         text += f"{r['snippet']}\n"
@@ -160,6 +240,6 @@ async def search_and_summarize(query: str) -> Optional[str]:
             text += f"Kaynak: {r['url']}\n"
         text += "\n"
     
-    text += "Bu bilgileri kullanarak yanıt ver, ama kaynağın internetten geldiğini belirt.\n"
+    text += "Bu bilgileri kullanarak yanıt ver. Kaynağın internetten geldiğini belirt.\n"
     
     return text

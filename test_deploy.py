@@ -6,12 +6,12 @@ import time
 HOST = "192.168.0.12"
 KEY_PATH = "keys/companyai_key"
 
-def ssh_cmd(cmd):
+def ssh_cmd(cmd, timeout=300):
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     pkey = paramiko.Ed25519Key.from_private_key_file(KEY_PATH)
     ssh.connect(HOST, username="root", pkey=pkey)
-    stdin, stdout, stderr = ssh.exec_command(cmd, timeout=300)
+    stdin, stdout, stderr = ssh.exec_command(cmd, timeout=timeout)
     out = stdout.read().decode().strip()
     err = stderr.read().decode().strip()
     ssh.close()
@@ -29,66 +29,45 @@ login_resp = json.loads(out)
 token = login_resp["access_token"]
 print(f"Token alındı: {token[:30]}...")
 
-# 3. Yeni session oluştur (temiz başlangıç)
-print("\n=== 3. Yeni Session Oluştur ===")
-out, _ = ssh_cmd(f"curl -s -X POST http://127.0.0.1:8000/api/memory/sessions/new -H 'Authorization: Bearer {token}'")
-session_resp = json.loads(out)
-print(f"Yeni session: {session_resp}")
-session_id = session_resp.get("session_id")
+# 3. Web arama testi — bilgi sorusu (Google yapılandırılmamış → DuckDuckGo fallback)
+print("\n=== 3. Web Arama Testi (bilgi intent) ===")
+out, _ = ssh_cmd(f"curl -s -X POST http://127.0.0.1:8000/api/ask/multimodal -H 'Authorization: Bearer {token}' -F 'question=Turkiye baskenti neresi araştır'")
+try:
+    resp = json.loads(out)
+    answer = resp.get('answer', '?')
+    web_searched = resp.get('web_searched', False)
+    sources = resp.get('sources', [])
+    print(f"Yanıt: {answer[:300]}")
+    print(f"Web arandı mı: {web_searched}")
+    print(f"Kaynaklar: {sources}")
+    print(f"Süre: {resp.get('processing_time_ms')}ms")
+except Exception as e:
+    print(f"Parse hatası: {e}")
+    print(f"Raw: {out[:500]}")
 
-# 4. İsim tanıtma (multimodal — dosyasız)
-print("\n=== 4. İsim Tanıtma (multimodal endp.) ===")
+# 4. Google API durumu kontrolü
+print("\n=== 4. Google API Yapılandırma Durumu ===")
+out, _ = ssh_cmd("grep -c 'GOOGLE_API_KEY' /opt/companyai/.env 2>/dev/null || echo 'Google env tanımsız'")
+print(f"Durum: {out}")
+
+# 5. İsim hatırlama (önceki session fix çalışıyor mu?)
+print("\n=== 5. İsim Hatırlama (önceki fix kontrolü) ===")
 out, _ = ssh_cmd(f"curl -s -X POST http://127.0.0.1:8000/api/ask/multimodal -H 'Authorization: Bearer {token}' -F 'question=Benim adım Murteza'")
-resp = json.loads(out)
-print(f"Yanıt: {resp.get('answer', '?')[:200]}")
-print(f"Süre: {resp.get('processing_time_ms')}ms")
+resp1 = json.loads(out)
+print(f"Tanıtma: {resp1.get('answer', '?')[:100]}")
 
-# 5. İsmimi hatırlıyor mu? (multimodal — dosyasız)
-print("\n=== 5. İsim Hatırlama Testi ===")
 time.sleep(1)
 out, _ = ssh_cmd(f"curl -s -X POST http://127.0.0.1:8000/api/ask/multimodal -H 'Authorization: Bearer {token}' -F 'question=Benim ismim ne?'")
-resp = json.loads(out)
-answer = resp.get('answer', '?')
-print(f"Yanıt: {answer[:200]}")
-print(f"Süre: {resp.get('processing_time_ms')}ms")
-has_name = "murteza" in answer.lower() or "Murteza" in answer
+resp2 = json.loads(out)
+answer2 = resp2.get('answer', '?')
+print(f"Hatırlama: {answer2[:100]}")
+has_name = "murteza" in answer2.lower()
 print(f"İsim hatırlandı mı: {'✅ EVET' if has_name else '⚠️ HAYIR'}")
 
-# 6. Session mesajlarını kontrol et
-print("\n=== 6. Session Mesajları Kontrolü ===")
-out, _ = ssh_cmd(f"curl -s http://127.0.0.1:8000/api/memory/sessions/{session_id}/messages -H 'Authorization: Bearer {token}'")
-msg_resp = json.loads(out)
-messages = msg_resp.get("messages", [])
-print(f"Mesaj sayısı: {len(messages)}")
-for m in messages:
-    print(f"  Q: {m.get('question', '')[:60]}")
-    print(f"  A: {m.get('answer', '')[:60]}")
-
-# 7. Session listesi
-print("\n=== 7. Session Listesi ===")
-out, _ = ssh_cmd(f"curl -s http://127.0.0.1:8000/api/memory/sessions -H 'Authorization: Bearer {token}'")
-sess_resp = json.loads(out)
-sessions = sess_resp.get("sessions", [])
-print(f"Toplam session: {len(sessions)}")
-for s in sessions[:3]:
-    print(f"  [{s.get('id')}] {s.get('title', '?')[:40]} (active={s.get('is_active')})")
-
-# 8. Session switch testi
-if len(sessions) > 1:
-    other = [s for s in sessions if s["id"] != session_id]
-    if other:
-        print(f"\n=== 8. Session Switch Testi (→ {other[0]['id']}) ===")
-        out, _ = ssh_cmd(f"curl -s -X POST http://127.0.0.1:8000/api/memory/sessions/{other[0]['id']}/switch -H 'Authorization: Bearer {token}'")
-        switch_resp = json.loads(out)
-        print(f"Switch başarılı: {switch_resp.get('success')}")
-        print(f"Mesaj sayısı: {len(switch_resp.get('messages', []))}")
-else:
-    print("\n=== 8. Session Switch: Tek session var, atlıyorum ===")
-
-# 9. Correlation ID kontrolü
-print("\n=== 9. X-Request-ID Kontrolü ===")
-out, _ = ssh_cmd("curl -sI http://127.0.0.1:8000/api/health 2>&1 | grep -i x-request-id")
-print(out or "Header bulunamadı")
+# 6. Backend logları — web search modülü aktif mi?
+print("\n=== 6. Web Search Modülü Log Kontrolü ===")
+out, _ = ssh_cmd("journalctl -u companyai-backend --since '5 min ago' --no-pager | grep -i 'web_search\\|google\\|ddg\\|duckduck' | tail -5")
+print(out or "Web search logu bulunamadı (henüz arama yapılmamış olabilir)")
 
 print("\n=== TEST TAMAMLANDI ===")
 

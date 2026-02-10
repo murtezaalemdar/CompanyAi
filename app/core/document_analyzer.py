@@ -56,12 +56,12 @@ def parse_file_to_dataframe(filename: str, file_content: bytes) -> Optional[pd.D
             # En çok satırı olan sayfayı döndür
             main_sheet = max(sheets.values(), key=lambda x: len(x))
             
-            # Tüm sayfaları metadata olarak sakla
+            # Tüm sayfaları metadata olarak sakla (sadece istatistik, DataFrame referansı KOYMUYORUZ)
             main_sheet.attrs['_all_sheets'] = {
                 name: {"rows": len(df), "cols": len(df.columns)} 
                 for name, df in sheets.items()
             }
-            main_sheet.attrs['_sheets_data'] = sheets
+            # NOT: _sheets_data attrs'a konmaz — pandas deepcopy recursion bug'ına yol açar
             
             return main_sheet
         
@@ -104,6 +104,9 @@ def discover_data(df: pd.DataFrame) -> dict:
     """
     DataFrame'i otomatik keşfet — sütun tipleri, istatistikler, ilişkiler.
     """
+    # pandas 2.3.x deepcopy recursion bug'ını önle
+    df.attrs = {}
+    
     info = {
         "row_count": len(df),
         "col_count": len(df.columns),

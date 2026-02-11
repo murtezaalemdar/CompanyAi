@@ -645,7 +645,7 @@ export default function Ask() {
                             {/* Logo + Copilot Icon */}
                             <div className="flex items-center gap-3 mb-6">
                                 {companyLogo ? (
-                                    <img src={`data:image/png;base64,${companyLogo}`} alt="Logo" className="w-10 h-10 rounded-xl object-contain" />
+                                    <img src={companyLogo} alt="Logo" className="w-10 h-10 rounded-xl object-contain" />
                                 ) : (
                                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">
                                         <Brain className="w-6 h-6 text-white" />

@@ -2,7 +2,7 @@
 
 > **Proje Adı:** Kurumsal Yapay Zeka Asistanı – LOCAL & ÖĞRENEN  
 > **Amaç:** Kurumsal kullanım için tasarlanmış, tamamen lokal çalışan ve öğrenen bir AI asistan sistemi.  
-> **Son Güncelleme:** 11 Şubat 2026 (v2.9.0 — Backup & Restore + Sesli Asistan)
+> **Son Güncelleme:** 11 Şubat 2026 (v2.9.0 — Backup & Restore + Sesli Sohbet + ChatGPT Karşılama)
 
 ---
 
@@ -78,6 +78,7 @@ CompanyAi/
 │   │       ├── FileUploadModal.tsx    # Dosya + kamera yükleme modal'ı
 │   │       ├── Layout.tsx            # Sidebar navigasyon
 │   │       ├── QuickExportButtons.tsx # Her mesajdan export butonları
+│   │       ├── VoiceChat.tsx          # ★ Tam ekran sesli sohbet overlay
 │   │       └── WeatherCard.tsx        # Hava durumu kartı
 │   │   │   ├── AndroidManifest.xml   # HTTP izni + networkSecurityConfig
 │   │   │   └── res/

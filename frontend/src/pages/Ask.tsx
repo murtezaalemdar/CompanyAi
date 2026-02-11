@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { aiApi } from '../services/api'
+import { aiApi, logoApi } from '../services/api'
 import {
     Send,
     Loader2,
@@ -25,7 +25,13 @@ import {
     ShieldX,
     MessageSquarePlus,
     History,
-    ChevronLeft
+    ChevronLeft,
+    BarChart3,
+    TrendingUp,
+    Calculator,
+    Globe,
+    BookOpen,
+    AudioLines
 } from 'lucide-react'
 import clsx from 'clsx'
 import FileUploadModal from '../components/FileUploadModal'
@@ -33,6 +39,7 @@ import WeatherCard from '../components/WeatherCard'
 import ImageResultsCard from '../components/ImageResultsCard'
 import ExportCard from '../components/ExportCard'
 import QuickExportButtons from '../components/QuickExportButtons'
+import VoiceChat from '../components/VoiceChat'
 import { useAuth } from '../contexts/AuthContext'
 import { DEPARTMENTS }  from '../constants'
 
@@ -73,6 +80,12 @@ export default function Ask() {
     const [previewImage, setPreviewImage] = useState<string | null>(null)
     const [isDragging, setIsDragging] = useState(false)
 
+    // Company logo for welcome screen
+    const [companyLogo, setCompanyLogo] = useState<string | null>(null)
+
+    // Voice chat mode
+    const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false)
+
     // Voice states
     const [isListening, setIsListening] = useState(false)
     const [micError, setMicError] = useState('')
@@ -107,6 +120,13 @@ export default function Ask() {
     const [selectedDepartment, setSelectedDepartment] = useState<string>(availableDepartments[0] || 'Genel')
     const [memoryCount, setMemoryCount] = useState<number>(0)
     const [showForgetConfirm, setShowForgetConfirm] = useState(false)
+
+    // Company logo yükle
+    useEffect(() => {
+        logoApi.getLogo().then(res => {
+            if (res?.logo) setCompanyLogo(res.logo)
+        }).catch(() => {})
+    }, [])
 
     // Seçili departmanı güncelle (User değişiminde)
     useEffect(() => {
@@ -539,6 +559,40 @@ export default function Ask() {
         window.speechSynthesis.speak(utterance)
     }
 
+    // === VOICE CHAT MODE — Full duplex voice conversation ===
+    const handleVoiceChatSend = async (text: string): Promise<string> => {
+        // Add user message to chat
+        const userMessage: Message = {
+            id: Date.now().toString(),
+            role: 'user',
+            content: text,
+        }
+        setMessages(prev => [...prev, userMessage])
+
+        // Send to AI and get response
+        const data = await aiApi.askWithFiles(
+            text,
+            [],
+            selectedDepartment !== 'Genel' ? selectedDepartment : undefined
+        )
+
+        const botMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: data.answer,
+            rich_data: data.rich_data || null,
+            metadata: {
+                department: data.department,
+                risk_level: data.risk_level,
+                processing_time_ms: data.processing_time_ms,
+            },
+        }
+        setMessages(prev => [...prev, botMessage])
+        loadSessions()
+
+        return data.answer
+    }
+
     const formatFileSize = (bytes: number): string => {
         if (bytes === 0) return '0 Bytes'
         const k = 1024
@@ -587,29 +641,63 @@ export default function Ask() {
                 {/* Messages Area */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-6">
                     {messages.length === 0 && (
-                        <div className="h-full flex flex-col items-center justify-center text-center p-4 md:p-8 opacity-50">
-                            <Bot className="w-12 h-12 md:w-16 md:h-16 text-dark-400 mb-3 md:mb-4" />
-                            <h3 className="text-lg md:text-xl font-medium text-white">AI Asistan</h3>
-                            <p className="text-dark-400 mt-2 max-w-md text-sm">
-                                Hoş geldiniz, bugün size nasıl yardımcı olabilirim?
-                            </p>
-                            <div className="flex items-center gap-2 mt-3 text-xs md:text-sm text-primary-400">
-                                <Sparkles className="w-4 h-4" />
-                                <span>RAG destekli • Şirket verileriyle öğrenmiş</span>
+                        <div className="h-full flex flex-col items-center justify-center text-center px-4 py-8 md:py-16">
+                            {/* Logo + Copilot Icon */}
+                            <div className="flex items-center gap-3 mb-6">
+                                {companyLogo ? (
+                                    <img src={`data:image/png;base64,${companyLogo}`} alt="Logo" className="w-10 h-10 rounded-xl object-contain" />
+                                ) : (
+                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">
+                                        <Brain className="w-6 h-6 text-white" />
+                                    </div>
+                                )}
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center">
+                                    <Sparkles className="w-5 h-5 text-white" />
+                                </div>
                             </div>
-                            <div className="hidden sm:flex flex-wrap justify-center gap-3 mt-6">
-                                <div className="flex items-center gap-2 px-4 py-2 bg-dark-800/50 rounded-full text-sm text-dark-400">
-                                    <ImageIcon className="w-4 h-4" />
-                                    Resim yükleyin
-                                </div>
-                                <div className="flex items-center gap-2 px-4 py-2 bg-dark-800/50 rounded-full text-sm text-dark-400">
-                                    <Camera className="w-4 h-4" />
-                                    Fotoğraf çekin
-                                </div>
-                                <div className="flex items-center gap-2 px-4 py-2 bg-dark-800/50 rounded-full text-sm text-dark-400">
-                                    <FileText className="w-4 h-4" />
-                                    Doküman ekleyin
-                                </div>
+
+                            {/* Greeting */}
+                            <h2 className="text-2xl md:text-3xl font-semibold text-white mb-2">
+                                Merhaba{user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''}!
+                            </h2>
+                            <p className="text-dark-400 text-base md:text-lg mb-8 max-w-lg">
+                                Bugün size nasıl yardımcı olabilirim?
+                            </p>
+
+                            {/* Suggestion Cards Grid */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
+                                {[
+                                    { icon: BarChart3, title: 'Satış Raporu', desc: 'Son ayın satış verilerini analiz et', prompt: 'Son ayın satış raporunu detaylı analiz et' },
+                                    { icon: TrendingUp, title: 'Üretim Verimliliği', desc: 'Üretim performansını değerlendir', prompt: 'Üretim verimliliğini değerlendir ve iyileştirme önerileri sun' },
+                                    { icon: Calculator, title: 'Maliyet Analizi', desc: 'Maliyet hesaplaması ve karşılaştırma', prompt: 'Maliyet analizi yap ve tasarruf önerileri sun' },
+                                    { icon: Globe, title: 'Pazar Araştırması', desc: 'Sektör trendlerini ve rakipleri incele', prompt: 'Tekstil sektöründeki güncel trendleri ve pazar durumunu analiz et' },
+                                    { icon: BookOpen, title: 'Şirket Politikaları', desc: 'İç düzenlemeler ve prosedürler', prompt: 'Şirket politikalarını ve prosedürlerini özetle' },
+                                    { icon: Brain, title: 'Genel Soru', desc: 'Herhangi bir konuda yardım al', prompt: '' },
+                                ].map((card, i) => (
+                                    <button
+                                        key={i}
+                                        onClick={() => {
+                                            if (card.prompt) {
+                                                setInput(card.prompt)
+                                            }
+                                        }}
+                                        className="group flex items-start gap-3 p-4 rounded-xl bg-dark-800/60 hover:bg-dark-700/80 border border-dark-700/50 hover:border-primary-500/30 transition-all duration-200 text-left"
+                                    >
+                                        <div className="w-9 h-9 rounded-lg bg-dark-700/80 group-hover:bg-primary-500/20 flex items-center justify-center flex-shrink-0 transition-colors">
+                                            <card.icon className="w-5 h-5 text-dark-400 group-hover:text-primary-400 transition-colors" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-medium text-white group-hover:text-primary-300 transition-colors">{card.title}</p>
+                                            <p className="text-xs text-dark-500 mt-0.5 line-clamp-1">{card.desc}</p>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* RAG badge */}
+                            <div className="flex items-center gap-2 mt-6 text-xs text-dark-500">
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>RAG destekli • Şirket verileriyle eğitilmiş AI</span>
                             </div>
                         </div>
                     )}
@@ -984,6 +1072,17 @@ export default function Ask() {
                                 <Send className="w-5 h-5" />
                             )}
                         </button>
+
+                        {/* Voice Chat Button — ChatGPT style */}
+                        <button
+                            type="button"
+                            onClick={() => setIsVoiceChatOpen(true)}
+                            disabled={askMutation.isPending}
+                            className="shrink-0 w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-dark-950 hover:bg-dark-800 border border-dark-700/50 hover:border-primary-500/30 flex items-center justify-center transition-all hover:scale-105 shadow-lg"
+                            title="Sesli sohbet başlat"
+                        >
+                            <AudioLines className="w-5 h-5 text-white" />
+                        </button>
                     </form>
 
                     {/* Quick Tips - hidden on mobile */}
@@ -992,12 +1091,20 @@ export default function Ask() {
                         <span>•</span>
                         <span>🔊 Yanıtı dinle</span>
                         <span>•</span>
-                        <span>Ctrl+V yapıştır</span>
+                        <span>🗣️ Sesli sohbet</span>
                         <span>•</span>
                         <span>Shift+Enter yeni satır</span>
                     </div>
                 </div>
             </div>
+
+            {/* Voice Chat Full Screen */}
+            <VoiceChat
+                isOpen={isVoiceChatOpen}
+                onClose={() => setIsVoiceChatOpen(false)}
+                onSendMessage={handleVoiceChatSend}
+                userName={user?.full_name?.split(' ')[0]}
+            />
 
             {/* File Upload Modal */}
             <FileUploadModal

@@ -210,6 +210,33 @@ c478097 feat: Gorsel arama sonuclari karti + rich_data liste destegi
 - Backup dizini: /opt/companyai/backups/ (sunucuda)
 - Max 20 yedek saklanır (eski olanlar otomatik silinir)
 
+### 11 Şubat 2026 — v2.9.0: ChatGPT Tarzı Karşılama + Sesli Sohbet Modu
 
+**Yapılan işler:**
+
+**ChatGPT tarzı karşılama ekranı:**
+- Ask.tsx empty state tamamen yenilendi
+- Şirket logosu (logoApi) + Copilot tarzı Sparkles ikonu
+- Kişisel karşılama: "Merhaba, {isim}!" + "Bugün size nasıl yardımcı olabilirim?"
+- 6 tıklanabilir öneri kartı (grid): Satış Raporu, Üretim Verimliliği, Maliyet Analizi, Pazar Araştırması, Şirket Politikaları, Genel Soru
+- Karta tıklayınca prompt input'a otomatik yazılır
+- RAG badge altında
+
+**Sesli sohbet modu (ChatGPT voice chat benzeri):**
+- `frontend/src/components/VoiceChat.tsx` oluşturuldu (~310 satır)
+- Tam ekran overlay — kapatınca Ask.tsx'e dönüş
+- Döngü: Dinle → 2sn sessizlik → Otomatik gönder → AI yanıt → Sesli oku (TTS) → Tekrar dinle
+- Pulse animasyonları (dinleme: mavi, konuşma: mor, işleme: spinner)
+- Konuşma log’u gösterilir (user/ai balonları)
+- Ask.tsx’e AudioLines ikonu buton eklendi (gönder butonunun yanında siyah yuvarlak)
+- Konusmalar aynı zamanda metin olarak chat geçmişine de eklenir
+- Markdown temizleme (bold, header, code block, link) TTS öncesi
+- Kırmızı telefon butonu ile kapat
+
+**Alınan kararlar:**
+- VoiceChat ayrı bileşen (reusable), Ask.tsx’e prop ile bağlı
+- `handleVoiceChatSend` — `aiApi.askWithFiles()` ile doğrudan API çağrısı
+- HTTPS zorunlu (mikrofon erişimi için)
+- Ses tanıma dili: tr-TR
 
 

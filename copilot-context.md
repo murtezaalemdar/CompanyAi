@@ -83,10 +83,22 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
   - `type: "images"` → ImageResultsCard.tsx (lightbox + grid)
   - `type: "export"` → ExportCard.tsx (indirme kartı)
 
-## 🎙️ Ses Özellikleri (v2.8.0)
+## 🎩️ Ses Özellikleri (v2.8.0 → v2.9.0)
 - **STT:** Web Speech API (SpeechRecognition) — mikrofon butonu, Ask.tsx
 - **TTS:** Web Speech Synthesis — her mesajda "Dinle"/"Durdur" butonu
 - **Browser-native:** Backend değişikliği yok, tamamen frontend
+- **Sesli Sohbet Modu (v2.9.0):** ChatGPT tarzı tam ekran karşılıklı sesli sohbet
+  - `VoiceChat.tsx` bileşeni — full-screen overlay
+  - Döngü: Dinle → Gönder → AI Yanıtla → Sesli Oku → Tekrar Dinle
+  - 2 sn sessizlik algılama ile otomatik gönderim
+  - AudioLines buton (gönder yanında siyah yuvarlak)
+  - Konuşma geçmişi chat mesajlarına da yansır
+
+## 🎨 ChatGPT Tarzı Karşılama Ekranı (v2.9.0)
+- Ask.tsx boş durum → Şirket logosu + Copilot ikonu + kişisel karşılama
+- 6 tıklanabilir öneri kartı (Satış Raporu, Üretim, Maliyet, Pazar, Politika, Genel)
+- Karta tıklayınca prompt input'a yazılır
+- `logoApi.getLogo()` ile dinamik logo çekme
 
 ## 💾 Yedekleme & Geri Yükleme (v2.9.0)
 - **Backend:** `app/api/routes/backup.py` — 9 endpoint
@@ -123,7 +135,8 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 | `app/api/routes/export.py` | Export API endpoint'leri |
 | `app/api/routes/multimodal.py` | Ana AI soru-cevap endpoint'i (Form-data) |
 | `app/main.py` | FastAPI app + tüm router kayıtları |
-| `frontend/src/pages/Ask.tsx` | Ana sohbet sayfası (~1000 satır) |
+| `frontend/src/pages/Ask.tsx` | Ana sohbet sayfası (~1260 satır) |
+| `frontend/src/components/VoiceChat.tsx` | Tam ekran sesli sohbet overlay bileşeni |
 | `frontend/src/components/DesktopBanner.tsx` | Desktop app indirme banner'ı |
 | `frontend/src/services/api.ts` | Axios API client |
 | `frontend/capacitor.config.ts` | Capacitor mobil ayarları (sunucu URL, splash, statusbar) |

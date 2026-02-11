@@ -347,12 +347,28 @@ export default function Documents() {
 
     // ── EVENT HANDLERS ──
 
+    const [micError, setMicError] = useState('')
+
+    const switchToHttps = () => {
+        const httpsUrl = window.location.href.replace('http://', 'https://')
+        window.location.href = httpsUrl
+    }
+
     const toggleListening = () => {
+        setMicError('')
         if (isListening) {
             recognitionRef.current?.stop()
             setIsListening(false)
             return
         }
+
+        // HTTPS kontrolü — SpeechRecognition sadece HTTPS veya localhost'ta çalışır
+        const isSecureContext = window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+        if (!isSecureContext) {
+            setMicError('HTTPS_REQUIRED')
+            return
+        }
+
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
             const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
             const recognition = new SpeechRecognition()
@@ -370,13 +386,26 @@ export default function Documents() {
                     setTeachContent(prev => prev + ' ' + finalTranscript)
                 }
             }
-            recognition.onerror = () => setIsListening(false)
+            recognition.onerror = (event: any) => {
+                setIsListening(false)
+                if (event.error === 'not-allowed') {
+                    setMicError('Mikrofon erişimi reddedildi. Tarayıcı ayarlarından mikrofon iznini kontrol edin.')
+                } else if (event.error === 'no-speech') {
+                    setMicError('Ses algılanamadı. Lütfen tekrar deneyin.')
+                } else {
+                    setMicError(`Sesle yazma hatası: ${event.error}`)
+                }
+            }
             recognition.onend = () => setIsListening(false)
             recognitionRef.current = recognition
-            recognition.start()
-            setIsListening(true)
+            try {
+                recognition.start()
+                setIsListening(true)
+            } catch (e: any) {
+                setMicError('Sesle yazma başlatılamadı. Lütfen HTTPS üzerinden erişin.')
+            }
         } else {
-            alert('Tarayıcınız sesle yazmayı desteklemiyor.')
+            setMicError('Tarayıcınız sesle yazmayı desteklemiyor. Chrome veya Edge kullanın.')
         }
     }
 
@@ -715,6 +744,27 @@ export default function Documents() {
                             {teachMutation.isError && (
                                 <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 p-3 rounded-lg">
                                     <AlertCircle className="w-4 h-4" /> Bilgi öğretilirken hata oluştu.
+                                </div>
+                            )}
+                            {micError && (
+                                <div className="flex items-center justify-between text-sm text-amber-400 bg-amber-500/10 p-3 rounded-lg">
+                                    <div className="flex items-center gap-2">
+                                        <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                                        <span>
+                                            {micError === 'HTTPS_REQUIRED'
+                                                ? 'Sesle yazma güvenli bağlantı (HTTPS) gerektirir.'
+                                                : micError}
+                                        </span>
+                                    </div>
+                                    {micError === 'HTTPS_REQUIRED' && (
+                                        <button
+                                            type="button"
+                                            onClick={switchToHttps}
+                                            className="ml-3 px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded text-xs font-medium whitespace-nowrap transition-colors"
+                                        >
+                                            🔒 HTTPS'e Geç
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </form>

@@ -144,10 +144,12 @@ ERROR_HTML = """
 
 
 def create_desktop_shortcut():
-    """İlk çalıştırmada masaüstüne kısayol oluştur"""
+    """İlk çalıştırmada masaüstüne kısayol oluştur (sadece Windows)"""
     try:
         if not getattr(sys, 'frozen', False):
             return  # Sadece exe olarak çalışırken
+        if sys.platform != 'win32':
+            return  # Sadece Windows'ta kısayol oluştur
         exe_path = os.path.abspath(sys.executable)
         desktop = os.path.join(os.path.expanduser("~"), "Desktop")
         shortcut_path = os.path.join(desktop, "CompanyAI.lnk")

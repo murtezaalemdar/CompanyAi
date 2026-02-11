@@ -151,6 +151,28 @@ export const aiApi = {
     },
 }
 
+// Logo API (public — auth gerektirmez)
+export const logoApi = {
+    getLogo: async () => {
+        const response = await axios.get('/api/admin/public/logo')
+        return response.data
+    },
+
+    uploadLogo: async (file: File) => {
+        const formData = new FormData()
+        formData.append('file', file)
+        const response = await api.post('/admin/upload-logo', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        return response.data
+    },
+
+    deleteLogo: async () => {
+        const response = await api.delete('/admin/logo')
+        return response.data
+    },
+}
+
 // Admin API
 export const adminApi = {
     getUsers: async () => {
@@ -395,6 +417,70 @@ export const analyzeApi = {
             },
             body: formData,
         })
+    },
+}
+
+// Backup API
+export const backupApi = {
+    list: async () => {
+        const response = await api.get('/backup/list')
+        return response.data
+    },
+
+    create: async (note?: string) => {
+        const response = await api.post('/backup/create', null, {
+            params: note ? { note } : undefined,
+            timeout: 120000,
+        })
+        return response.data
+    },
+
+    download: (filename: string) => {
+        const token = localStorage.getItem('token')
+        return `${API_BASE_URL}/backup/download/${encodeURIComponent(filename)}?token=${token}`
+    },
+
+    restore: async (filename: string, confirm: boolean = false) => {
+        const response = await api.post('/backup/restore', { filename, confirm }, { timeout: 300000 })
+        return response.data
+    },
+
+    deleteBackup: async (filename: string) => {
+        const response = await api.delete(`/backup/delete/${encodeURIComponent(filename)}`)
+        return response.data
+    },
+
+    upload: async (file: File) => {
+        const formData = new FormData()
+        formData.append('file', file)
+        const response = await api.post('/backup/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 120000,
+        })
+        return response.data
+    },
+
+    getSchedule: async () => {
+        const response = await api.get('/backup/schedule')
+        return response.data
+    },
+
+    updateSchedule: async (schedule: {
+        enabled: boolean
+        frequency: string
+        time: string
+        day_of_week?: number
+        day_of_month?: number
+        max_keep?: number
+        note?: string
+    }) => {
+        const response = await api.put('/backup/schedule', schedule)
+        return response.data
+    },
+
+    getInfo: async () => {
+        const response = await api.get('/backup/info')
+        return response.data
     },
 }
 

@@ -7,7 +7,7 @@ Tekstil sektörü odaklı, her bölümün kendi bilgi tabanı ve yetkilendirmesi
 ## Sunucu
 - **IP:** 192.168.0.12, Ubuntu 22.04, Intel Xeon 4316 16-core, **64GB RAM**, no GPU
 - **LLM:** Ollama qwen2.5:72b (48GB in RAM, 0 swap), ~2 tok/s CPU-only
-- **Versiyon:** v2.6.0
+- **Versiyon:** v2.9.0
 
 ## Önemli Kararlar
 - Tamamen lokal LLM (Ollama + qwen2.5:72b) — GPU yok, CPU-only (Xeon Silver 4316), 64GB RAM
@@ -118,6 +118,98 @@ c478097 feat: Gorsel arama sonuclari karti + rich_data liste destegi
   - pywebview içinde gizlenir, tarayıcıda gösterilir
   - 7 gün dismiss (localStorage)
   - window.open() ile indirme (self-signed cert uyumlu)
+
+### 11 Şubat 2026 — Phase 21: Multi-Platform (Android + iOS + macOS)
+
+**Yapılan işler:**
+
+**Capacitor Kurulumu:**
+- Capacitor 6.2.1 kuruldu (core, cli, android, ios, app, splash-screen, status-bar)
+- `frontend/capacitor.config.ts` oluşturuldu (server URL, splash, statusbar, Android/iOS ayarları)
+- `npx cap add android` + `npx cap add ios` → native projeler eklendi
+- `npx cap sync` başarılı
+
+**Android Native:**
+- `AndroidManifest.xml` → usesCleartextTraffic + networkSecurityConfig
+- `network_security_config.xml` — 192.168.0.12 HTTP cleartext izni
+- Gradle 8.2.1 → 8.11.1, AGP 8.2.1 → 8.7.3 (JDK 23.0.2 uyumu)
+- compileSdk/targetSdk 34 → 35, minSdk 22
+- Tüm mipmap ikonları ve splash görselleri CompanyAI markalı olarak üretildi
+- ic_launcher_background.xml: #FFFFFF → #0f1117
+- `local.properties` şablonu oluşturuldu
+
+**iOS Native:**
+- `Info.plist` → NSAppTransportSecurity exception (192.168.0.12)
+- AppIcon 1024×1024 + Splash 2732×2732 üretildi
+
+**macOS Desktop:**
+- `desktop/companyai_mac.spec` — PyInstaller macOS spec (.app bundle, WebKit, ATS plist)
+- `desktop/build_mac.sh` — Otomatik build scripti (venv + pip + pyinstaller)
+- `desktop/app.py` — sys.platform kontrolü eklendi (kısayol sadece Windows'ta)
+
+**İkon & Splash Üretici:**
+- `scripts/generate_icons.py` — Pillow ile ~35 görsel üretir (Android/iOS/Windows/macOS)
+- `desktop/icon.ico` (6 boyut) + `desktop/icon_1024.png` üretildi
+
+**Diğer:**
+- `frontend/public/error.html` — mobil bağlantı hatası sayfası
+- `MOBILE_BUILD.md` — kapsamlı build rehberi
+- `frontend/package.json` — mobile:sync/android/ios/build-android scriptleri eklendi
+
+**Alınan kararlar:**
+- Capacitor 6 (Node 18 uyumu) > Capacitor 8 (Node 22 zorunlu)
+- Tüm platformlar aynı mimari: sunucu URL'ini WebView'da aç
+- Splash/ikon programatik üretilir (Pillow) — dış araca gerek yok
+- Gradle/AGP JDK 23 ile uyumlu sürümlere yükseltildi
+
+**Açık kalanlar:**
+- Android Studio + SDK kurulumu → test APK build
+- macOS'ta .app test build (macOS cihaz gerekli)
+- iOS Xcode test build (macOS + Xcode + Apple Developer)
+- Push notification (Firebase/APNs)
+- Offline cache modu
+
+---
+## 11 Şubat 2026 — Detaylı Kod & Deploy Notları (özet)
+
+- Versiyon: `2.7.0`
+- Tamamlanan ana öğeler: prompts rewrite, structured_output, tool_registry, reasoning, forecasting, kpi_engine, textile_knowledge, risk_analyzer, sql_generator, vector_store hybrid, engine entegrasyonu, deploy.
+- Önemli dosyalar: `app/core/engine.py`, `app/llm/prompts.py`, `app/llm/structured_output.py`, `app/core/tool_registry.py`, `app/core/kpi_engine.py`, `app/core/forecasting.py`, `app/core/textile_knowledge.py`, `app/core/risk_analyzer.py`, `app/core/sql_generator.py`, `app/rag/vector_store.py`.
+- Deploy: Backend servis `companyai-backend` yeniden başlatıldı; Uvicorn çalışıyor. Frontend build edildi.
+- Kısa next-steps: End-to-end smoke testleri; `sql_generator` test DB doğrulaması; hybrid ağırlık kalibrasyonu; tool-calling unit testleri; monitoring eklenecek.
+
+### 11 Şubat 2026 — v2.8.0: Sesli Asistan (STT + TTS)
+
+**Yapılan işler:**
+- Ask.tsx'e Web Speech API ile mikrofon butonu (STT) eklendi
+- Her mesaja Web Speech Synthesis ile "Dinle"/"Durdur" butonu (TTS) eklendi
+- Tamamen browser-native, backend değişikliği yok
+- Deploy başarılı
+
+### 11 Şubat 2026 — v2.9.0: Backup & Restore Sistemi
+
+**Yapılan işler:**
+- `app/api/routes/backup.py` (9 endpoint) oluşturuldu
+- PostgreSQL 8 tablo + ChromaDB (AI hafızası + RAG belgeleri) tek ZIP'te yedekleniyor
+- Settings.tsx iki sütunlu layout: Sol=Ayarlar, Sağ=Backup & Restore
+- Backup info kartları: DB boyutu, yedek sayısı, zamanlama, AI Hafıza (ChromaDB)
+- Manuel yedek oluştur/indir/sil/restore + otomatik zamanlama (günlük/haftalık/aylık)
+- Upload (harici ZIP) desteği
+- Tablo istatistikleri görünümü
+- `docs/db_schema.sql` — tüm tabloların şeması dökümente edildi
+
+**Çözülen buglar:**
+- `log_action()` TypeError — keyword-only args (user_id=, action=, resource=, details=)
+- `Optional[User]` plain param → FastAPI startup crash (SQLAlchemy model Pydantic'e cast edilemez)
+- JWT `sub` alanı user ID, email değil — download endpoint düzeltildi
+- Frontend TypeScript type eksiklikleri (chromadb_included, chromadb_size_mb)
+
+**Alınan kararlar:**
+- ChromaDB verileri de backup'a dahil (v2.9.0+)
+- Download: token query param ile (browser'dan doğrudan indirme için)
+- Backup dizini: /opt/companyai/backups/ (sunucuda)
+- Max 20 yedek saklanır (eski olanlar otomatik silinir)
+
 
 
 

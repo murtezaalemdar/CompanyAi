@@ -12,7 +12,7 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 - **Auth:** JWT (HS256) + pbkdf2_sha256 + RBAC (Admin/Manager/User)
 - **Frontend:** React + TypeScript + Vite + Tailwind CSS + TanStack Query
 - **Desktop:** pywebview + PyInstaller → CompanyAI.exe (12MB)
-- **Versiyon:** v2.6.0
+- **Versiyon:** v2.9.0
 - **Proje dizini (lokal):** `C:\Users\murteza.KARAKOC\Desktop\Python\CompanyAi`
 - **Proje dizini (sunucu):** `/opt/companyai`
 
@@ -37,14 +37,33 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VERSION` eşleşecek şekilde artır.
 (PATCH=bugfix, MINOR=özellik, MAJOR=kırılma)
 
-## 🖥️ Desktop Uygulaması
-- **Dosya:** `desktop/app.py` → pywebview native pencere
-- **Build:** `desktop/build.bat` veya `pyinstaller desktop/companyai.spec`
-- **Exe:** `dist/CompanyAI.exe` (~12MB tek dosya)
-- **Sunucu download:** `https://192.168.0.12/downloads/CompanyAI.exe`
-- **Özellikler:** HTTPS redirect desteği, self-signed cert, loading sayaç, imza
+## 🖥️ Desktop Uygulaması (Windows + macOS)
+- **Windows:** `desktop/app.py` → pywebview (Edge WebView2) native pencere
+  - Build: `desktop/build.bat` veya `pyinstaller desktop/companyai.spec`
+  - Çıktı: `dist/CompanyAI.exe` (~12MB tek dosya)
+  - Download: `https://192.168.0.12/downloads/CompanyAI.exe`
+- **macOS:** `desktop/app.py` → pywebview (WebKit cocoa) native pencere
+  - Build: `./desktop/build_mac.sh` veya `pyinstaller desktop/companyai_mac.spec`
+  - Çıktı: `dist/CompanyAI.app` bundle
+  - ATS exception için plist spec içine gömülü
+- **Ortak özellikler:** HTTPS redirect, self-signed cert, loading sayaç, imza
 - **Web banner:** `DesktopBanner.tsx` — tarayıcıdan girince "İndir" bildirimi (7 gün dismiss)
-4. `deploy_now.py` otomatik kontrol eder, farklıysa uyarı verir
+- `deploy_now.py` otomatik kontrol eder, farklıysa uyarı verir
+
+## 📱 Mobil Uygulama (Android + iOS)
+- **Framework:** Capacitor 6.2.1 (Node 18 uyumlu; v8 Node 22 gerektirdi)
+- **AppId:** `com.companyai.app`
+- **Mimari:** Sunucudaki React SPA'yı native WebView içinde açar (`http://192.168.0.12`)
+- **Config:** `frontend/capacitor.config.ts`
+- **Android:** `frontend/android/` — AGP 8.7.3, Gradle 8.11.1, SDK 35, minSdk 22
+  - HTTP izni: `network_security_config.xml` + `AndroidManifest.xml`
+  - Build: `cd frontend && npm run mobile:build-android`
+  - Aç: `npm run mobile:android` (Android Studio)
+- **iOS:** `frontend/ios/` — ATS exception (Info.plist)
+  - Aç: `npm run mobile:ios` (Xcode)
+- **Error page:** `frontend/public/error.html` — sunucu bağlantısı kesildiğinde
+- **Splash & İkonlar:** `python scripts/generate_icons.py` — Pillow ile ~35 görsel üretir
+- **npm Scriptleri:** `mobile:sync`, `mobile:android`, `mobile:ios`, `mobile:build-android`
 
 ## 📄 Doküman Yönetimi v2 (Güncel)
 - **Desteklenen format:** 65+ dosya formatı (metin, office, kod, e-posta, görüntü OCR)
@@ -63,6 +82,28 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
   - `type: "weather"` → WeatherCard.tsx
   - `type: "images"` → ImageResultsCard.tsx (lightbox + grid)
   - `type: "export"` → ExportCard.tsx (indirme kartı)
+
+## 🎙️ Ses Özellikleri (v2.8.0)
+- **STT:** Web Speech API (SpeechRecognition) — mikrofon butonu, Ask.tsx
+- **TTS:** Web Speech Synthesis — her mesajda "Dinle"/"Durdur" butonu
+- **Browser-native:** Backend değişikliği yok, tamamen frontend
+
+## 💾 Yedekleme & Geri Yükleme (v2.9.0)
+- **Backend:** `app/api/routes/backup.py` — 9 endpoint
+  - `GET /api/backup/list` — yedek listesi
+  - `POST /api/backup/create` — manuel yedek oluştur (PG + ChromaDB)
+  - `GET /api/backup/download/{filename}?token=JWT` — ZIP indir
+  - `POST /api/backup/restore` — geri yükle (confirm=true)
+  - `DELETE /api/backup/delete/{filename}` — yedek sil
+  - `POST /api/backup/upload` — harici ZIP yükle
+  - `GET /api/backup/schedule` — zamanlama ayarı oku
+  - `PUT /api/backup/schedule` — zamanlama güncelle
+  - `GET /api/backup/info` — tablo stats, disk bilgisi, ChromaDB boyutu
+- **Kapsam:** PostgreSQL (8 tablo) + ChromaDB (AI hafızası + RAG) tek ZIP'te
+- **Frontend:** Settings.tsx — iki sütunlu layout (Sol: Ayarlar, Sağ: Backup)
+- **DB Şeması:** `docs/db_schema.sql`
+- **log_action() uyarı:** keyword-only args kullanır: `await log_action(db, user_id=..., action=..., resource=..., details=...)`
+- **JWT sub alanı:** `sub` = user ID (int as string), email DEĞİL
 
 ## 📥 Export Sistemi (Phase 20c)
 - **Formatlar:** Excel (.xlsx), PDF, PowerPoint (.pptx), Word (.docx), CSV
@@ -85,8 +126,15 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 | `frontend/src/pages/Ask.tsx` | Ana sohbet sayfası (~1000 satır) |
 | `frontend/src/components/DesktopBanner.tsx` | Desktop app indirme banner'ı |
 | `frontend/src/services/api.ts` | Axios API client |
-| `desktop/app.py` | Masaüstü uygulaması (pywebview) |
-| `desktop/companyai.spec` | PyInstaller build config |
+| `frontend/capacitor.config.ts` | Capacitor mobil ayarları (sunucu URL, splash, statusbar) |
+| `frontend/public/error.html` | Mobil sunucu bağlantı hatası sayfası |
+| `desktop/app.py` | Masaüstü uygulaması (pywebview — Windows + macOS) |
+| `desktop/companyai.spec` | Windows PyInstaller build config |
+| `desktop/companyai_mac.spec` | macOS PyInstaller build config (.app bundle) |
+| `desktop/build_mac.sh` | macOS otomatik build scripti |
+| `desktop/icon.ico` / `icon_1024.png` | Desktop ikonları (Windows .ico + macOS PNG) |
+| `scripts/generate_icons.py` | Tüm platformlar ikon + splash üretici (Pillow) |
+| `MOBILE_BUILD.md` | Mobil uygulama build rehberi |
 | `deploy_now.py` | Otomatik deploy script |
 
 ## Kod Prensipleri
@@ -94,6 +142,24 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 - Okunabilirlik > kısalık
 - Fonksiyonlar tek iş yapar
 - `any` kullanma (zorunlu değilse)
+
+## 📱 Platform Desteği
+| Platform | Araç | Build | Çıktı | Durum |
+|----------|------|-------|-------|-------|
+| Windows | pywebview + PyInstaller | `desktop\build.bat` | `.exe` | ✅ Hazır |
+| macOS | pywebview + PyInstaller | `./desktop/build_mac.sh` | `.app` | ✅ Hazır |
+| Android | Capacitor 6 + WebView | `npm run mobile:android` | `.apk` | ✅ Hazır |
+| iOS | Capacitor 6 + WKWebView | `npm run mobile:ios` | `.ipa` | ✅ Hazır |
+| Web | React + Vite + Nginx | `deploy_now.py` | HTML | ✅ Canlı |
+
+### Sunucu URL Değiştiğinde Güncelle
+| Dosya | Alan |
+|-------|------|
+| `frontend/capacitor.config.ts` | `server.url` |
+| `desktop/app.py` | `SERVER_URL` |
+| `frontend/android/.../network_security_config.xml` | `<domain>` |
+| `frontend/ios/.../Info.plist` | `NSExceptionDomains` |
+| Sonra: `cd frontend && npx cap sync` | |
 
 ## Mimari
 - Business logic izole
@@ -113,6 +179,14 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 - Error handling merkezi
 - IO ve business logic ayrılır
 - Loglar anlamlı ve seviyeli (structlog)
+
+---
+## 11 Şubat 2026 — Özet Notlar (referans: reference.md)
+
+- Versiyon: `2.7.0` (backend + frontend)
+- Özet: Prompts rewrite, structured output, tool registry, multi-step reasoning, forecasting, KPI engine, textile knowledge, risk analyzer, SQL generator, vector_store hybrid ve engine entegrasyonu tamamlandı.
+- Deploy: `deploy_now.py` ile deploy yapıldı; `companyai-backend` servisi active; Uvicorn dinliyor.
+- Dikkat: `sql_generator` üretilecek SQL'leri test DB'de doğrulayın, hybrid search ağırlıklarını kalibre edin.
 
 
 

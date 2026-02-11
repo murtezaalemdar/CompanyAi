@@ -1,12 +1,13 @@
 """Admin API Routes"""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, extract
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from datetime import datetime, timedelta
 import json
+import base64
 
 from app.db.database import get_db
 from app.db.models import User, Query, SystemSettings
@@ -16,6 +17,94 @@ from app.auth.jwt_handler import hash_password
 from app.core.audit import log_action
 
 router = APIRouter()
+
+
+# ── Public Endpoints (auth gerektirmez) ───────────────────────────
+
+@router.get("/public/logo")
+async def get_public_logo(db: AsyncSession = Depends(get_db)):
+    """Login sayfasi icin sirket logosunu doner (auth gerektirmez)."""
+    result = await db.execute(
+        select(SystemSettings).where(SystemSettings.key == "company_logo")
+    )
+    setting = result.scalar_one_or_none()
+    if not setting or not setting.value:
+        return {"logo": None}
+    return {"logo": setting.value}
+
+
+@router.post("/upload-logo")
+async def upload_logo(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sirket logosunu yukler ve SystemSettings'e base64 olarak kaydeder (admin only)."""
+    check_admin(current_user)
+
+    # Dosya tipi kontrolu
+    allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Desteklenmeyen dosya tipi: {file.content_type}. Izin verilenler: PNG, JPEG, SVG, WebP"
+        )
+
+    # Boyut kontrolu (max 2MB)
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Logo dosyasi 2MB'dan buyuk olamaz")
+
+    # Base64'e cevir
+    b64 = base64.b64encode(content).decode("utf-8")
+    data_uri = f"data:{file.content_type};base64,{b64}"
+
+    # SystemSettings'e kaydet (upsert)
+    result = await db.execute(
+        select(SystemSettings).where(SystemSettings.key == "company_logo")
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.value = data_uri
+        existing.updated_by = current_user.id
+    else:
+        db.add(SystemSettings(
+            key="company_logo",
+            value=data_uri,
+            description="Sirket logosu (base64 data URI)",
+            updated_by=current_user.id,
+        ))
+
+    await log_action(
+        db, user=current_user, action="admin_upload_logo",
+        resource="setting:company_logo",
+        details=json.dumps({"filename": file.filename, "size_kb": round(len(content) / 1024, 1)}),
+    )
+    await db.commit()
+    return {"success": True, "logo": data_uri}
+
+
+@router.delete("/logo")
+async def delete_logo(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sirket logosunu siler (admin only)."""
+    check_admin(current_user)
+
+    result = await db.execute(
+        select(SystemSettings).where(SystemSettings.key == "company_logo")
+    )
+    setting = result.scalar_one_or_none()
+    if setting:
+        await db.delete(setting)
+        await log_action(
+            db, user=current_user, action="admin_delete_logo",
+            resource="setting:company_logo",
+        )
+        await db.commit()
+    return {"success": True}
 
 
 # Pydantic Schemas

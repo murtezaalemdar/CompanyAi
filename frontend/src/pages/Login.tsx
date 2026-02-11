@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { BrainCircuit, Loader2, AlertCircle } from 'lucide-react'
 import { APP_VERSION } from '../constants'
+import { logoApi } from '../services/api'
 import DesktopBanner from '../components/DesktopBanner'
 
 export default function Login() {
@@ -10,8 +11,15 @@ export default function Login() {
     const [password, setPassword] = useState('')
     const [error, setError] = useState('')
     const [isSubmitting, setIsSubmitting] = useState(false)
+    const [companyLogo, setCompanyLogo] = useState<string | null>(null)
     const { login } = useAuth()
     const navigate = useNavigate()
+
+    useEffect(() => {
+        logoApi.getLogo().then(data => {
+            if (data.logo) setCompanyLogo(data.logo)
+        }).catch(() => {})
+    }, [])
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
@@ -35,9 +43,17 @@ export default function Login() {
 
             <div className="sm:mx-auto sm:w-full sm:max-w-md">
                 <div className="flex justify-center animate-float">
-                    <div className="bg-primary-500/10 p-4 rounded-2xl border border-primary-500/20 backdrop-blur-sm">
-                        <BrainCircuit className="w-12 h-12 text-primary-500" />
-                    </div>
+                    {companyLogo ? (
+                        <img
+                            src={companyLogo}
+                            alt="Company Logo"
+                            className="h-20 w-auto object-contain drop-shadow-[0_4px_24px_rgba(99,102,241,0.25)]"
+                        />
+                    ) : (
+                        <div className="bg-primary-500/10 p-4 rounded-2xl border border-primary-500/20 backdrop-blur-sm">
+                            <BrainCircuit className="w-12 h-12 text-primary-500" />
+                        </div>
+                    )}
                 </div>
                 <h2 className="mt-6 text-center text-3xl font-extrabold text-white tracking-tight">
                     Company.AI
@@ -110,23 +126,16 @@ export default function Login() {
                         </div>
                     </form>
 
-                    <div className="mt-6">
-                        <div className="relative">
-                            <div className="absolute inset-0 flex items-center">
-                                <div className="w-full border-t border-dark-700" />
-                            </div>
-                            <div className="relative flex justify-center text-sm">
-                                <span className="px-2 bg-dark-900/50 text-dark-400">
-                                    Demo Hesabı
-                                </span>
-                            </div>
+                    {/* Şirket logosu — alt bölüm */}
+                    {companyLogo && (
+                        <div className="mt-8 flex justify-center">
+                            <img
+                                src={companyLogo}
+                                alt="Company Logo"
+                                className="h-20 w-auto object-contain opacity-60 hover:opacity-80 transition-opacity duration-500"
+                            />
                         </div>
-
-                        <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-dark-500 text-center">
-                            <p>Email: admin@company.ai</p>
-                            <p>Şifre: admin123</p>
-                        </div>
-                    </div>
+                    )}
                 </div>
             </div>
 

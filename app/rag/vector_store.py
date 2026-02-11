@@ -169,29 +169,53 @@ def search_documents(query: str, n_results: int = 3, department: str = None) -> 
         if department and department != "Genel":
             where_filter = {"department": department}
 
+        # Daha fazla aday getir, sonra re-rank et
+        fetch_n = min(n_results * 3, 15)
+        
         # Ara
         results = collection.query(
             query_embeddings=[query_embedding],
-            n_results=n_results,
+            n_results=fetch_n,
             where=where_filter if where_filter else None
         )
         
-        # Sonuçları formatla
+        # Sonuçları formatla + hybrid skor hesapla
         documents = []
         if results and results['documents']:
+            query_terms = set(query.lower().split())
+            
             for i, doc in enumerate(results['documents'][0]):
                 metadata = results['metadatas'][0][i] if results['metadatas'] else {}
                 distance = results['distances'][0][i] if results['distances'] else 0
+                
+                # Semantic skor (ChromaDB distance → similarity)
+                semantic_score = max(0, 1 - distance)
+                
+                # Keyword skor (BM25-like basit)
+                doc_lower = doc.lower()
+                keyword_hits = sum(1 for t in query_terms if t in doc_lower)
+                keyword_score = keyword_hits / max(len(query_terms), 1)
+                
+                # Hybrid skor: %70 semantic + %30 keyword
+                hybrid_score = 0.7 * semantic_score + 0.3 * keyword_score
                 
                 documents.append({
                     "content": doc,
                     "source": metadata.get("source", "Bilinmeyen"),
                     "type": metadata.get("type", "text"),
                     "department": metadata.get("department", "Genel"),
-                    "relevance": 1 - distance,  # Mesafeyi benzerliğe çevir
+                    "relevance": round(hybrid_score, 4),
+                    "distance": distance,
+                    "semantic_score": round(semantic_score, 4),
+                    "keyword_score": round(keyword_score, 4),
                 })
         
-        logger.info("search_completed", query=query[:50], results=len(documents))
+        # Re-rank: hybrid skora göre sırala, en iyi n_results'ı döndür
+        documents.sort(key=lambda x: x["relevance"], reverse=True)
+        documents = documents[:n_results]
+        
+        logger.info("search_completed", query=query[:50], results=len(documents),
+                     hybrid_search=True)
         return documents
         
     except Exception as e:

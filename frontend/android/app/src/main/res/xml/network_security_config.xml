@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CompanyAI — Android Network Security Config
+  HTTP izni (192.168.0.12 sunucusu için)
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">192.168.0.12</domain>
+    </domain-config>
+</network-security-config>

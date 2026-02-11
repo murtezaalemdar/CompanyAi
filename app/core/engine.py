@@ -1,6 +1,8 @@
 """Merkezi İşlem Motoru - Tüm AI sorgu işlemleri burada koordine edilir
 
 RAG + Web Arama + Semantik Hafıza + Kişiselleştirme
++ Tool Calling + Multi-Step Reasoning + Structured Output
++ Forecasting + KPI Engine + Textile Knowledge + Risk Analysis
 """
 
 from typing import Optional
@@ -45,6 +47,58 @@ try:
 except ImportError:
     EXPORT_AVAILABLE = False
     detect_export_request = lambda q: None
+
+# ── YENİ MODÜLLER ──
+
+# Tool Calling
+try:
+    from app.core.tool_registry import tool_registry, detect_tool_calls
+    TOOLS_AVAILABLE = True
+except ImportError:
+    TOOLS_AVAILABLE = False
+    tool_registry = None
+
+# Multi-step Reasoning
+try:
+    from app.core.reasoning import needs_multi_step, plan_reasoning_steps, execute_reasoning_chain, format_reasoning_result
+    REASONING_AVAILABLE = True
+except ImportError:
+    REASONING_AVAILABLE = False
+
+# Structured Output
+try:
+    from app.llm.structured_output import force_json_output, auto_structure, get_schema_for_mode
+    STRUCTURED_OUTPUT_AVAILABLE = True
+except ImportError:
+    STRUCTURED_OUTPUT_AVAILABLE = False
+
+# KPI Engine
+try:
+    from app.core.kpi_engine import interpret_kpi_value, list_kpis, kpi_scorecard
+    KPI_ENGINE_AVAILABLE = True
+except ImportError:
+    KPI_ENGINE_AVAILABLE = False
+
+# Textile Knowledge
+try:
+    from app.core.textile_knowledge import get_glossary_term, analyze_waste, get_efficiency_loss_framework
+    TEXTILE_AVAILABLE = True
+except ImportError:
+    TEXTILE_AVAILABLE = False
+
+# Risk Analyzer
+try:
+    from app.core.risk_analyzer import assess_risk, risk_heatmap, fmea_analysis, build_risk_report_prompt
+    RISK_AVAILABLE = True
+except ImportError:
+    RISK_AVAILABLE = False
+
+# SQL Generator
+try:
+    from app.core.sql_generator import generate_sql, build_sql_prompt
+    SQL_AVAILABLE = True
+except ImportError:
+    SQL_AVAILABLE = False
 
 logger = structlog.get_logger()
 
@@ -222,6 +276,41 @@ async def process_question(
         logger.error("llm_error", error=str(e))
         llm_answer = f"[Hata] LLM yanıt üretemedi: {str(e)}"
     
+    # ── 5b. TOOL CALLING — LLM çıktısında tool çağrısı var mı? ──
+    tool_results = []
+    if TOOLS_AVAILABLE and llm_answer and not llm_answer.startswith("[Hata]"):
+        try:
+            detected_tools = detect_tool_calls(llm_answer)
+            if detected_tools:
+                for tool_call in detected_tools[:3]:  # Max 3 tool
+                    tool_name = tool_call.get("tool", "")
+                    tool_params = tool_call.get("params", {})
+                    result = tool_registry.execute(tool_name, tool_params)
+                    if result and not result.get("error"):
+                        tool_results.append({
+                            "tool": tool_name,
+                            "result": result,
+                        })
+                if tool_results:
+                    # Tool sonuçlarını cevaba ekle
+                    tool_text = "\n\n---\n📊 **Hesaplama Sonuçları:**\n"
+                    for tr in tool_results:
+                        tool_text += f"\n**{tr['tool']}**: {_format_tool_result(tr['result'])}"
+                    llm_answer += tool_text
+                    logger.info("tools_executed", count=len(tool_results))
+        except Exception as e:
+            logger.warning("tool_execution_error", error=str(e))
+    
+    # ── 5c. STRUCTURED OUTPUT — Analiz/Rapor modunda JSON yapılandırma ──
+    structured_data = None
+    if STRUCTURED_OUTPUT_AVAILABLE and context.get("mode") in ["Analiz", "Rapor", "Acil"]:
+        try:
+            structured_data = auto_structure(llm_answer)
+            if structured_data and structured_data.get("sections"):
+                logger.info("output_structured", sections=len(structured_data.get("sections", [])))
+        except Exception as e:
+            logger.debug("structured_output_skipped", error=str(e))
+    
     # 6. Sonuç
     sources = []
     if relevant_docs:
@@ -269,6 +358,8 @@ async def process_question(
         "sources": sources,
         "web_searched": web_results is not None,
         "rich_data": rich_data if rich_data else None,
+        "tool_results": tool_results if tool_results else None,
+        "structured_data": structured_data,
     }
     
     # 7. Hafızaya kaydet (öğrenme)
@@ -328,4 +419,37 @@ async def get_system_status() -> dict:
         "available_models": models,
         "memory_entries": memory_size,
         "rag": rag_stats,
+        "modules": {
+            "tools": TOOLS_AVAILABLE,
+            "reasoning": REASONING_AVAILABLE,
+            "structured_output": STRUCTURED_OUTPUT_AVAILABLE,
+            "kpi_engine": KPI_ENGINE_AVAILABLE,
+            "textile_knowledge": TEXTILE_AVAILABLE,
+            "risk_analyzer": RISK_AVAILABLE,
+            "sql_generator": SQL_AVAILABLE,
+            "export": EXPORT_AVAILABLE,
+            "web_search": WEB_SEARCH_AVAILABLE,
+        },
     }
+
+
+def _format_tool_result(result: dict) -> str:
+    """Tool sonucunu kullanıcı dostu formata çevir."""
+    if not result:
+        return ""
+    
+    parts = []
+    for key, value in result.items():
+        if key in ("error", "tool"):
+            continue
+        if isinstance(value, float):
+            parts.append(f"{key}: {value:.2f}")
+        elif isinstance(value, dict):
+            inner = ", ".join(f"{k}: {v}" for k, v in value.items())
+            parts.append(f"{key}: {{{inner}}}")
+        elif isinstance(value, list):
+            parts.append(f"{key}: {', '.join(str(v) for v in value[:5])}")
+        else:
+            parts.append(f"{key}: {value}")
+    
+    return " | ".join(parts) if parts else str(result)

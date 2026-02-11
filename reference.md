@@ -2,7 +2,7 @@
 
 > **Proje Adı:** Kurumsal Yapay Zeka Asistanı – LOCAL & ÖĞRENEN  
 > **Amaç:** Kurumsal kullanım için tasarlanmış, tamamen lokal çalışan ve öğrenen bir AI asistan sistemi.  
-> **Son Güncelleme:** 9 Şubat 2026 (Phase 19: Konuşma Hafızası & Session Persistence Düzeltmesi)
+> **Son Güncelleme:** 11 Şubat 2026 (v2.9.0 — Backup & Restore + Sesli Asistan)
 
 ---
 
@@ -21,38 +21,45 @@ CompanyAi/
 │   │       ├── ask.py                # AI soru-cevap (/api/ask)
 │   │       ├── auth.py               # JWT auth (/api/auth)
 │   │       ├── documents.py          # RAG doküman yönetimi (/api/rag)
+│   │       ├── export.py             # Export API (/api/export) — Excel/PDF/PPTX/Word/CSV
 │   │       ├── memory.py             # Hafıza API (/api/memory)
 │   │       └── multimodal.py         # Dosya+resim destekli AI (/api/ask/multimodal)
 │   ├── auth/                         # Kimlik & yetkilendirme
 │   │   ├── jwt_handler.py            # JWT token (access+refresh) + password hash (pbkdf2)
 │   │   └── rbac.py                   # Rol tanımları + check_admin/check_admin_or_manager
 │   ├── core/                         # Çekirdek işlem motoru
-│   │   ├── audit.py                  # ✅ Denetim kaydı (AuditLog) yardımcısı
+│   │   ├── audit.py                  # Denetim kaydı (AuditLog) yardımcısı
 │   │   ├── constants.py              # Departman sabitleri (28 departman)
-│   │   └── engine.py                 # Router → RAG → Memory → LLM pipeline
+│   │   ├── engine.py                 # Router → RAG → Memory → Web → Export → LLM pipeline
+│   │   └── export_service.py         # Excel/PDF/PPTX/Word/CSV üretici
 │   ├── db/                           # Veritabanı katmanı
 │   │   ├── database.py               # Async SQLAlchemy engine & session
 │   │   └── models.py                 # User, Query, AuditLog, SystemSettings
 │   ├── llm/                          # Dil modeli entegrasyonu
 │   │   ├── client.py                 # Ollama HTTP client (connection pooling + generate/stream/health/vision)
-│   │   ├── local_llm.py              # ✅ OllamaClient wrapper (geriye uyumluluk)
-│   │   └── prompts.py                # Departman/risk bazlı prompt şablonları + injection koruması
+│   │   ├── local_llm.py              # OllamaClient wrapper (geriye uyumluluk)
+│   │   ├── prompts.py                # Departman/risk bazlı prompt şablonları + injection koruması
+│   │   └── web_search.py             # SerpAPI + Google Images + DuckDuckGo fallback
 │   ├── memory/                       # Hafıza ve öğrenme sistemi
+│   │   ├── persistent_memory.py      # PostgreSQL sohbet geçmişi + session yönetimi
 │   │   └── vector_memory.py          # ChromaDB + SentenceTransformers
 │   ├── rag/                          # Retrieval Augmented Generation
 │   │   └── vector_store.py           # Doküman chunk'lama & vektör arama (ChromaDB)
 │   ├── router/                       # Akıllı yönlendirme
 │   │   └── router.py                 # Keyword → departman/mod/risk yönlendirici
-│   ├── voice/                        # Sesli asistan
-│   │   └── field_assistant.py        # ✅ STT (Whisper) + TTS (pyttsx3/gTTS)
-│   └── dashboard/                    # Yönetim paneli (eski yapı)
-│       ├── backend/
-│       └── frontend/
+│   └── voice/                        # Sesli asistan
+│       └── field_assistant.py        # STT (Whisper) + TTS (pyttsx3/gTTS)
 ├── frontend/                         # React + TypeScript Dashboard
+│   ├── capacitor.config.ts           # ★ Capacitor mobil ayarları (sunucu URL, splash, statusbar)
+│   ├── package.json                  # npm bağımlılıkları + mobile scriptler
+│   ├── vite.config.ts                # Vite dev server + proxy
+│   ├── tailwind.config.js
+│   ├── public/
+│   │   └── error.html                # ★ Mobil — sunucu bağlantı hatası sayfası
 │   ├── src/
 │   │   ├── App.tsx                   # React Router & Protected Routes
 │   │   ├── main.tsx                  # Entry point
-│   │   ├── constants.ts              # Frontend sabitleri
+│   │   ├── constants.ts              # Frontend sabitleri + APP_VERSION
 │   │   ├── contexts/
 │   │   │   └── AuthContext.tsx        # JWT auth context
 │   │   ├── services/
@@ -66,27 +73,20 @@ CompanyAi/
 │   │   │   ├── Settings.tsx          # Ayarlar
 │   │   │   └── Users.tsx             # Kullanıcı yönetimi
 │   │   └── components/
+│   │       ├── DesktopBanner.tsx      # Desktop app indirme banner'ı
+│   │       ├── ExportCard.tsx         # Export indirme kartı
 │   │       ├── FileUploadModal.tsx    # Dosya + kamera yükleme modal'ı
-│   │       └── Layout.tsx            # Sidebar navigasyon
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── tailwind.config.js
-├── docker/                           # Docker yapılandırması
-│   ├── docker-compose.yml
-│   ├── Dockerfile
-│   └── nginx.conf
-├── docs/                             # Dokümantasyon
-│   ├── architecture/
-│   └── deployment/
+│   │       ├── Layout.tsx            # Sidebar navigasyon
+│   │       ├── QuickExportButtons.tsx # Her mesajdan export butonları
+│   │       └── WeatherCard.tsx        # Hava durumu kartı
+│   │   │   ├── AndroidManifest.xml   # HTTP izni + networkSecurityConfig
+│   │   │   └── res/
+│   ├── app.py                        # pywebview native pencere (cross-platform)
+│   ├── build.bat                     # Windows build scripti
 ├── keys/                             # SSH anahtarları
 ├── backups/                          # Veritabanı yedekleri
-├── memory-bank/                      # Copilot hafıza dosyaları
-├── scripts/                          # Yardımcı scriptler
-└── textile_knowledge_base/           # Tekstil bilgi tabanı
-```
 
----
-
+> ★ Phase 21'de eklenen / güncellenen dosyalar
 ## 🏗️ Mimari Genel Bakış
 
 ```mermaid
@@ -134,6 +134,7 @@ flowchart LR
 | `/api/admin` | admin | Kullanıcı CRUD, dashboard, settings, audit |
 | `/api/rag` | documents | RAG doküman yönetimi |
 | `/api` | multimodal | Dosya + resim destekli AI (vision LLM) |
+| `/api/backup` | backup | ★ Yedekleme & geri yükleme (PG + ChromaDB) |
 
 ---
 
@@ -626,10 +627,28 @@ sudo systemctl restart nginx
 - **Yönlendirme:** Tüm HTTP (80) istekleri otomatik olarak HTTPS (443)'e yönlendiriliyor.
 - **Sertifika Yolu:** `/etc/nginx/ssl/companyai.crt`
 
-#### 4. Otomatik Yedekleme
-- **Script:** `/usr/local/bin/companyai-backup.sh`
-- **Zamanlama:** Her gece 03:00 (Cronjob).
-- **Konum:** `/opt/companyai/backups/` (Son 7 günlük yedek saklanır).
+#### 4. Otomatik Yedekleme (v2.9.0 — API ile)
+- **API:** `app/api/routes/backup.py` — 9 endpoint
+- **Kapsamı:** PostgreSQL (8 tablo) + ChromaDB (AI hafızası + RAG belgeleri) tek ZIP
+- **Konum:** `/opt/companyai/backups/` (max 20 yedek)
+- **Zamanlama:** UI'dan ayarlanabilir (günlük/haftalık/aylık)
+- **Tablolar:** users, queries, audit_logs, system_settings, chat_sessions, conversation_memory, user_preferences, company_culture
+- **ChromaDB:** company_documents (RAG) + company_memory (AI hafıza)
+- **DB Şeması:** `docs/db_schema.sql`
+- **Endpoint'ler:**
+  - `GET /api/backup/list` — yedek listesi
+  - `POST /api/backup/create` — manuel yedek
+  - `GET /api/backup/download/{filename}?token=JWT` — indir
+  - `POST /api/backup/restore` — geri yükle
+  - `DELETE /api/backup/delete/{filename}` — sil
+  - `POST /api/backup/upload` — harici ZIP yükle
+  - `GET/PUT /api/backup/schedule` — zamanlama
+  - `GET /api/backup/info` — sistem bilgisi
+
+#### 5. Sesli Asistan (v2.8.0)
+- **STT:** Web Speech API (SpeechRecognition) — mikrofon butonu, Ask.tsx
+- **TTS:** Web Speech Synthesis — her mesajda "Dinle"/"Durdur" butonu
+- **Browser-native:** Backend değişikliği yok
 
 
 ---
@@ -916,3 +935,209 @@ sudo systemctl restart nginx
 - Session mesajlari: PASSED (2 mesaj, session_id ile kaydedilmis)
 - Session switch: PASSED (dogru mesajlar yuklendi)
 - X-Request-ID: PASSED
+
+---
+
+## Phase 20: Web Arama + Görsel Arama + Rapor Export
+
+**Commit serisi:** `39bfbbf` → `ad5a827` | **Tarih:** 10 Şubat 2026
+
+### Phase 20a — Web Arama Entegrasyonu
+- `app/llm/web_search.py` — SerpAPI Google arama + DuckDuckGo fallback
+- `engine.py` → web sonuçlarını LLM prompt'una dahil etme
+- `WeatherCard.tsx` — Google tarzı hava durumu gradient kartı
+- `rich_data` sistemi: `Optional[list]` → birden fazla kart tipi desteği
+
+### Phase 20b — Görsel Arama
+- Google Images engine (`google_images`) entegrasyonu
+- `ImageResultsCard.tsx` — 3×4 grid, lightbox, lazy loading
+- `_query_needs_images()` — Türkçe tetikleyici kelimeler (örnek, desen, baskı vb.)
+
+### Phase 20c — Rapor Export
+- `app/core/export_service.py` — 5 format: Excel, PDF, PPTX, Word, CSV
+- `app/api/routes/export.py` — `/api/export/generate` + `/api/export/download/{file_id}`
+- `ExportCard.tsx` — Format ikonu + indirme butonu
+- `QuickExportButtons.tsx` — Her mesajdan sonradan export
+- Otomatik tetikleme: "excel olarak", "sunum hazırla" → format algılama
+- Markdown tablo parse → stilli çıktı (Excel: auto-width, PDF: transliteration)
+
+---
+
+## Phase 21: Multi-Platform — Android + iOS + macOS
+
+**Tarih:** 11 Şubat 2026
+
+### Genel Bakış
+
+Desktop viewer (pywebview) mantığı tüm platformlara genişletildi. Tüm native uygulamalar aynı mimariyi kullanır: **sunucudaki web arayüzünü (http://192.168.0.12) bir WebView içinde açar.**
+
+```
+                    ┌─────────────┐
+                    │  CompanyAI   │
+                    │   Sunucu     │
+                    │ 192.168.0.12 │
+                    └──────┬──────┘
+                           │ HTTP
+         ┌─────────────────┼─────────────────┐
+         │                 │                 │
+   ┌─────┴─────┐   ┌──────┴──────┐   ┌──────┴──────┐
+   │  Desktop   │   │   Mobil     │   │    Web      │
+   │  Viewer    │   │   Viewer    │   │  (Nginx)    │
+   ├───────────┤   ├────────────┤   ├────────────┤
+   │ Windows   │   │  Android   │   │  Tarayıcı   │
+   │ pywebview  │   │  Capacitor │   │  React SPA  │
+   │ .exe       │   │  WebView   │   │             │
+   ├───────────┤   ├────────────┤   └────────────┘
+   │ macOS     │   │  iOS       │
+   │ pywebview  │   │  Capacitor │
+   │ .app       │   │  WKWebView │
+   └───────────┘   └────────────┘
+```
+
+### Platform Desteği Özeti
+
+| Platform | Araç | Build Komutu | Çıktı | Durum |
+|----------|------|-------------|-------|-------|
+| **Windows** | pywebview + PyInstaller | `desktop\build.bat` | `dist/CompanyAI.exe` (~12MB) | ✅ Hazır |
+| **macOS** | pywebview + PyInstaller | `./desktop/build_mac.sh` | `dist/CompanyAI.app` | ✅ Hazır (macOS'ta test edilecek) |
+| **Android** | Capacitor 6 + WebView | `npm run mobile:android` | `.apk` | ✅ Hazır (Android Studio gerekli) |
+| **iOS** | Capacitor 6 + WKWebView | `npm run mobile:ios` | `.ipa` | ✅ Hazır (macOS + Xcode gerekli) |
+| **Web** | React + Vite + Nginx | `deploy_now.py` | `/var/www/html/` | ✅ Canlı |
+
+### Capacitor Kurulumu
+
+**Seçilen versiyon:** Capacitor 6.2.1 (Node 18 uyumlu — Capacitor 8, Node 22 gerektirdiği için tercih edilmedi)
+
+**Kurulan paketler (frontend/package.json):**
+| Paket | Versiyon | Açıklama |
+|-------|---------|----------|
+| `@capacitor/core` | 6.2.1 | Capacitor çekirdek runtime |
+| `@capacitor/cli` | 6.2.1 | Capacitor komut satırı aracı |
+| `@capacitor/android` | 6.2.1 | Android platform desteği |
+| `@capacitor/ios` | 6.2.1 | iOS platform desteği |
+| `@capacitor/app` | 6.0.3 | Native app lifecycle |
+| `@capacitor/splash-screen` | 6.0.4 | Splash screen kontrolü |
+| `@capacitor/status-bar` | 6.0.3 | Status bar stili kontrolü |
+
+**Capacitor config (`frontend/capacitor.config.ts`):**
+```typescript
+{
+  appId: 'com.companyai.app',
+  appName: 'CompanyAI',
+  webDir: 'dist',
+  server: {
+    url: 'http://192.168.0.12',     // Sunucu URL'i
+    cleartext: true,                 // HTTP izni
+    errorPath: 'error.html',        // Bağlantı hatası sayfası
+  },
+  android: {
+    allowMixedContent: true,
+    backgroundColor: '#0f1117',
+    overrideUserAgent: 'CompanyAI-Mobile/2.6.0',
+  },
+  ios: {
+    backgroundColor: '#0f1117',
+    overrideUserAgent: 'CompanyAI-Mobile/2.6.0',
+    preferredContentMode: 'mobile',
+    scheme: 'CompanyAI',
+  },
+  plugins: {
+    SplashScreen: { backgroundColor: '#0f1117', spinnerColor: '#6366f1' },
+    StatusBar: { style: 'DARK', backgroundColor: '#0f1117' },
+  }
+}
+```
+
+### Android Native Proje (`frontend/android/`)
+
+| Dosya | Değişiklik |
+|-------|------------|
+| `AndroidManifest.xml` | `usesCleartextTraffic=true` + `networkSecurityConfig` eklendi |
+| `res/xml/network_security_config.xml` | **Yeni** — 192.168.0.12 için HTTP cleartext izni |
+| `build.gradle` (root) | AGP 8.2.1 → **8.7.3** (JDK 23 uyumu) |
+| `gradle-wrapper.properties` | Gradle 8.2.1 → **8.11.1** (JDK 23 uyumu) |
+| `variables.gradle` | compileSdk 34 → **35**, targetSdk 34 → **35** |
+| `local.properties` | **Yeni** — SDK yolu şablonu |
+| `res/values/ic_launcher_background.xml` | #FFFFFF → **#0f1117** (koyu tema) |
+| `res/mipmap-*/` | Tüm ikon boyutları CompanyAI markalı olarak üretildi |
+| `res/drawable-*/splash.png` | Tüm splash boyutları CompanyAI markalı olarak üretildi |
+
+### iOS Native Proje (`frontend/ios/`)
+
+| Dosya | Değişiklik |
+|-------|------------|
+| `Info.plist` | `NSAppTransportSecurity` → 192.168.0.12 HTTP exception eklendi |
+| `Assets.xcassets/AppIcon.appiconset/` | 1024×1024 CompanyAI ikonu üretildi |
+| `Assets.xcassets/Splash.imageset/` | 2732×2732 CompanyAI splash üretildi (3 varyant) |
+
+### macOS Desktop
+
+| Dosya | Değişiklik |
+|-------|------------|
+| `desktop/app.py` | `sys.platform != 'win32'` kontrolü — kısayol oluşturma sadece Windows'ta |
+| `desktop/companyai_mac.spec` | **Yeni** — PyInstaller macOS spec: WebKit cocoa, .app bundle, ATS plist |
+| `desktop/build_mac.sh` | **Yeni** — venv + pywebview + PyInstaller otomatik build scripti |
+
+### İkon & Splash Üretici (`scripts/generate_icons.py`)
+
+**Yeni** — Pillow ile programatik görsel üretim. Toplam ~35 dosya üretir:
+
+| Platform | Üretilen Görseller |
+|----------|-------------------|
+| **Android** | 5 mipmap boyutu × 3 varyant (launcher, round, foreground) = 15 ikon + 11 splash |
+| **iOS** | 1 × 1024×1024 AppIcon + 3 × 2732×2732 splash |
+| **Windows** | 1 × icon.ico (6 boyut: 16/32/48/64/128/256px) |
+| **macOS** | 1 × icon_1024.png (iconutil ile .icns'e dönüştürülür) |
+
+**Marka tasarımı:**
+- Arka plan: #0f1117 (koyu tema)
+- Daire: #6366f1 → #5558e6 (gradient efekt)
+- Logo: Beyaz "C" + açık mor "AI" alt yazı
+- Splash: "CompanyAI" yazı (beyaz + mor) + "Designed by Murteza ALEMDAR" imza
+
+**Kullanım:**
+```bash
+pip install Pillow
+python scripts/generate_icons.py
+cd frontend && npx cap sync
+```
+
+### npm Scriptleri (frontend/package.json)
+
+| Script | Komut | Açıklama |
+|--------|-------|----------|
+| `mobile:sync` | `npx cap sync` | Web assets'leri native projelere kopyala |
+| `mobile:android` | `build + sync + cap open android` | Android Studio'da projeyi aç |
+| `mobile:ios` | `build + sync + cap open ios` | Xcode'da projeyi aç |
+| `mobile:build-android` | `build + sync + gradlew assembleDebug` | Terminal APK build |
+
+### Error Sayfası (`frontend/public/error.html`)
+
+**Yeni** — Mobilde sunucu bağlantısı kesildiğinde gösterilen tam HTML sayfası:
+- Koyu tema (#0f1117 arka plan)
+- CompanyAI logosu
+- "Sunucuya Ulaşılamıyor" mesajı + "Tekrar Dene" butonu
+- "Designed by Murteza ALEMDAR" + versiyon badge
+- Safe-area-inset desteği (iPhone notch uyumu)
+
+### Sunucu URL Değiştiğinde Güncellenmesi Gereken Dosyalar
+
+| Dosya | Değiştirilecek Yer |
+|-------|-------------------|
+| `frontend/capacitor.config.ts` | `server.url` |
+| `desktop/app.py` | `SERVER_URL` sabiti |
+| `frontend/android/.../network_security_config.xml` | `<domain>` |
+| `frontend/ios/.../Info.plist` | `NSExceptionDomains` key |
+| `frontend/public/error.html` | Bilgi metni (opsiyonel) |
+| Sonra: `npx cap sync` çalıştır | |
+
+### Açık Kalanlar
+
+| # | Görev | Bağımlılık |
+|---|-------|------------|
+| 1 | Android Studio + SDK kurulumu → APK test build | Android Studio indirilecek |
+| 2 | macOS'ta `.app` test build | macOS cihaz gerekli |
+| 3 | iOS Xcode test build | macOS + Xcode + Apple Developer |
+| 4 | App Store / Play Store dağıtım | Apple Developer ($99/yıl) + Google Play ($25) |
+| 5 | Push notification | Capacitor push plugin + Firebase/APNs |
+| 6 | Offline modu (cache) | Service worker veya Capacitor storage |

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>CompanyAI — Bağlantı Hatası</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        background: #0f1117;
+        color: #e2e8f0;
+        font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        height: 100vh; overflow: hidden;
+        padding: 24px;
+        -webkit-user-select: none; user-select: none;
+    }
+    .logo { font-size: 1.8rem; font-weight: 800; margin-bottom: 1.5rem; }
+    .logo span { color: #6366f1; }
+    .icon { font-size: 3rem; margin-bottom: 1rem; }
+    h2 { color: #f87171; margin-bottom: 0.5rem; font-size: 1.1rem; }
+    p { color: #94a3b8; font-size: 0.9rem; margin-bottom: 1.5rem; text-align: center; max-width: 340px; line-height: 1.5; }
+    .btn {
+        padding: 0.7rem 2.5rem; background: #6366f1; color: white;
+        border: none; border-radius: 12px; font-size: 1rem; cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+    }
+    .btn:active { background: #4f46e5; transform: scale(0.97); }
+    .footer {
+        position: absolute; bottom: max(16px, env(safe-area-inset-bottom));
+        display: flex; flex-direction: column; align-items: center; gap: 6px;
+    }
+    .sig { color: #334155; font-size: 0.6rem; letter-spacing: 0.25em; text-transform: uppercase; }
+    .sig b { color: #475569; letter-spacing: 0.18em; font-weight: 500; }
+    .ver {
+        color: #475569; font-size: 0.6rem; font-family: monospace;
+        padding: 2px 10px; border: 1px solid #1e293b; border-radius: 99px;
+    }
+</style>
+</head>
+<body>
+    <div class="logo">Company<span>AI</span></div>
+    <div class="icon">⚠️</div>
+    <h2>Sunucuya Ulaşılamıyor</h2>
+    <p>CompanyAI sunucusu yanıt vermiyor.<br>
+    Cihazınızın şirket ağına bağlı olduğundan emin olun.</p>
+    <button class="btn" onclick="location.reload()">Tekrar Dene</button>
+    <div class="footer">
+        <span class="sig">Designed by <b>Murteza ALEMDAR</b></span>
+        <span class="ver">v2.6.0</span>
+    </div>
+</body>
+</html>

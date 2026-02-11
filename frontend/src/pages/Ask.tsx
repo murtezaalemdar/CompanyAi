@@ -16,6 +16,8 @@ import {
     Download,
     Mic,
     MicOff,
+    Volume2,
+    VolumeX,
     Building2,
     Trash2,
     Sparkles,
@@ -70,6 +72,13 @@ export default function Ask() {
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
     const [previewImage, setPreviewImage] = useState<string | null>(null)
     const [isDragging, setIsDragging] = useState(false)
+
+    // Voice states
+    const [isListening, setIsListening] = useState(false)
+    const [micError, setMicError] = useState('')
+    const [isSpeaking, setIsSpeaking] = useState(false)
+    const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
+    const recognitionRef = useRef<any>(null)
 
     // Session state
     const [currentSessionId, setCurrentSessionId] = useState<number | null>(null)
@@ -310,6 +319,14 @@ export default function Ask() {
         }
     }, [input])
 
+    // Voice cleanup on unmount
+    useEffect(() => {
+        return () => {
+            recognitionRef.current?.stop()
+            window.speechSynthesis?.cancel()
+        }
+    }, [])
+
     const getFileType = (file: File): 'image' | 'document' | 'other' => {
         if (file.type.startsWith('image/')) return 'image'
         if (
@@ -432,6 +449,94 @@ export default function Ask() {
             e.preventDefault()
             handleSubmit(e)
         }
+    }
+
+    // === VOICE INPUT (STT) — Web Speech API ===
+    const toggleListening = () => {
+        setMicError('')
+        if (isListening) {
+            recognitionRef.current?.stop()
+            setIsListening(false)
+            return
+        }
+
+        const isSecureContext = window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+        if (!isSecureContext) {
+            setMicError('Sesle yazma için HTTPS gereklidir. Lütfen HTTPS üzerinden bağlanın.')
+            return
+        }
+
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
+            const recognition = new SpeechRecognition()
+            recognition.lang = 'tr-TR'
+            recognition.continuous = true
+            recognition.interimResults = true
+            recognition.onresult = (event: any) => {
+                let finalTranscript = ''
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript
+                    }
+                }
+                if (finalTranscript) {
+                    setInput(prev => (prev ? prev + ' ' : '') + finalTranscript)
+                }
+            }
+            recognition.onerror = (event: any) => {
+                setIsListening(false)
+                if (event.error === 'not-allowed') {
+                    setMicError('Mikrofon erişimi reddedildi. Tarayıcı ayarlarından izin verin.')
+                } else if (event.error === 'no-speech') {
+                    setMicError('Ses algılanamadı. Lütfen tekrar deneyin.')
+                } else {
+                    setMicError(`Sesle yazma hatası: ${event.error}`)
+                }
+            }
+            recognition.onend = () => setIsListening(false)
+            recognitionRef.current = recognition
+            try {
+                recognition.start()
+                setIsListening(true)
+            } catch {
+                setMicError('Sesle yazma başlatılamadı.')
+            }
+        } else {
+            setMicError('Tarayıcınız sesle yazmayı desteklemiyor. Chrome veya Edge kullanın.')
+        }
+    }
+
+    // === VOICE OUTPUT (TTS) — Web Speech Synthesis ===
+    const speakMessage = (messageId: string, text: string) => {
+        if (isSpeaking && speakingMessageId === messageId) {
+            window.speechSynthesis.cancel()
+            setIsSpeaking(false)
+            setSpeakingMessageId(null)
+            return
+        }
+
+        window.speechSynthesis.cancel()
+        const utterance = new SpeechSynthesisUtterance(text)
+        utterance.lang = 'tr-TR'
+        utterance.rate = 1.0
+        utterance.pitch = 1.0
+
+        const voices = window.speechSynthesis.getVoices()
+        const turkishVoice = voices.find(v => v.lang.startsWith('tr'))
+        if (turkishVoice) utterance.voice = turkishVoice
+
+        utterance.onend = () => {
+            setIsSpeaking(false)
+            setSpeakingMessageId(null)
+        }
+        utterance.onerror = () => {
+            setIsSpeaking(false)
+            setSpeakingMessageId(null)
+        }
+
+        setIsSpeaking(true)
+        setSpeakingMessageId(messageId)
+        window.speechSynthesis.speak(utterance)
     }
 
     const formatFileSize = (bytes: number): string => {
@@ -602,9 +707,28 @@ export default function Ask() {
                                     </div>
                                 )}
 
-                                {/* Her assistant mesajında export butonları */}
-                                {msg.role === 'assistant' && msg.content && msg.content.length > 50 && (
-                                    <QuickExportButtons content={msg.content} />
+                                {/* Sesli dinle + Export butonları */}
+                                {msg.role === 'assistant' && msg.content && (
+                                    <div className="flex items-center gap-1 mt-2 flex-wrap">
+                                        <button
+                                            type="button"
+                                            onClick={() => speakMessage(msg.id, msg.content)}
+                                            className={clsx(
+                                                "inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors",
+                                                isSpeaking && speakingMessageId === msg.id
+                                                    ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                                                    : "text-dark-400 hover:text-primary-400 hover:bg-dark-700/50"
+                                            )}
+                                            title={isSpeaking && speakingMessageId === msg.id ? 'Sesi durdur' : 'Sesli dinle'}
+                                        >
+                                            {isSpeaking && speakingMessageId === msg.id ? (
+                                                <><VolumeX className="w-3.5 h-3.5" /><span>Durdur</span></>
+                                            ) : (
+                                                <><Volume2 className="w-3.5 h-3.5" /><span>Dinle</span></>
+                                            )}
+                                        </button>
+                                        {msg.content.length > 50 && <QuickExportButtons content={msg.content} />}
+                                    </div>
                                 )}
                             </div>
                         </div>
@@ -738,6 +862,28 @@ export default function Ask() {
                         </div>
                     </div>
 
+                    {/* Mic Error */}
+                    {micError && (
+                        <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>{micError}</span>
+                            <button type="button" onClick={() => setMicError('')} className="ml-auto p-0.5 hover:bg-red-500/20 rounded">
+                                <X className="w-3 h-3" />
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Listening indicator */}
+                    {isListening && (
+                        <div className="flex items-center gap-2 mb-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400 animate-pulse">
+                            <Mic className="w-3.5 h-3.5" />
+                            <span>Dinleniyor... Konuşmaya başlayın</span>
+                            <button type="button" onClick={toggleListening} className="ml-auto text-red-300 hover:text-red-200 text-xs underline">
+                                Durdur
+                            </button>
+                        </div>
+                    )}
+
                     <form onSubmit={handleSubmit} className="flex items-end gap-1.5 sm:gap-3">
                         {/* Attachment Buttons */}
                         <div className="flex gap-0.5 sm:gap-1 shrink-0">
@@ -806,6 +952,26 @@ export default function Ask() {
                             )}
                         </div>
 
+                        {/* Mic Button */}
+                        <button
+                            type="button"
+                            onClick={toggleListening}
+                            disabled={askMutation.isPending}
+                            className={clsx(
+                                "p-2.5 sm:p-3 shrink-0 rounded-xl transition-all",
+                                isListening
+                                    ? "bg-red-500 text-white animate-pulse shadow-lg shadow-red-500/30"
+                                    : "hover:bg-dark-800 text-dark-400 hover:text-primary-400"
+                            )}
+                            title={isListening ? 'Dinlemeyi durdur' : 'Sesle yaz'}
+                        >
+                            {isListening ? (
+                                <MicOff className="w-5 h-5" />
+                            ) : (
+                                <Mic className="w-5 h-5" />
+                            )}
+                        </button>
+
                         {/* Send Button */}
                         <button
                             type="submit"
@@ -822,11 +988,13 @@ export default function Ask() {
 
                     {/* Quick Tips - hidden on mobile */}
                     <div className="hidden sm:flex items-center justify-center gap-4 mt-2 text-xs text-dark-500">
-                        <span>Ctrl+V ile yapıştır</span>
+                        <span>🎤 Sesle yaz</span>
+                        <span>•</span>
+                        <span>🔊 Yanıtı dinle</span>
+                        <span>•</span>
+                        <span>Ctrl+V yapıştır</span>
                         <span>•</span>
                         <span>Shift+Enter yeni satır</span>
-                        <span>•</span>
-                        <span>Sürükle-bırak desteklenir</span>
                     </div>
                 </div>
             </div>

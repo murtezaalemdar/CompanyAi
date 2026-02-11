@@ -15,7 +15,7 @@ from app.config import settings
 from app.config import APP_VERSION
 from app.db.database import engine, init_db
 from app.db.models import Base
-from app.api.routes import auth, ask, admin, documents, multimodal, memory, analyze, export
+from app.api.routes import auth, ask, admin, documents, multimodal, memory, analyze, export, backup
 
 # Rate Limiting
 try:
@@ -153,6 +153,7 @@ app.include_router(documents.router, prefix="/api/rag", tags=["RAG Documents"])
 app.include_router(multimodal.router, prefix="/api", tags=["Multimodal AI"])
 app.include_router(analyze.router, prefix="/api/analyze", tags=["Document Analysis"])
 app.include_router(export.router, prefix="/api/export", tags=["Export"])
+app.include_router(backup.router, prefix="/api/backup", tags=["Backup & Restore"])
 
 
 @app.get("/")

@@ -237,12 +237,77 @@ def extract_text_from_file(filename: str, file_content: bytes) -> tuple:
         
         # ── PDF ──
         elif doc_type == 'pdf':
+            # 1) pdfplumber ile dene (en güçlü)
             try:
-                from PyPDF2 import PdfReader
-                pdf = PdfReader(io.BytesIO(file_content))
-                content = "\n".join([page.extract_text() or "" for page in pdf.pages])
+                import pdfplumber
+                with pdfplumber.open(io.BytesIO(file_content)) as pdf:
+                    pages_text = []
+                    for page in pdf.pages:
+                        text = page.extract_text() or ""
+                        # Tablolar varsa onları da çıkar
+                        tables = page.extract_tables()
+                        if tables:
+                            for table in tables:
+                                for row in table:
+                                    if row:
+                                        row_text = " | ".join([str(cell) if cell else "" for cell in row])
+                                        text += "\n" + row_text
+                        if text.strip():
+                            pages_text.append(text)
+                    content = "\n\n".join(pages_text)
+                    if content.strip():
+                        logger.info("pdf_extracted_with_pdfplumber", filename=filename, pages=len(pdf.pages), chars=len(content))
             except ImportError:
-                raise HTTPException(status_code=500, detail="PyPDF2 yüklü değil")
+                pass
+            except Exception as e:
+                logger.warning("pdfplumber_failed", filename=filename, error=str(e))
+            
+            # 2) PyPDF2 fallback
+            if not content.strip():
+                try:
+                    from PyPDF2 import PdfReader
+                    pdf = PdfReader(io.BytesIO(file_content))
+                    pages_text = []
+                    for page in pdf.pages:
+                        text = page.extract_text() or ""
+                        if text.strip():
+                            pages_text.append(text)
+                    content = "\n\n".join(pages_text)
+                    if content.strip():
+                        logger.info("pdf_extracted_with_pypdf2", filename=filename, pages=len(pdf.pages), chars=len(content))
+                except ImportError:
+                    pass
+                except Exception as e:
+                    logger.warning("pypdf2_failed", filename=filename, error=str(e))
+            
+            # 3) Hiçbiri çalışmazsa — görüntü tabanlı PDF
+            if not content.strip():
+                try:
+                    # Sayfa sayısını al
+                    page_count = 0
+                    try:
+                        import pdfplumber
+                        with pdfplumber.open(io.BytesIO(file_content)) as pdf:
+                            page_count = len(pdf.pages)
+                    except Exception:
+                        try:
+                            from PyPDF2 import PdfReader
+                            pdf = PdfReader(io.BytesIO(file_content))
+                            page_count = len(pdf.pages)
+                        except Exception:
+                            pass
+                    
+                    file_size_mb = round(len(file_content) / 1024 / 1024, 1)
+                    content = (
+                        f"[Görüntü tabanlı PDF dosyası: {filename}]\n"
+                        f"Boyut: {file_size_mb} MB, Sayfa sayısı: {page_count}\n"
+                        f"Bu PDF görüntü tabanlı olduğu için metin çıkarılamadı.\n"
+                        f"OCR (Tesseract) yüklü değil — metin tanıma yapılamıyor.\n"
+                        f"Dosya metadata olarak kaydedildi."
+                    )
+                    logger.warning("pdf_image_based", filename=filename, pages=page_count, size_mb=file_size_mb)
+                except Exception:
+                    content = f"[PDF dosyası: {filename}, metin çıkarılamadı]"
         
         # ── Word (DOCX) ──
         elif doc_type == 'docx':
@@ -469,10 +534,15 @@ async def upload_document(
         if not file_content:
             raise HTTPException(status_code=400, detail="Dosya boş")
         
+        logger.info("upload_started", filename=file.filename, size_mb=round(len(file_content)/1024/1024, 1))
+        
         content, doc_type = extract_text_from_file(file.filename, file_content)
         
         if not content.strip():
-            raise HTTPException(status_code=400, detail="Dosyadan içerik çıkarılamadı")
+            logger.warning("upload_empty_content", filename=file.filename, doc_type=doc_type)
+            raise HTTPException(status_code=400, detail=f"Dosyadan içerik çıkarılamadı ({doc_type})")
+        
+        logger.info("upload_content_extracted", filename=file.filename, chars=len(content), doc_type=doc_type)
         
         # Dokümanı ekle
         success = add_document(
@@ -499,6 +569,7 @@ async def upload_document(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error("upload_error", filename=file.filename, error=str(e), error_type=type(e).__name__)
         raise HTTPException(status_code=500, detail=f"Dosya işleme hatası: {str(e)}")
 
 

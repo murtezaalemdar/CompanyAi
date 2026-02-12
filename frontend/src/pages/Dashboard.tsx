@@ -713,7 +713,7 @@ export default function Dashboard() {
                                 <div className="flex items-center gap-2 px-3 py-2 bg-green-500/5 rounded-lg border border-green-500/20">
                                     <GitBranch className="w-4 h-4 text-green-500" />
                                     <span className="text-sm text-green-400">
-                                        Production: <strong>{modelRegistry.production_model}</strong>
+                                        Production: <strong>{modelRegistry.production_model.name || modelRegistry.production_model.model_id || 'Bilinmiyor'}</strong>
                                     </span>
                                 </div>
                             )}

@@ -163,6 +163,53 @@ try:
 except ImportError:
     SQL_AVAILABLE = False
 
+# Model Registry (v3.4.0)
+try:
+    from app.core.model_registry import model_registry
+    MODEL_REGISTRY_AVAILABLE = True
+except ImportError:
+    MODEL_REGISTRY_AVAILABLE = False
+    model_registry = None
+
+# Data Versioning (v3.4.0)
+try:
+    from app.core.data_versioning import data_version_manager
+    DATA_VERSIONING_AVAILABLE = True
+except ImportError:
+    DATA_VERSIONING_AVAILABLE = False
+    data_version_manager = None
+
+# Human-in-the-Loop (v3.4.0)
+try:
+    from app.core.hitl import hitl_manager
+    HITL_AVAILABLE = True
+except ImportError:
+    HITL_AVAILABLE = False
+    hitl_manager = None
+
+# Enhanced Monitoring (v3.4.0)
+try:
+    from app.core.monitoring import metrics_collector, alert_manager, get_full_telemetry, calculate_health_score
+    MONITORING_AVAILABLE = True
+except ImportError:
+    MONITORING_AVAILABLE = False
+    metrics_collector = None
+
+# Textile Vision (v3.4.0)
+try:
+    from app.core.textile_vision import analyze_colors, analyze_pattern, compare_images, generate_quality_report, get_textile_vision_capabilities
+    TEXTILE_VISION_AVAILABLE = True
+except ImportError:
+    TEXTILE_VISION_AVAILABLE = False
+
+# Explainability / XAI (v3.4.0)
+try:
+    from app.core.explainability import decision_explainer
+    XAI_AVAILABLE = True
+except ImportError:
+    XAI_AVAILABLE = False
+    decision_explainer = None
+
 logger = structlog.get_logger()
 
 
@@ -642,6 +689,12 @@ async def get_system_status() -> dict:
             "sql_generator": SQL_AVAILABLE,
             "export": EXPORT_AVAILABLE,
             "web_search": WEB_SEARCH_AVAILABLE,
+            "model_registry": MODEL_REGISTRY_AVAILABLE,
+            "data_versioning": DATA_VERSIONING_AVAILABLE,
+            "human_in_the_loop": HITL_AVAILABLE,
+            "monitoring": MONITORING_AVAILABLE,
+            "textile_vision": TEXTILE_VISION_AVAILABLE,
+            "explainability": XAI_AVAILABLE,
         },
     }
 

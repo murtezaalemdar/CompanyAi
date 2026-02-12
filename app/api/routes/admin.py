@@ -16,6 +16,38 @@ from app.auth.rbac import Role, check_admin, check_admin_or_manager
 from app.auth.jwt_handler import hash_password
 from app.core.audit import log_action
 
+# v3.4.0 modülleri
+try:
+    from app.core.model_registry import model_registry
+except ImportError:
+    model_registry = None
+
+try:
+    from app.core.data_versioning import data_version_manager
+except ImportError:
+    data_version_manager = None
+
+try:
+    from app.core.hitl import hitl_manager
+except ImportError:
+    hitl_manager = None
+
+try:
+    from app.core.monitoring import metrics_collector, alert_manager, get_full_telemetry, calculate_health_score
+except ImportError:
+    metrics_collector = None
+    alert_manager = None
+
+try:
+    from app.core.textile_vision import analyze_colors, analyze_pattern, compare_images, generate_quality_report, get_textile_vision_capabilities
+except ImportError:
+    analyze_colors = None
+
+try:
+    from app.core.explainability import decision_explainer
+except ImportError:
+    decision_explainer = None
+
 router = APIRouter()
 
 
@@ -683,3 +715,294 @@ async def get_department_query_stats(
         }
         for r in rows
     ]
+
+
+# ══════════════════════════════════════════════════════════════════
+# v3.4.0 — Yeni Modül Endpoint'leri
+# ══════════════════════════════════════════════════════════════════
+
+
+# ── Model Registry ─────────────────────────────────────────────
+
+@router.get("/model-registry")
+async def get_model_registry_dashboard(current_user: User = Depends(get_current_user)):
+    """Model Registry dashboard verilerini döner."""
+    check_admin_or_manager(current_user)
+    if not model_registry:
+        return {"available": False, "error": "Model Registry modülü yüklü değil"}
+    try:
+        return {"available": True, **model_registry.get_dashboard()}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/model-registry/models")
+async def list_registered_models(current_user: User = Depends(get_current_user)):
+    check_admin_or_manager(current_user)
+    if not model_registry:
+        raise HTTPException(status_code=503, detail="Model Registry modülü yüklü değil")
+    return model_registry.list_models()
+
+
+@router.post("/model-registry/sync")
+async def sync_models_with_ollama(current_user: User = Depends(get_current_user)):
+    """Ollama modelleri ile senkronize et."""
+    check_admin(current_user)
+    if not model_registry:
+        raise HTTPException(status_code=503, detail="Model Registry modülü yüklü değil")
+    try:
+        synced = await model_registry.sync_with_ollama()
+        await log_action(None, current_user.id, "model_registry_sync", f"Senkronize edilen model sayısı: {synced}")
+        return {"synced_count": synced}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/model-registry/promote/{model_name}")
+async def promote_model(model_name: str, current_user: User = Depends(get_current_user)):
+    """Modeli production'a yükselt."""
+    check_admin(current_user)
+    if not model_registry:
+        raise HTTPException(status_code=503, detail="Model Registry modülü yüklü değil")
+    result = model_registry.promote(model_name, promoted_by=current_user.username)
+    if not result:
+        raise HTTPException(status_code=404, detail="Model bulunamadı")
+    await log_action(None, current_user.id, "model_promoted", f"Model: {model_name}")
+    return result
+
+
+# ── Data Versioning ────────────────────────────────────────────
+
+@router.get("/data-versions")
+async def get_data_versioning_dashboard(current_user: User = Depends(get_current_user)):
+    check_admin_or_manager(current_user)
+    if not data_version_manager:
+        return {"available": False, "error": "Data Versioning modülü yüklü değil"}
+    try:
+        return {"available": True, **data_version_manager.get_dashboard()}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/data-versions/datasets")
+async def list_datasets(current_user: User = Depends(get_current_user)):
+    check_admin_or_manager(current_user)
+    if not data_version_manager:
+        raise HTTPException(status_code=503, detail="Data Versioning modülü yüklü değil")
+    return data_version_manager.list_datasets()
+
+
+@router.post("/data-versions/snapshot")
+async def create_data_snapshot(
+    current_user: User = Depends(get_current_user),
+):
+    """Mevcut veri dosyalarının snapshot'ını al."""
+    check_admin(current_user)
+    if not data_version_manager:
+        raise HTTPException(status_code=503, detail="Data Versioning modülü yüklü değil")
+    try:
+        # data/ klasöründeki tüm CSV/JSON dosyaları
+        import glob
+        files = glob.glob("data/*.csv") + glob.glob("data/*.json") + glob.glob("data/*.jsonl")
+        results = []
+        for f in files:
+            snap = data_version_manager.create_snapshot(f, created_by=current_user.username)
+            results.append(snap)
+        await log_action(None, current_user.id, "data_snapshot", f"{len(results)} dosya snapshot'landı")
+        return {"snapshots": results, "count": len(results)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Human-in-the-Loop ─────────────────────────────────────────
+
+@router.get("/hitl")
+async def get_hitl_dashboard(current_user: User = Depends(get_current_user)):
+    check_admin_or_manager(current_user)
+    if not hitl_manager:
+        return {"available": False, "error": "HITL modülü yüklü değil"}
+    try:
+        pending = hitl_manager.get_pending_tasks()
+        reviewed = hitl_manager.get_reviewed_tasks(limit=20)
+        stats = hitl_manager.get_feedback_stats()
+        return {
+            "available": True,
+            "pending_count": len(pending),
+            "pending_tasks": pending[:10],
+            "recent_reviewed": reviewed,
+            "feedback_stats": stats,
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.post("/hitl/review/{task_id}")
+async def review_hitl_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Onay kuyruğundaki görevi onayla/reddet."""
+    check_admin_or_manager(current_user)
+    if not hitl_manager:
+        raise HTTPException(status_code=503, detail="HITL modülü yüklü değil")
+
+    from fastapi import Request
+    # Body'den action ve feedback alınacak
+    # Basit implementasyon: query param
+    return {"info": "POST body ile action=approve|reject|modify, feedback=... gönderin"}
+
+
+@router.put("/hitl/review/{task_id}")
+async def execute_hitl_review(
+    task_id: str,
+    action: str = "approve",
+    feedback: str = "",
+    current_user: User = Depends(get_current_user),
+):
+    """HITL görevini değerlendir."""
+    check_admin_or_manager(current_user)
+    if not hitl_manager:
+        raise HTTPException(status_code=503, detail="HITL modülü yüklü değil")
+    result = hitl_manager.review(
+        task_id=task_id,
+        action=action,
+        reviewer=current_user.username,
+        feedback=feedback,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Görev bulunamadı")
+    await log_action(None, current_user.id, f"hitl_{action}", f"Task: {task_id}")
+    return result
+
+
+# ── Monitoring & Telemetry ─────────────────────────────────────
+
+@router.get("/monitoring/telemetry")
+async def get_telemetry(current_user: User = Depends(get_current_user)):
+    """Tam telemetri raporu."""
+    check_admin_or_manager(current_user)
+    if not metrics_collector:
+        return {"available": False, "error": "Monitoring modülü yüklü değil"}
+    try:
+        telemetry = await get_full_telemetry()
+        return {"available": True, **telemetry}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/monitoring/health")
+async def get_health_score(current_user: User = Depends(get_current_user)):
+    """Sistem sağlık skoru."""
+    check_admin_or_manager(current_user)
+    if not metrics_collector:
+        return {"available": False}
+    try:
+        health = calculate_health_score()
+        return {"available": True, **health}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/monitoring/alerts")
+async def get_alerts(current_user: User = Depends(get_current_user)):
+    """Aktif alarmlar."""
+    check_admin_or_manager(current_user)
+    if not alert_manager:
+        return {"alerts": [], "count": 0}
+    try:
+        alerts = alert_manager.get_active_alerts()
+        return {"alerts": alerts, "count": len(alerts)}
+    except Exception as e:
+        return {"alerts": [], "error": str(e)}
+
+
+@router.post("/monitoring/alerts/{alert_id}/acknowledge")
+async def acknowledge_alert(alert_id: str, current_user: User = Depends(get_current_user)):
+    check_admin(current_user)
+    if not alert_manager:
+        raise HTTPException(status_code=503, detail="Alert Manager yüklü değil")
+    result = alert_manager.acknowledge(alert_id, current_user.username)
+    if not result:
+        raise HTTPException(status_code=404, detail="Alarm bulunamadı")
+    return result
+
+
+# ── Textile Vision ─────────────────────────────────────────────
+
+@router.get("/textile-vision/capabilities")
+async def textile_vision_caps(current_user: User = Depends(get_current_user)):
+    check_admin_or_manager(current_user)
+    if not analyze_colors:
+        return {"available": False, "error": "Textile Vision modülü yüklü değil"}
+    return {"available": True, **get_textile_vision_capabilities()}
+
+
+@router.post("/textile-vision/analyze-color")
+async def textile_color_analysis(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Yüklenen kumaş görselinin renk analizini yapar."""
+    check_admin_or_manager(current_user)
+    if not analyze_colors:
+        raise HTTPException(status_code=503, detail="Textile Vision modülü yüklü değil")
+
+    import tempfile, os
+    content = await file.read()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        result = analyze_colors(tmp_path)
+        pattern = analyze_pattern(tmp_path)
+        return {"color": result, "pattern": pattern}
+    finally:
+        os.unlink(tmp_path)
+
+
+@router.post("/textile-vision/quality-report")
+async def textile_quality_report(
+    file: UploadFile = File(...),
+    order_no: str = "",
+    lot_no: str = "",
+    fabric_type: str = "",
+    current_user: User = Depends(get_current_user),
+):
+    """Kumaş kalite kontrol raporu oluştur."""
+    check_admin_or_manager(current_user)
+    if not analyze_colors:
+        raise HTTPException(status_code=503, detail="Textile Vision modülü yüklü değil")
+
+    import tempfile, os
+    content = await file.read()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        report = generate_quality_report(tmp_path, order_no, lot_no, fabric_type)
+        await log_action(None, current_user.id, "quality_report", f"Order: {order_no}")
+        return report
+    finally:
+        os.unlink(tmp_path)
+
+
+# ── Explainability (XAI) ──────────────────────────────────────
+
+@router.get("/explainability")
+async def xai_dashboard(current_user: User = Depends(get_current_user)):
+    check_admin_or_manager(current_user)
+    if not decision_explainer:
+        return {"available": False, "error": "XAI modülü yüklü değil"}
+    return {"available": True, **decision_explainer.get_dashboard()}
+
+
+@router.post("/explainability/explain")
+async def explain_decision(
+    current_user: User = Depends(get_current_user),
+):
+    """Bir AI kararını açıkla. Body: {query, response, confidence, module_source}"""
+    check_admin_or_manager(current_user)
+    if not decision_explainer:
+        raise HTTPException(status_code=503, detail="XAI modülü yüklü değil")
+    # Örnek kullanım — gerçek kullanımda body'den alınır
+    return {"info": "POST body ile query, response, confidence, module_source gönderin"}

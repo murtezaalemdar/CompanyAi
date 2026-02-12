@@ -1,7 +1,7 @@
 """Konfigürasyon Yönetimi"""
 
 # Versiyon — frontend/src/constants.ts ile eşleşmeli
-APP_VERSION = "3.3.1"
+APP_VERSION = "3.3.2"
 
 from pydantic_settings import BaseSettings
 from typing import List

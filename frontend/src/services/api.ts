@@ -62,7 +62,7 @@ export const aiApi = {
         return response.data
     },
 
-    askWithFiles: async (question: string, files: File[], department?: string) => {
+    askWithFiles: async (question: string, files: File[], department?: string, signal?: AbortSignal) => {
         const formData = new FormData()
         formData.append('question', question)
         if (department) {
@@ -78,6 +78,7 @@ export const aiApi = {
             headers: {
                 'Content-Type': 'multipart/form-data',
             },
+            signal,
         })
         return response.data
     },

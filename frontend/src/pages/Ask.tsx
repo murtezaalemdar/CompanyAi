@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import axios from 'axios'
 import { aiApi, logoApi, adminApi } from '../services/api'
 import {
     Send,
@@ -39,6 +40,8 @@ import {
     Cpu,
     Shield,
     Zap,
+    RotateCcw,
+    Square,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useNavigate } from 'react-router-dom'
@@ -316,13 +319,20 @@ export default function Ask() {
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
+    const abortControllerRef = useRef<AbortController | null>(null)
+
+    // Son gönderilen sorguyu sakla (tekrar dene için)
+    const [lastQuery, setLastQuery] = useState<{ question: string; files: File[]; department?: string } | null>(null)
 
     const askMutation = useMutation({
         mutationFn: async ({ question, files, department }: { question: string; files: File[]; department?: string }) => {
-            // Konuşma geçmişi artık PostgreSQL'de kalıcı saklanıyor
-            return await aiApi.askWithFiles(question, files, department)
+            // Abort controller oluştur
+            const controller = new AbortController()
+            abortControllerRef.current = controller
+            return await aiApi.askWithFiles(question, files, department, controller.signal)
         },
         onSuccess: (data) => {
+            abortControllerRef.current = null
             const botMessage: Message = {
                 id: Date.now().toString(),
                 role: 'assistant',
@@ -337,16 +347,53 @@ export default function Ask() {
             setMessages((prev) => [...prev, botMessage])
             // Mesaj gönderildikten sonra oturum listesini yenile (başlık güncellenmesi için)
             loadSessions()
+            // Auto-focus textarea
+            setTimeout(() => textareaRef.current?.focus(), 100)
         },
-        onError: (error) => {
-            const errorMessage: Message = {
-                id: Date.now().toString(),
-                role: 'assistant',
-                content: 'Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin.',
+        onError: (error: any) => {
+            abortControllerRef.current = null
+            // İptal edildiyse hata mesajı gösterme
+            if (axios.isCancel(error) || error?.code === 'ERR_CANCELED') {
+                const cancelMessage: Message = {
+                    id: Date.now().toString(),
+                    role: 'assistant',
+                    content: '⏹️ Yanıt oluşturma durduruldu.',
+                }
+                setMessages((prev) => [...prev, cancelMessage])
+            } else {
+                const errorMessage: Message = {
+                    id: Date.now().toString(),
+                    role: 'assistant',
+                    content: 'Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin.',
+                }
+                setMessages((prev) => [...prev, errorMessage])
             }
-            setMessages((prev) => [...prev, errorMessage])
+            // Auto-focus textarea
+            setTimeout(() => textareaRef.current?.focus(), 100)
         },
     })
+
+    // Yanıtı durdur
+    const handleStopGeneration = () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+            abortControllerRef.current = null
+        }
+    }
+
+    // Tekrar dene — son mesajı yeniden gönder
+    const handleRetry = () => {
+        if (!lastQuery || askMutation.isPending) return
+        // Son assistant mesajını sil
+        setMessages((prev) => {
+            const lastIdx = prev.length - 1
+            if (lastIdx >= 0 && prev[lastIdx].role === 'assistant') {
+                return prev.slice(0, lastIdx)
+            }
+            return prev
+        })
+        askMutation.mutate(lastQuery)
+    }
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -465,11 +512,13 @@ export default function Ask() {
         }
         setMessages((prev) => [...prev, userMessage])
 
-        askMutation.mutate({
+        const query = {
             question: input,
             files: attachedFiles.map((f) => f.file),
             department: selectedDepartment !== 'Genel' ? selectedDepartment : undefined,
-        })
+        }
+        setLastQuery(query)
+        askMutation.mutate(query)
         setInput('')
         setAttachedFiles([])
     }
@@ -913,7 +962,7 @@ export default function Ask() {
                                     </div>
                                 )}
 
-                                {/* Sesli dinle + Export butonları */}
+                                {/* Sesli dinle + Export + Tekrar dene butonları */}
                                 {msg.role === 'assistant' && msg.content && (
                                     <div className="flex items-center gap-1 mt-2 flex-wrap">
                                         <button
@@ -934,6 +983,18 @@ export default function Ask() {
                                             )}
                                         </button>
                                         {msg.content.length > 50 && <QuickExportButtons content={msg.content} />}
+                                        {/* Tekrar dene — sadece son assistant mesajında göster */}
+                                        {lastQuery && !askMutation.isPending && messages[messages.length - 1]?.id === msg.id && (
+                                            <button
+                                                type="button"
+                                                onClick={handleRetry}
+                                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-dark-400 hover:text-amber-400 hover:bg-amber-500/10 transition-colors ml-auto"
+                                                title="Bu yanıtı tekrar oluştur"
+                                            >
+                                                <RotateCcw className="w-3.5 h-3.5" />
+                                                <span>Tekrar dene</span>
+                                            </button>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -945,12 +1006,22 @@ export default function Ask() {
                             <div className="w-8 h-8 rounded-full bg-dark-700 flex items-center justify-center shrink-0">
                                 <Bot className="w-5 h-5 text-primary-400" />
                             </div>
-                            <div className="bg-dark-800 rounded-2xl rounded-tl-none px-5 py-4 border border-dark-700">
-                                <div className="flex gap-1">
-                                    <div className="w-2 h-2 bg-dark-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                    <div className="w-2 h-2 bg-dark-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                    <div className="w-2 h-2 bg-dark-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                            <div className="space-y-2">
+                                <div className="bg-dark-800 rounded-2xl rounded-tl-none px-5 py-4 border border-dark-700">
+                                    <div className="flex gap-1">
+                                        <div className="w-2 h-2 bg-dark-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                        <div className="w-2 h-2 bg-dark-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                        <div className="w-2 h-2 bg-dark-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                    </div>
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={handleStopGeneration}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-dark-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg border border-dark-700 hover:border-red-500/30 transition-all"
+                                >
+                                    <Square className="w-3 h-3 fill-current" />
+                                    Durdur
+                                </button>
                             </div>
                         </div>
                     )}
@@ -1178,18 +1249,25 @@ export default function Ask() {
                             )}
                         </button>
 
-                        {/* Send Button */}
-                        <button
-                            type="submit"
-                            disabled={(!input.trim() && attachedFiles.length === 0) || askMutation.isPending}
-                            className="btn-primary p-2.5 sm:p-3 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {askMutation.isPending ? (
-                                <Loader2 className="w-5 h-5 animate-spin" />
-                            ) : (
+                        {/* Send / Stop Button */}
+                        {askMutation.isPending ? (
+                            <button
+                                type="button"
+                                onClick={handleStopGeneration}
+                                className="bg-red-500 hover:bg-red-600 text-white p-2.5 sm:p-3 shrink-0 rounded-xl transition-colors"
+                                title="Yanıt oluşturmayı durdur"
+                            >
+                                <Square className="w-5 h-5 fill-current" />
+                            </button>
+                        ) : (
+                            <button
+                                type="submit"
+                                disabled={!input.trim() && attachedFiles.length === 0}
+                                className="btn-primary p-2.5 sm:p-3 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
                                 <Send className="w-5 h-5" />
-                            )}
-                        </button>
+                            </button>
+                        )}
 
                         {/* Voice Chat Button — ChatGPT style */}
                         <button

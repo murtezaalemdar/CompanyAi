@@ -1,5 +1,5 @@
 // Versiyon — app/config.py ile eşleşmeli
-export const APP_VERSION = '3.3.1'
+export const APP_VERSION = '3.3.2'
 
 export const DEPARTMENTS = [
     "Yönetim",

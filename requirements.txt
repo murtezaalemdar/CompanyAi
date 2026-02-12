@@ -51,3 +51,6 @@ fpdf2>=2.7.0
 
 # Statistical Forecasting (ARIMA/SARIMA) — v3.3.0
 statsmodels>=0.14.0
+
+# Statistical Tests (t-test, ANOVA, Shapiro-Wilk, Grubbs) — v3.5.1
+scipy>=1.10.0

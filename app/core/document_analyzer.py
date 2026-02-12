@@ -29,6 +29,27 @@ import numpy as np
 
 logger = structlog.get_logger()
 
+# Opsiyonel: statsmodels istatistik testleri
+try:
+    from scipy import stats as scipy_stats
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+
+# Opsiyonel: forecasting motoru (ARIMA, Holt-Winters)
+try:
+    from app.core.forecasting import (
+        arima_forecast,
+        holt_linear_trend,
+        holt_winters_seasonal,
+        exponential_smoothing,
+        STATSMODELS_AVAILABLE,
+    )
+    FORECASTING_AVAILABLE = True
+except ImportError:
+    FORECASTING_AVAILABLE = False
+    STATSMODELS_AVAILABLE = False
+
 
 # ══════════════════════════════════════════════════════════════
 # 1. VERİ PARSE & KEŞİF
@@ -512,10 +533,9 @@ def top_n_analysis(df: pd.DataFrame, n: int = 10) -> dict:
 # ══════════════════════════════════════════════════════════════
 
 def comparison_analysis(df: pd.DataFrame, group_col: str = None) -> dict:
-    """Gelişmiş kategorik gruplara göre karşılaştırma — medyan, std, fark yüzdesi"""
+    """Pro karşılaştırma — medyan, std, fark yüzdesi, t-test/ANOVA istatistiksel testler"""
     
     if not group_col:
-        # Otomatik kategorik sütun seç
         cat_cols = [
             c for c in df.columns 
             if df[c].dtype == 'object' and df[c].nunique() <= 20
@@ -528,15 +548,16 @@ def comparison_analysis(df: pd.DataFrame, group_col: str = None) -> dict:
     if not num_cols:
         return {"success": False, "error": "Sayısal sütun bulunamadı"}
     
-    grouped = df.groupby(group_col)[num_cols].agg(['mean', 'sum', 'count', 'min', 'max'])
-    
     result = {
         "success": True,
         "group_column": group_col,
-        "groups": list(df[group_col].unique()),
+        "groups": [str(g) for g in df[group_col].unique()],
         "group_count": df[group_col].nunique(),
         "summary": {},
+        "statistical_tests": {},
     }
+    
+    groups = df[group_col].unique()
     
     for col in num_cols[:5]:
         group_means = df.groupby(group_col)[col].mean().sort_values(ascending=False)
@@ -545,7 +566,7 @@ def comparison_analysis(df: pd.DataFrame, group_col: str = None) -> dict:
         group_counts = df.groupby(group_col)[col].count()
         group_stds = df.groupby(group_col)[col].std()
         
-        # Gruplar arası fark yüzdesi (en iyi vs en kötü)
+        # Gruplar arası fark yüzdesi
         best_val = group_means.iloc[0] if len(group_means) > 0 else 0
         worst_val = group_means.iloc[-1] if len(group_means) > 0 else 0
         gap_pct = round(((best_val - worst_val) / worst_val) * 100, 1) if worst_val != 0 else 0
@@ -569,6 +590,57 @@ def comparison_analysis(df: pd.DataFrame, group_col: str = None) -> dict:
             "deviation_from_avg": deviations,
             "overall_mean": round(overall_mean, 2),
         }
+        
+        # İstatistiksel testler (scipy varsa)
+        if SCIPY_AVAILABLE and len(groups) >= 2:
+            group_data = [df[df[group_col] == g][col].dropna().values for g in groups if len(df[df[group_col] == g][col].dropna()) >= 2]
+            
+            if len(group_data) >= 2:
+                test_result = {}
+                if len(group_data) == 2:
+                    # 2 grup → t-test
+                    try:
+                        t_stat, p_val = scipy_stats.ttest_ind(group_data[0], group_data[1], equal_var=False)
+                        # Effect size (Cohen's d)
+                        pooled_std = np.sqrt((np.std(group_data[0])**2 + np.std(group_data[1])**2) / 2)
+                        cohens_d = abs(np.mean(group_data[0]) - np.mean(group_data[1])) / pooled_std if pooled_std > 0 else 0
+                        
+                        test_result = {
+                            "test": "Welch t-test",
+                            "statistic": round(float(t_stat), 4),
+                            "p_value": round(float(p_val), 4),
+                            "significant": float(p_val) < 0.05,
+                            "cohens_d": round(float(cohens_d), 3),
+                            "effect_size": "Büyük" if cohens_d > 0.8 else "Orta" if cohens_d > 0.5 else "Küçük" if cohens_d > 0.2 else "İhmal Edilebilir",
+                            "interpretation": f"Gruplar arası fark {'istatistiksel olarak anlamlı ✓' if float(p_val) < 0.05 else 'anlamlı değil ✗'} (p={round(float(p_val), 4)})",
+                        }
+                    except Exception:
+                        pass
+                else:
+                    # 3+ grup → ANOVA
+                    try:
+                        f_stat, p_val = scipy_stats.f_oneway(*group_data)
+                        # Eta-squared (etki büyüklüğü)
+                        all_data = np.concatenate(group_data)
+                        grand_mean = np.mean(all_data)
+                        ss_between = sum(len(g) * (np.mean(g) - grand_mean)**2 for g in group_data)
+                        ss_total = np.sum((all_data - grand_mean)**2)
+                        eta_sq = ss_between / ss_total if ss_total > 0 else 0
+                        
+                        test_result = {
+                            "test": "One-way ANOVA",
+                            "statistic": round(float(f_stat), 4),
+                            "p_value": round(float(p_val), 4),
+                            "significant": float(p_val) < 0.05,
+                            "eta_squared": round(float(eta_sq), 3),
+                            "effect_size": "Büyük" if eta_sq > 0.14 else "Orta" if eta_sq > 0.06 else "Küçük",
+                            "interpretation": f"Gruplar arası fark {'istatistiksel olarak anlamlı ✓' if float(p_val) < 0.05 else 'anlamlı değil ✗'} (p={round(float(p_val), 4)})",
+                        }
+                    except Exception:
+                        pass
+                
+                if test_result:
+                    result["statistical_tests"][col] = test_result
     
     return result
 
@@ -578,7 +650,7 @@ def comparison_analysis(df: pd.DataFrame, group_col: str = None) -> dict:
 # ══════════════════════════════════════════════════════════════
 
 def anomaly_detection(df: pd.DataFrame) -> dict:
-    """IQR ve Z-Score ile aykırı değer tespiti"""
+    """Pro anomali tespiti — IQR, Z-Score, Rolling Window, Modified Z-Score, Grubbs testi"""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
         return {"success": False, "error": "Sayısal sütun bulunamadı"}
@@ -591,7 +663,7 @@ def anomaly_detection(df: pd.DataFrame) -> dict:
         if len(vals) < 10:
             continue
         
-        # IQR yöntemi
+        # 1) IQR yöntemi
         Q1 = vals.quantile(0.25)
         Q3 = vals.quantile(0.75)
         IQR = Q3 - Q1
@@ -599,7 +671,7 @@ def anomaly_detection(df: pd.DataFrame) -> dict:
         upper_iqr = Q3 + 1.5 * IQR
         iqr_outliers = vals[(vals < lower_iqr) | (vals > upper_iqr)]
         
-        # Z-Score yöntemi
+        # 2) Z-Score yöntemi
         mean_val = vals.mean()
         std_val = vals.std()
         if std_val > 0:
@@ -608,24 +680,91 @@ def anomaly_detection(df: pd.DataFrame) -> dict:
         else:
             z_outliers = pd.Series(dtype=float)
         
-        # Ciddi anomaliler (her iki yöntemde de tespit edilen)
-        severe = set(iqr_outliers.index) & set(z_outliers.index)
+        # 3) Modified Z-Score (MAD tabanlı — medyan bazlı, daha robust)
+        median_val = vals.median()
+        mad = np.median(np.abs(vals - median_val))
+        modified_z_outliers = pd.Series(dtype=float)
+        if mad > 0:
+            modified_z = 0.6745 * (vals - median_val) / mad
+            modified_z_outliers = vals[np.abs(modified_z) > 3.5]
         
-        col_anomaly_count = len(iqr_outliers)
+        # 4) Rolling Window anomali (veri sıralıysa — trend-adjusted)
+        rolling_anomalies = pd.Series(dtype=float)
+        if len(vals) >= 20:
+            window = min(max(int(len(vals) * 0.1), 5), 50)
+            rolling_mean = vals.rolling(window=window, center=True, min_periods=3).mean()
+            rolling_std = vals.rolling(window=window, center=True, min_periods=3).std()
+            valid_std = rolling_std.fillna(std_val)
+            valid_mean = rolling_mean.fillna(mean_val)
+            deviations = np.abs(vals - valid_mean)
+            threshold = valid_std * 2.5
+            threshold = threshold.replace(0, std_val * 2.5)
+            rolling_anomalies = vals[deviations > threshold]
+        
+        # Ciddi anomaliler (en az 3 yöntemde tespit edilen)
+        all_outlier_sets = [set(iqr_outliers.index), set(z_outliers.index), set(modified_z_outliers.index)]
+        if len(rolling_anomalies) > 0:
+            all_outlier_sets.append(set(rolling_anomalies.index))
+        
+        # Her indeks kaç yöntemde yakalandı
+        all_outlier_indices = set()
+        for s in all_outlier_sets:
+            all_outlier_indices |= s
+        
+        detection_counts = {}
+        for idx in all_outlier_indices:
+            cnt = sum(1 for s in all_outlier_sets if idx in s)
+            detection_counts[idx] = cnt
+        
+        severe = {idx for idx, cnt in detection_counts.items() if cnt >= 3}
+        moderate = {idx for idx, cnt in detection_counts.items() if cnt == 2}
+        mild = {idx for idx, cnt in detection_counts.items() if cnt == 1}
+        
+        col_anomaly_count = len(all_outlier_indices)
         total_anomaly_count += col_anomaly_count
         
+        # Grubbs testi (scipy varsa — en uç değer istatistiksel test)
+        grubbs_result = None
+        if SCIPY_AVAILABLE and len(vals) >= 8:
+            try:
+                n = len(vals)
+                max_idx = np.argmax(np.abs(vals - mean_val))
+                G = abs(vals.iloc[max_idx] - mean_val) / std_val if std_val > 0 else 0
+                t_crit = scipy_stats.t.ppf(1 - 0.05 / (2 * n), n - 2)
+                G_crit = ((n - 1) / np.sqrt(n)) * np.sqrt(t_crit**2 / (n - 2 + t_crit**2))
+                grubbs_result = {
+                    "test_statistic": round(float(G), 4),
+                    "critical_value": round(float(G_crit), 4),
+                    "extreme_value": round(float(vals.iloc[max_idx]), 2),
+                    "is_outlier": float(G) > float(G_crit),
+                    "interpretation": f"En uç değer {round(float(vals.iloc[max_idx]), 2)} {'istatistiksel olarak aykırı ✓' if G > G_crit else 'aykırı sayılmaz ✗'}"
+                }
+            except Exception:
+                pass
+        
         if col_anomaly_count > 0:
-            anomalies[col] = {
-                "iqr_count": len(iqr_outliers),
-                "zscore_count": len(z_outliers),
-                "severe_count": len(severe),
-                "anomaly_pct": round(len(iqr_outliers) / len(vals) * 100, 1),
-                "normal_range": f"{round(float(lower_iqr), 2)} — {round(float(upper_iqr), 2)}",
-                "mean": round(float(mean_val), 2),
-                "std": round(float(std_val), 2),
-                "top_anomalies": sorted([round(float(v), 2) for v in iqr_outliers.values], reverse=True)[:5],
-                "severity": "Kritik" if len(severe) > 0 else "Uyarı" if len(iqr_outliers) > len(vals) * 0.05 else "Bilgi",
+            col_result = {
+                "methods": {
+                    "iqr": {"count": len(iqr_outliers), "range": f"{round(float(lower_iqr), 2)} — {round(float(upper_iqr), 2)}"},
+                    "zscore": {"count": len(z_outliers), "threshold": 2.5},
+                    "modified_zscore": {"count": len(modified_z_outliers), "threshold": 3.5, "method": "MAD-based"},
+                },
+                "severity_breakdown": {
+                    "kritik": len(severe),
+                    "orta": len(moderate),
+                    "hafif": len(mild),
+                },
+                "total_anomalies": col_anomaly_count,
+                "anomaly_pct": round(col_anomaly_count / len(vals) * 100, 1),
+                "stats": {"mean": round(float(mean_val), 2), "median": round(float(median_val), 2), "std": round(float(std_val), 2)},
+                "top_anomalies": sorted([round(float(vals.loc[idx]), 2) for idx in list(severe | moderate)[:10]], reverse=True)[:5],
+                "severity": "Kritik" if len(severe) > 0 else "Uyarı" if col_anomaly_count > len(vals) * 0.05 else "Bilgi",
             }
+            if len(rolling_anomalies) > 0:
+                col_result["methods"]["rolling_window"] = {"count": len(rolling_anomalies), "window_size": window, "note": "Trend-adjusted"}
+            if grubbs_result:
+                col_result["grubbs_test"] = grubbs_result
+            anomalies[col] = col_result
     
     return {
         "success": True,
@@ -633,6 +772,7 @@ def anomaly_detection(df: pd.DataFrame) -> dict:
         "columns_with_anomalies": len(anomalies),
         "total_columns_checked": len(num_cols[:8]),
         "anomaly_details": anomalies,
+        "detection_methods": ["IQR", "Z-Score", "Modified Z-Score (MAD)", "Rolling Window", "Grubbs Test"],
         "overall_health": "İyi" if total_anomaly_count < 5 else "Dikkat" if total_anomaly_count < 20 else "Sorunlu",
     }
 
@@ -642,57 +782,86 @@ def anomaly_detection(df: pd.DataFrame) -> dict:
 # ══════════════════════════════════════════════════════════════
 
 def correlation_analysis(df: pd.DataFrame) -> dict:
-    """Detaylı korelasyon matrisi ve ilişki önerileri"""
+    """Pro korelasyon analizi — Pearson + Spearman + istatistiksel anlamlılık"""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if len(num_cols) < 2:
         return {"success": False, "error": "En az 2 sayısal sütun gerekli"}
     
-    corr_matrix = df[num_cols[:10]].corr()
+    cols = num_cols[:10]
+    pearson_matrix = df[cols].corr(method='pearson')
+    spearman_matrix = df[cols].corr(method='spearman')
     
     # Tüm ilişkileri sınıfla
     relationships = []
-    for i in range(len(corr_matrix.columns)):
-        for j in range(i + 1, len(corr_matrix.columns)):
-            val = corr_matrix.iloc[i, j]
-            if pd.isna(val):
+    for i in range(len(cols)):
+        for j in range(i + 1, len(cols)):
+            p_val = pearson_matrix.iloc[i, j]
+            s_val = spearman_matrix.iloc[i, j]
+            if pd.isna(p_val):
                 continue
-            abs_val = abs(val)
+            
+            abs_p = abs(p_val)
+            abs_s = abs(s_val) if not pd.isna(s_val) else 0
             strength = (
-                "Çok Güçlü" if abs_val > 0.9 else
-                "Güçlü" if abs_val > 0.7 else
-                "Orta" if abs_val > 0.5 else
-                "Zayıf" if abs_val > 0.3 else
+                "Çok Güçlü" if abs_p > 0.9 else
+                "Güçlü" if abs_p > 0.7 else
+                "Orta" if abs_p > 0.5 else
+                "Zayıf" if abs_p > 0.3 else
                 "Çok Zayıf"
             )
+            
+            # Non-linear ilişki tespiti (Spearman > Pearson farkı)
+            linearity = "Doğrusal"
+            if abs_s - abs_p > 0.15:
+                linearity = "Non-Doğrusal (monoton)"
+            elif abs_p - abs_s > 0.15:
+                linearity = "Muhtemelen non-monoton"
+            
+            # P-value hesapla (scipy varsa)
+            p_value = None
+            if SCIPY_AVAILABLE and len(df) >= 3:
+                try:
+                    _, p_value = scipy_stats.pearsonr(df[cols[i]].dropna(), df[cols[j]].dropna())
+                    p_value = round(p_value, 4)
+                except Exception:
+                    pass
+            
             relationships.append({
-                "col1": corr_matrix.columns[i],
-                "col2": corr_matrix.columns[j],
-                "correlation": round(val, 3),
+                "col1": cols[i],
+                "col2": cols[j],
+                "pearson": round(p_val, 3),
+                "spearman": round(s_val, 3) if not pd.isna(s_val) else None,
                 "strength": strength,
-                "direction": "Pozitif" if val > 0 else "Negatif",
-                "actionable": abs_val > 0.5,
+                "direction": "Pozitif" if p_val > 0 else "Negatif",
+                "linearity": linearity,
+                "p_value": p_value,
+                "significant": p_value < 0.05 if p_value is not None else None,
+                "actionable": abs_p > 0.5,
             })
     
     # Önemlilere göre sırala
-    relationships.sort(key=lambda x: abs(x["correlation"]), reverse=True)
+    relationships.sort(key=lambda x: abs(x["pearson"]), reverse=True)
     
     # Her sütunun en güçlü ilişkisi
     best_pairs = {}
-    for col in num_cols[:10]:
+    for col in cols:
         col_rels = [r for r in relationships if r["col1"] == col or r["col2"] == col]
         if col_rels:
             best = col_rels[0]
             partner = best["col2"] if best["col1"] == col else best["col1"]
-            best_pairs[col] = {"partner": partner, "correlation": best["correlation"], "strength": best["strength"]}
+            best_pairs[col] = {"partner": partner, "pearson": best["pearson"], "spearman": best["spearman"], "strength": best["strength"]}
     
     return {
         "success": True,
-        "matrix": {str(k): {str(k2): round(v2, 3) for k2, v2 in v.items()} for k, v in corr_matrix.to_dict().items()},
+        "pearson_matrix": {str(k): {str(k2): round(v2, 3) for k2, v2 in v.items()} for k, v in pearson_matrix.to_dict().items()},
+        "spearman_matrix": {str(k): {str(k2): round(v2, 3) for k2, v2 in v.items()} for k, v in spearman_matrix.to_dict().items()},
         "relationships": relationships[:20],
-        "strong_count": sum(1 for r in relationships if abs(r["correlation"]) > 0.7),
-        "moderate_count": sum(1 for r in relationships if 0.5 < abs(r["correlation"]) <= 0.7),
+        "strong_count": sum(1 for r in relationships if abs(r["pearson"]) > 0.7),
+        "moderate_count": sum(1 for r in relationships if 0.5 < abs(r["pearson"]) <= 0.7),
+        "nonlinear_count": sum(1 for r in relationships if r["linearity"] != "Doğrusal"),
         "best_pairs": best_pairs,
         "total_pairs": len(relationships),
+        "method": "Pearson + Spearman" if True else "Pearson",
     }
 
 
@@ -701,7 +870,7 @@ def correlation_analysis(df: pd.DataFrame) -> dict:
 # ══════════════════════════════════════════════════════════════
 
 def distribution_analysis(df: pd.DataFrame) -> dict:
-    """Veri dağılım profili — çarpıklık, basıklık, yüzdelikler"""
+    """Pro dağılım profili — çarpıklık, basıklık, normallik testi, yüzdelikler"""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     if not num_cols:
         return {"success": False, "error": "Sayısal sütun bulunamadı"}
@@ -734,6 +903,33 @@ def distribution_analysis(df: pd.DataFrame) -> dict:
             else:
                 dist_type = "Normal Civarı"
             
+            # Normallik testleri (scipy varsa)
+            normality_test = None
+            if SCIPY_AVAILABLE and 8 <= len(vals) <= 5000:
+                try:
+                    stat, p_val = scipy_stats.shapiro(vals.values)
+                    normality_test = {
+                        "test": "Shapiro-Wilk",
+                        "statistic": round(stat, 4),
+                        "p_value": round(p_val, 4),
+                        "is_normal": p_val > 0.05,
+                        "interpretation": "Normal dağılım ✓" if p_val > 0.05 else "Normal dağılım değil ✗",
+                    }
+                except Exception:
+                    pass
+            elif SCIPY_AVAILABLE and len(vals) > 5000:
+                try:
+                    stat, p_val = scipy_stats.kstest(vals.values, 'norm', args=(vals.mean(), vals.std()))
+                    normality_test = {
+                        "test": "Kolmogorov-Smirnov",
+                        "statistic": round(stat, 4),
+                        "p_value": round(p_val, 4),
+                        "is_normal": p_val > 0.05,
+                        "interpretation": "Normal dağılım ✓" if p_val > 0.05 else "Normal dağılım değil ✗",
+                    }
+                except Exception:
+                    pass
+            
             # Yüzdelik değerler
             percentiles = {
                 "P5": round(float(vals.quantile(0.05)), 2),
@@ -743,6 +939,7 @@ def distribution_analysis(df: pd.DataFrame) -> dict:
                 "P75": round(float(vals.quantile(0.75)), 2),
                 "P90": round(float(vals.quantile(0.90)), 2),
                 "P95": round(float(vals.quantile(0.95)), 2),
+                "P99": round(float(vals.quantile(0.99)), 2),
             }
             
             # Histogram benzeri bant analizi
@@ -754,7 +951,12 @@ def distribution_analysis(df: pd.DataFrame) -> dict:
                     low = min_val + i * band_width
                     high = low + band_width
                     count = int(((vals >= low) & (vals < high if i < 4 else vals <= high)).sum())
-                    bands[f"{round(low, 1)}-{round(high, 1)}"] = count
+                    pct = round(count / len(vals) * 100, 1)
+                    bands[f"{round(low, 1)}-{round(high, 1)}"] = {"count": count, "pct": pct}
+            
+            # Yoğunlaşma bölgesi (P25-P75 arası yüzde)
+            iqr_count = int(((vals >= vals.quantile(0.25)) & (vals <= vals.quantile(0.75))).sum())
+            concentration = round(iqr_count / len(vals) * 100, 1)
             
             distributions[col] = {
                 "distribution_type": dist_type,
@@ -769,6 +971,8 @@ def distribution_analysis(df: pd.DataFrame) -> dict:
                 "range": round(max_val - min_val, 2),
                 "iqr": round(float(vals.quantile(0.75) - vals.quantile(0.25)), 2),
                 "bands": bands,
+                "concentration_iqr_pct": concentration,
+                "normality_test": normality_test,
             }
         except Exception:
             continue
@@ -780,8 +984,8 @@ def distribution_analysis(df: pd.DataFrame) -> dict:
 # 6e. TAHMİNLEME (Basit Projeksiyon)
 # ══════════════════════════════════════════════════════════════
 
-def forecast_analysis(df: pd.DataFrame, date_col: str = None, value_col: str = None, periods: int = 5) -> dict:
-    """Hareketli ortalama ve lineer regresyon tabanlı basit tahminleme"""
+def forecast_analysis(df: pd.DataFrame, date_col: str = None, value_col: str = None, periods: int = 6) -> dict:
+    """Pro tahminleme — ARIMA/Holt-Winters + güven aralıkları + model karşılaştırması"""
     
     if not date_col:
         for col in df.columns:
@@ -811,44 +1015,127 @@ def forecast_analysis(df: pd.DataFrame, date_col: str = None, value_col: str = N
         if len(vals) < 5:
             return {"success": False, "error": "Tahmin için en az 5 veri noktası gerekli"}
         
-        x = np.arange(len(vals))
+        values_list = [float(v) for v in vals.values]
+        models = {}
+        best_model = None
+        best_mape = float("inf")
         
-        # Lineer regresyon
+        # ── Model 1: Lineer Regresyon (her zaman) ──
+        x = np.arange(len(vals))
         coeffs = np.polyfit(x, vals.values, 1)
         slope, intercept = coeffs
-        
-        # R² hesapla
         y_pred = slope * x + intercept
         ss_res = np.sum((vals.values - y_pred) ** 2)
         ss_tot = np.sum((vals.values - vals.mean()) ** 2)
         r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
-        
-        # Gelecek tahminleri
         future_x = np.arange(len(vals), len(vals) + periods)
-        linear_forecast = [round(float(slope * xi + intercept), 2) for xi in future_x]
+        linear_fc = [round(float(slope * xi + intercept), 2) for xi in future_x]
         
-        # Hareketli ortalama tabanlı tahmin
-        window = min(5, len(vals) // 2)
-        ma_last = float(vals.rolling(window=window).mean().iloc[-1]) if window > 0 else float(vals.mean())
-        ma_trend = float(slope)  # Trendi ekle
-        ma_forecast = [round(ma_last + ma_trend * (i + 1), 2) for i in range(periods)]
+        linear_errors = np.abs(vals.values - y_pred)
+        linear_mape = float(np.mean(linear_errors / np.abs(vals.values + 1e-10)) * 100)
         
-        # Güven seviyesi
-        confidence = "Yüksek" if r_squared > 0.7 else "Orta" if r_squared > 0.4 else "Düşük"
+        models["linear"] = {
+            "method": "Lineer Regresyon",
+            "forecasts": linear_fc,
+            "r_squared": round(r_squared, 3),
+            "mape": round(linear_mape, 2),
+            "slope": round(float(slope), 4),
+        }
+        if linear_mape < best_mape:
+            best_mape = linear_mape
+            best_model = "linear"
+        
+        # ── Model 2: Holt Linear Trend ──
+        if FORECASTING_AVAILABLE and len(values_list) >= 4:
+            try:
+                holt_result = holt_linear_trend(values_list, forecast_periods=periods)
+                if holt_result.get("success"):
+                    models["holt"] = {
+                        "method": holt_result["method"],
+                        "forecasts": holt_result["forecasts"],
+                        "confidence_intervals": holt_result.get("confidence_intervals", []),
+                        "mape": holt_result.get("mape", 999),
+                        "trend_per_period": holt_result.get("trend_per_period"),
+                    }
+                    if holt_result.get("mape", 999) < best_mape:
+                        best_mape = holt_result["mape"]
+                        best_model = "holt"
+            except Exception:
+                pass
+        
+        # ── Model 3: Exponential Smoothing ──
+        if FORECASTING_AVAILABLE and len(values_list) >= 3:
+            try:
+                ses_result = exponential_smoothing(values_list, forecast_periods=periods)
+                if ses_result.get("success"):
+                    models["ses"] = {
+                        "method": ses_result["method"],
+                        "forecasts": ses_result["forecasts"],
+                        "confidence_intervals": ses_result.get("confidence_intervals", []),
+                        "mape": ses_result.get("mape", 999),
+                    }
+                    if ses_result.get("mape", 999) < best_mape:
+                        best_mape = ses_result["mape"]
+                        best_model = "ses"
+            except Exception:
+                pass
+        
+        # ── Model 4: ARIMA (en güçlü) ──
+        if FORECASTING_AVAILABLE and STATSMODELS_AVAILABLE and len(values_list) >= 10:
+            try:
+                arima_result = arima_forecast(values_list, forecast_periods=periods)
+                if arima_result.get("success"):
+                    models["arima"] = {
+                        "method": arima_result["method"],
+                        "forecasts": arima_result["forecasts"],
+                        "confidence_intervals": arima_result.get("confidence_intervals", []),
+                        "mape": arima_result.get("mape", 999),
+                        "aic": arima_result.get("aic"),
+                        "order": arima_result.get("order"),
+                        "stationarity": arima_result.get("stationarity"),
+                    }
+                    if arima_result.get("mape", 999) < best_mape:
+                        best_mape = arima_result["mape"]
+                        best_model = "arima"
+            except Exception:
+                pass
+        
+        # ── Model 5: Holt-Winters Seasonal ──
+        if FORECASTING_AVAILABLE and len(values_list) >= 24:
+            try:
+                hw_result = holt_winters_seasonal(values_list, forecast_periods=periods)
+                if hw_result.get("success"):
+                    models["holt_winters"] = {
+                        "method": hw_result["method"],
+                        "forecasts": hw_result["forecasts"],
+                        "seasonal_indices": hw_result.get("seasonal_indices", []),
+                        "mape": hw_result.get("mape", 999),
+                    }
+                    if hw_result.get("mape", 999) < best_mape:
+                        best_mape = hw_result["mape"]
+                        best_model = "holt_winters"
+            except Exception:
+                pass
+        
+        # En iyi modelin güven seviyesi
+        confidence = "Yüksek" if best_mape < 10 else "Orta" if best_mape < 25 else "Düşük"
+        
+        current_value = round(float(vals.iloc[-1]), 2)
+        best_fc = models[best_model]["forecasts"] if best_model else linear_fc
+        predicted_change = round(((best_fc[-1] - current_value) / current_value) * 100, 1) if current_value != 0 else 0
         
         return {
             "success": True,
             "value_column": value_col,
             "data_points": len(vals),
             "forecast_periods": periods,
-            "linear_forecast": linear_forecast,
-            "ma_forecast": ma_forecast,
-            "trend_slope": round(float(slope), 4),
-            "r_squared": round(r_squared, 3),
+            "best_model": best_model,
+            "best_mape": round(best_mape, 2),
             "confidence": confidence,
-            "current_value": round(float(vals.iloc[-1]), 2),
-            "predicted_change_pct": round(((linear_forecast[-1] - float(vals.iloc[-1])) / float(vals.iloc[-1])) * 100, 1) if vals.iloc[-1] != 0 else 0,
-            "method": "Lineer Regresyon + Hareketli Ortalama",
+            "current_value": current_value,
+            "predicted_change_pct": predicted_change,
+            "models": models,
+            "models_compared": len(models),
         }
     
     except Exception as e:
@@ -941,12 +1228,13 @@ def pareto_analysis(df: pd.DataFrame, value_col: str = None, label_col: str = No
 # ══════════════════════════════════════════════════════════════
 
 def data_quality_analysis(df: pd.DataFrame) -> dict:
-    """Kapsamlı veri kalitesi değerlendirmesi"""
+    """Pro veri kalitesi — eksik veri, tip tutarlılığı, tarih doğrulama, aykırı değer taraması, çapraz kontrol"""
     total_cells = df.shape[0] * df.shape[1]
     
     # 1. Eksik veri analizi
     missing = {}
     total_missing = 0
+    missing_patterns = {}
     for col in df.columns:
         null_count = int(df[col].isnull().sum())
         if null_count > 0:
@@ -956,16 +1244,32 @@ def data_quality_analysis(df: pd.DataFrame) -> dict:
                 "severity": "Kritik" if null_count / len(df) > 0.3 else "Uyarı" if null_count / len(df) > 0.1 else "Düşük",
             }
             total_missing += null_count
+    # Eksik veri deseni — hangi sütunlar birlikte boş
+    if len(missing) >= 2:
+        missing_cols = list(missing.keys())[:5]
+        for i, c1 in enumerate(missing_cols):
+            for c2 in missing_cols[i+1:]:
+                both_null = int((df[c1].isnull() & df[c2].isnull()).sum())
+                if both_null > 0:
+                    missing_patterns[f"{c1} & {c2}"] = both_null
     
     # 2. Tekrarlayan satırlar
     duplicates = int(df.duplicated().sum())
     dup_pct = round(duplicates / len(df) * 100, 1) if len(df) > 0 else 0
+    # Near-duplicates (string sütunlarında benzerlik)
+    near_dup_cols = []
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            vals = df[col].dropna()
+            stripped = vals.str.strip().str.lower()
+            diff_count = int((vals != stripped.values).sum()) if len(vals) > 0 else 0
+            if diff_count > 0:
+                near_dup_cols.append({"column": col, "whitespace_case_diffs": diff_count})
     
     # 3. Sütun tip tutarlılığı
     type_issues = {}
     for col in df.columns:
         if df[col].dtype == 'object':
-            # Sayı gibi görünen metin var mı?
             numeric_like = df[col].dropna().apply(lambda x: str(x).replace(',', '.').replace(' ', '').replace('-', '')).str.match(r'^\d+\.?\d*$')
             numeric_count = int(numeric_like.sum()) if len(numeric_like) > 0 else 0
             total_non_null = int(df[col].notna().sum())
@@ -975,7 +1279,65 @@ def data_quality_analysis(df: pd.DataFrame) -> dict:
                     "numeric_ratio": round(numeric_count / total_non_null * 100, 1),
                 }
     
-    # 4. Boş/whitespace satırlar
+    # 4. Tarih formatı doğrulama
+    import re
+    date_issues = {}
+    date_patterns = [
+        r'\d{4}-\d{2}-\d{2}',           # YYYY-MM-DD
+        r'\d{2}/\d{2}/\d{4}',           # DD/MM/YYYY
+        r'\d{2}\.\d{2}\.\d{4}',         # DD.MM.YYYY
+        r'\d{4}/\d{2}/\d{2}',           # YYYY/MM/DD
+    ]
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            sample = df[col].dropna().head(100)
+            if len(sample) == 0:
+                continue
+            format_counts = {}
+            unparseable = 0
+            for val in sample:
+                val_str = str(val).strip()
+                matched = False
+                for pat in date_patterns:
+                    if re.fullmatch(pat, val_str[:10]):
+                        fmt = pat.replace(r'\d{4}', 'YYYY').replace(r'\d{2}', 'XX')
+                        format_counts[fmt] = format_counts.get(fmt, 0) + 1
+                        matched = True
+                        break
+                if not matched:
+                    # pd.to_datetime ile dene
+                    try:
+                        pd.to_datetime(val_str)
+                        format_counts["mixed_parseable"] = format_counts.get("mixed_parseable", 0) + 1
+                    except Exception:
+                        pass
+            
+            if len(format_counts) > 1:
+                date_issues[col] = {
+                    "issue": "Karışık tarih formatları",
+                    "formats_found": format_counts,
+                    "recommendation": "Tek bir tarih formatına (YYYY-MM-DD) dönüştürün",
+                }
+            elif len(format_counts) == 1 and list(format_counts.values())[0] > len(sample) * 0.5:
+                # Geçerli tarihler kontrol — gelecek/geçmiş sınırları
+                try:
+                    parsed = pd.to_datetime(df[col], errors='coerce')
+                    valid = parsed.dropna()
+                    if len(valid) > 0:
+                        future_count = int((valid > pd.Timestamp.now() + pd.Timedelta(days=365*5)).sum())
+                        past_count = int((valid < pd.Timestamp('1900-01-01')).sum())
+                        if future_count > 0 or past_count > 0:
+                            date_issues[col] = {
+                                "issue": "Şüpheli tarih aralıkları",
+                                "future_dates": future_count,
+                                "very_old_dates": past_count,
+                                "min_date": str(valid.min())[:10],
+                                "max_date": str(valid.max())[:10],
+                            }
+                except Exception:
+                    pass
+    
+    # 5. Boş/whitespace satırlar
     whitespace_issues = {}
     for col in df.columns:
         if df[col].dtype == 'object':
@@ -983,11 +1345,70 @@ def data_quality_analysis(df: pd.DataFrame) -> dict:
             if ws_count > 0:
                 whitespace_issues[col] = ws_count
     
-    # 5. Genel kalite skoru
+    # 6. Sayısal sütun aralık kontrolü (mantıksız değerler)
+    range_issues = {}
+    for col in df.select_dtypes(include=[np.number]).columns:
+        vals = df[col].dropna()
+        if len(vals) < 5:
+            continue
+        issues = []
+        if (vals < 0).any():
+            neg_count = int((vals < 0).sum())
+            # Yüzde, miktar gibi negatif olmaması gereken alanlar
+            lower_col = col.lower()
+            if any(kw in lower_col for kw in ['fiyat', 'price', 'miktar', 'quantity', 'adet', 'count', 'yaş', 'age', 'weight', 'ağırlık']):
+                issues.append({"type": "Negatif değerler", "count": neg_count, "note": f"'{col}' sütununda negatif değer beklenmez"})
+        # Aşırı yüksek değerler (ortalamadan 10x)
+        mean_v = vals.mean()
+        max_v = vals.max()
+        if mean_v > 0 and max_v > mean_v * 100:
+            issues.append({"type": "Aşırı yüksek", "max_value": round(float(max_v), 2), "mean": round(float(mean_v), 2), "ratio": round(float(max_v / mean_v), 1)})
+        if issues:
+            range_issues[col] = issues
+    
+    # 7. Çapraz sütun tutarlılığı
+    cross_checks = []
+    col_lower_map = {col: col.lower() for col in df.columns}
+    for col in df.columns:
+        lc = col_lower_map[col]
+        # başlangıç < bitiş kontrolleri
+        if any(kw in lc for kw in ['başlangıç', 'start', 'baslangic', 'min_']):
+            for col2 in df.columns:
+                lc2 = col_lower_map[col2]
+                if any(kw in lc2 for kw in ['bitiş', 'end', 'bitis', 'max_']):
+                    if df[col].dtype == df[col2].dtype:
+                        try:
+                            violations = int((df[col] > df[col2]).sum())
+                            if violations > 0:
+                                cross_checks.append({
+                                    "rule": f"{col} ≤ {col2}",
+                                    "violations": violations,
+                                    "severity": "Uyarı",
+                                })
+                        except Exception:
+                            pass
+    
+    # 8. Kardinalite analizi (sütun benzersiz değer oranı)
+    cardinality = {}
+    for col in df.columns:
+        nunique = df[col].nunique()
+        ratio = round(nunique / len(df) * 100, 1) if len(df) > 0 else 0
+        if ratio == 100 and df[col].dtype == 'object':
+            cardinality[col] = {"type": "Olası ID/anahtar sütun", "unique_ratio": ratio}
+        elif nunique <= 2 and len(df) > 10:
+            cardinality[col] = {"type": "Düşük kardinalite (binary)", "unique_values": nunique}
+        elif nunique <= 5 and len(df) > 50:
+            cardinality[col] = {"type": "Düşük kardinalite (kategori)", "unique_values": nunique}
+    
+    # 9. Genel kalite skoru (genişletilmiş)
     completeness = round((1 - total_missing / total_cells) * 100, 1) if total_cells > 0 else 100
     uniqueness = round((1 - duplicates / len(df)) * 100, 1) if len(df) > 0 else 100
     consistency = round((1 - len(type_issues) / len(df.columns)) * 100, 1) if len(df.columns) > 0 else 100
-    quality_score = round((completeness * 0.4 + uniqueness * 0.3 + consistency * 0.3), 1)
+    validity = 100.0
+    total_validity_checks = len(date_issues) + len(range_issues) + len(cross_checks)
+    if total_validity_checks > 0:
+        validity = round(max(0, 100 - total_validity_checks * 10), 1)
+    quality_score = round((completeness * 0.3 + uniqueness * 0.2 + consistency * 0.2 + validity * 0.3), 1)
     
     return {
         "success": True,
@@ -996,28 +1417,43 @@ def data_quality_analysis(df: pd.DataFrame) -> dict:
         "total_cells": total_cells,
         "quality_score": quality_score,
         "quality_grade": "A" if quality_score >= 90 else "B" if quality_score >= 75 else "C" if quality_score >= 60 else "D" if quality_score >= 40 else "F",
+        "dimensions": {
+            "completeness": completeness,
+            "uniqueness": uniqueness,
+            "consistency": consistency,
+            "validity": round(validity, 1),
+        },
         "completeness": {
             "score": completeness,
             "total_missing": total_missing,
             "columns_with_missing": len(missing),
             "details": missing,
+            "missing_patterns": missing_patterns if missing_patterns else None,
         },
         "uniqueness": {
             "score": uniqueness,
             "duplicate_rows": duplicates,
             "duplicate_pct": dup_pct,
+            "near_duplicates": near_dup_cols if near_dup_cols else None,
         },
         "consistency": {
             "score": consistency,
             "type_issues": type_issues,
             "whitespace_issues": whitespace_issues,
         },
-        "recommendations": _quality_recommendations(completeness, uniqueness, consistency, missing, type_issues),
+        "validity": {
+            "score": round(validity, 1),
+            "date_issues": date_issues if date_issues else None,
+            "range_issues": range_issues if range_issues else None,
+            "cross_column_checks": cross_checks if cross_checks else None,
+        },
+        "cardinality": cardinality if cardinality else None,
+        "recommendations": _quality_recommendations(completeness, uniqueness, consistency, missing, type_issues, date_issues, range_issues, cross_checks),
     }
 
 
-def _quality_recommendations(completeness, uniqueness, consistency, missing, type_issues) -> list:
-    """Veri kalitesi tavsiyelerini oluştur"""
+def _quality_recommendations(completeness, uniqueness, consistency, missing, type_issues, date_issues=None, range_issues=None, cross_checks=None) -> list:
+    """Pro veri kalitesi tavsiyelerini oluştur"""
     recs = []
     if completeness < 90:
         worst_cols = sorted(missing.items(), key=lambda x: x[1]["count"], reverse=True)[:3]
@@ -1028,7 +1464,17 @@ def _quality_recommendations(completeness, uniqueness, consistency, missing, typ
     if consistency < 90:
         for col, info in type_issues.items():
             recs.append(f"'{col}' sütununu sayısal tipe dönüştürün (%{info['numeric_ratio']} sayısal)")
-    if completeness >= 90 and uniqueness >= 95 and consistency >= 90:
+    if date_issues:
+        for col, info in date_issues.items():
+            recs.append(f"'{col}': {info['issue']} — {info.get('recommendation', 'Düzeltilmeli')}")
+    if range_issues:
+        for col, issues in range_issues.items():
+            for iss in issues:
+                recs.append(f"'{col}': {iss['type']} — {iss.get('note', str(iss))}")
+    if cross_checks:
+        for chk in cross_checks:
+            recs.append(f"Çapraz kontrol ihlali: {chk['rule']} ({chk['violations']} satır)")
+    if completeness >= 90 and uniqueness >= 95 and consistency >= 90 and not date_issues and not range_issues and not cross_checks:
         recs.append("Veri kalitesi genel olarak iyi durumda ✓")
     return recs
 
@@ -1138,6 +1584,16 @@ def generate_analysis_prompt(
                 prompt += f"- **{col}**: En iyi={cinfo['best_group']}, En düşük={cinfo['worst_group']}, Fark=%{cinfo.get('gap_pct', 0)}\n"
                 if cinfo.get("medians"):
                     prompt += f"  Medyanlar: {', '.join(f'{k}={v}' for k, v in list(cinfo['medians'].items())[:5])}\n"
+            # İstatistiksel test sonuçları
+            stat_tests = comp.get("statistical_tests", {})
+            if stat_tests:
+                prompt += "\n**İstatistiksel Testler:**\n"
+                for col, test_info in stat_tests.items():
+                    prompt += f"- **{col}**: {test_info['test']} — p={test_info['p_value']}, {test_info['interpretation']}\n"
+                    if test_info.get("cohens_d") is not None:
+                        prompt += f"  Etki büyüklüğü (Cohen's d): {test_info['cohens_d']} ({test_info['effect_size']})\n"
+                    if test_info.get("eta_squared") is not None:
+                        prompt += f"  Etki büyüklüğü (Eta²): {test_info['eta_squared']} ({test_info['effect_size']})\n"
     
     # Top-N
     if analysis_type in ("full", "report", "pareto") and discovery["numeric_columns"]:
@@ -1156,10 +1612,19 @@ def generate_analysis_prompt(
     if analysis_type == "anomaly":
         anom = anomaly_detection(df)
         if anom.get("success"):
-            prompt += f"\n### Anomali Tespiti (Genel Sağlık: {anom['overall_health']}):\n"
+            prompt += f"\n### Anomali Tespiti (Genel Sağlık: {anom['overall_health']}, Yöntemler: {', '.join(anom.get('detection_methods', []))}):\n"
             prompt += f"- Toplam anomali: {anom['total_anomalies']}, Etkilenen sütun: {anom['columns_with_anomalies']}/{anom['total_columns_checked']}\n"
             for col, det in anom.get("anomaly_details", {}).items():
-                prompt += f"- **{col}** [{det['severity']}]: {det['iqr_count']} IQR, {det['zscore_count']} Z-Score aykırı. Normal aralık: {det['normal_range']}\n"
+                methods = det.get("methods", {})
+                severity = det.get("severity_breakdown", {})
+                prompt += f"- **{col}** [{det['severity']}]: {det['total_anomalies']} anomali (Kritik:{severity.get('kritik',0)}, Orta:{severity.get('orta',0)}, Hafif:{severity.get('hafif',0)})\n"
+                prompt += f"  Yöntemler: IQR={methods.get('iqr',{}).get('count',0)}, Z-Score={methods.get('zscore',{}).get('count',0)}, Modified-Z={methods.get('modified_zscore',{}).get('count',0)}"
+                if 'rolling_window' in methods:
+                    prompt += f", Rolling={methods['rolling_window']['count']}"
+                prompt += "\n"
+                if det.get("grubbs_test"):
+                    gt = det["grubbs_test"]
+                    prompt += f"  Grubbs testi: {gt['interpretation']}\n"
                 if det.get("top_anomalies"):
                     prompt += f"  En büyük anomaliler: {', '.join(str(v) for v in det['top_anomalies'][:5])}\n"
     
@@ -1170,8 +1635,12 @@ def generate_analysis_prompt(
             prompt += f"\n### Detaylı Korelasyon Analizi ({corr['total_pairs']} çift incelendi):\n"
             prompt += f"- Güçlü ilişki: {corr['strong_count']}, Orta ilişki: {corr['moderate_count']}\n"
             for rel in corr.get("relationships", [])[:10]:
-                emoji = "🔴" if abs(rel["correlation"]) > 0.7 else "🟡" if abs(rel["correlation"]) > 0.5 else "⚪"
-                prompt += f"  {emoji} **{rel['col1']}** ↔ **{rel['col2']}**: {rel['correlation']} ({rel['strength']}, {rel['direction']})\n"
+                emoji = "🔴" if abs(rel["pearson"]) > 0.7 else "🟡" if abs(rel["pearson"]) > 0.5 else "⚪"
+                linearity = f", {rel.get('linearity', '')}" if rel.get('linearity') else ""
+                sig = " ✓" if rel.get("significant") else " ✗"
+                prompt += f"  {emoji} **{rel['col1']}** ↔ **{rel['col2']}**: Pearson={rel['pearson']}, Spearman={rel.get('spearman','N/A')} ({rel['strength']}, {rel['direction']}{linearity}){sig}\n"
+                if rel.get("p_value") is not None:
+                    prompt += f"    p-value={rel['p_value']}, Anlamlılık: {'Evet' if rel.get('significant') else 'Hayır'}\n"
     
     # Dağılım Analizi
     if analysis_type == "distribution":
@@ -1181,17 +1650,39 @@ def generate_analysis_prompt(
             for col, d in dist.get("distributions", {}).items():
                 prompt += f"- **{col}**: {d['distribution_type']}, Ort={d['mean']}, Medyan={d['median']}, Std={d['std']}, CV=%{d['cv_pct']}\n"
                 prompt += f"  Çarpıklık={d['skewness']}, Basıklık={d['kurtosis']}, IQR={d['iqr']}\n"
-                prompt += f"  Yüzdelikler: P25={d['percentiles']['P25']}, P50={d['percentiles']['P50']}, P75={d['percentiles']['P75']}, P95={d['percentiles']['P95']}\n"
+                prompt += f"  Yüzdelikler: P25={d['percentiles']['P25']}, P50={d['percentiles']['P50']}, P75={d['percentiles']['P75']}, P95={d['percentiles']['P95']}, P99={d['percentiles'].get('P99','N/A')}\n"
+                if d.get("normality_test"):
+                    nt = d["normality_test"]
+                    prompt += f"  Normallik testi ({nt['test']}): p={nt['p_value']}, {nt['interpretation']}\n"
+                if d.get("concentration_iqr_pct") is not None:
+                    prompt += f"  Yoğunlaşma (IQR kapsamı): %{d['concentration_iqr_pct']}\n"
     
     # Tahminleme
     if analysis_type == "forecast":
         fc = forecast_analysis(df)
         if fc.get("success"):
-            prompt += f"\n### Tahminleme ({fc['method']}, R²={fc['r_squared']}, Güven: {fc['confidence']}):\n"
-            prompt += f"- Mevcut değer: {fc['current_value']}, Eğim: {fc['trend_slope']}\n"
-            prompt += f"- Lineer tahmin (sonraki {fc['forecast_periods']} dönem): {', '.join(str(v) for v in fc['linear_forecast'])}\n"
-            prompt += f"- Hareketli Ort. tahmin: {', '.join(str(v) for v in fc['ma_forecast'])}\n"
-            prompt += f"- Beklenen değişim: %{fc['predicted_change_pct']}\n"
+            prompt += f"\n### Tahminleme ({fc.get('models_compared', 0)} model karşılaştırıldı, En iyi: {fc.get('best_model', 'Lineer')}):\n"
+            prompt += f"- Mevcut değer: {fc.get('current_value')}, Dönem: {fc.get('forecast_periods', 'N/A')} periyot\n"
+            
+            # Her modelin sonuçları
+            models = fc.get("models", {})
+            if models:
+                prompt += "- **Model Karşılaştırma Tablosu:**\n"
+                for model_name, model_data in models.items():
+                    is_best = " ★" if model_name == fc.get("best_model") else ""
+                    mape = model_data.get("mape", "N/A")
+                    trend = model_data.get("trend_direction", "")
+                    forecast_vals = model_data.get("forecast", [])
+                    forecast_str = ", ".join(str(v) for v in forecast_vals[:3]) if forecast_vals else "N/A"
+                    prompt += f"  | {model_name}{is_best} | MAPE=%{mape} | Tahmin: {forecast_str}... | Trend: {trend} |\n"
+                    if model_data.get("confidence_interval"):
+                        ci = model_data["confidence_interval"]
+                        prompt += f"    Güven aralığı: Alt={ci.get('lower', ['?'])[0]}, Üst={ci.get('upper', ['?'])[0]}\n"
+            
+            # Genel özet
+            prompt += f"- En iyi model MAPE: %{fc.get('best_mape', 'N/A')}\n"
+            if fc.get("predicted_change_pct") is not None:
+                prompt += f"- Beklenen değişim: %{fc['predicted_change_pct']}\n"
     
     # Pareto / ABC
     if analysis_type == "pareto":
@@ -1209,10 +1700,34 @@ def generate_analysis_prompt(
     if analysis_type == "quality":
         qual = data_quality_analysis(df)
         if qual.get("success"):
+            dims = qual.get("dimensions", {})
             prompt += f"\n### Veri Kalitesi Raporu (Skor: {qual['quality_score']}/100, Not: {qual['quality_grade']}):\n"
-            prompt += f"- Bütünlük: %{qual['completeness']['score']} ({qual['completeness']['total_missing']} eksik hücre)\n"
-            prompt += f"- Teksillik: %{qual['uniqueness']['score']} ({qual['uniqueness']['duplicate_rows']} tekrar satır)\n"
-            prompt += f"- Tutarlılık: %{qual['consistency']['score']} ({len(qual['consistency']['type_issues'])} tip sorunu)\n"
+            prompt += f"- Bütünlük: %{dims.get('completeness', qual['completeness']['score'])} ({qual['completeness']['total_missing']} eksik hücre)\n"
+            prompt += f"- Teksillik: %{dims.get('uniqueness', qual['uniqueness']['score'])} ({qual['uniqueness']['duplicate_rows']} tekrar satır)\n"
+            prompt += f"- Tutarlılık: %{dims.get('consistency', qual['consistency']['score'])} ({len(qual['consistency']['type_issues'])} tip sorunu)\n"
+            prompt += f"- Geçerlilik: %{dims.get('validity', 100)}\n"
+            # Tarih sorunları
+            validity = qual.get("validity", {})
+            if validity.get("date_issues"):
+                prompt += "- **Tarih Sorunları**:\n"
+                for col, info in validity["date_issues"].items():
+                    prompt += f"  • {col}: {info['issue']}\n"
+            # Aralık sorunları
+            if validity.get("range_issues"):
+                prompt += "- **Aralık Sorunları**:\n"
+                for col, issues in validity["range_issues"].items():
+                    for iss in issues:
+                        prompt += f"  • {col}: {iss['type']}\n"
+            # Çapraz kontrol
+            if validity.get("cross_column_checks"):
+                prompt += "- **Çapraz Kontrol İhlalleri**:\n"
+                for chk in validity["cross_column_checks"]:
+                    prompt += f"  • {chk['rule']}: {chk['violations']} satır\n"
+            # Eksik veri desenleri
+            if qual['completeness'].get("missing_patterns"):
+                prompt += "- **Eksik Veri Desenleri** (birlikte boş olan sütunlar):\n"
+                for pair, cnt in qual['completeness']['missing_patterns'].items():
+                    prompt += f"  • {pair}: {cnt} satır\n"
             if qual.get("recommendations"):
                 prompt += "- **Tavsiyeler**:\n"
                 for rec in qual["recommendations"]:
@@ -1247,13 +1762,15 @@ Her bulguyu verilerle destekle."""
 
     elif analysis_type == "compare":
         prompt += """
-**GÖREV**: Grupları kapsamlı karşılaştır:
+**GÖREV**: Grupları istatistiksel testlerle birlikte kapsamlı karşılaştır:
 1. En iyi ve en kötü performans gösteren gruplar (neden?)
 2. Medyan vs ortalama farklarının gösterdiği dağılım özellikleri
-3. Gruplar arası fark yüzdeleri ve anlamlılığı
-4. Genel ortalamadan sapma analizi
-5. Standart sapma ile tutarlılık değerlendirmesi
-6. Her grup için spesifik aksiyon önerileri"""
+3. t-test/ANOVA sonuçları — gruplar arası fark istatistiksel olarak anlamlı mı?
+4. Etki büyüklüğü (Cohen's d veya Eta²) — fark pratikte ne kadar önemli?
+5. Genel ortalamadan sapma analizi
+6. Standart sapma ile tutarlılık değerlendirmesi
+7. Her grup için spesifik aksiyon önerileri
+⚠️ p-value<0.05 = anlamlı fark, değilse fark rastlantısal olabilir."""
 
     elif analysis_type == "recommend":
         prompt += """
@@ -1292,47 +1809,50 @@ Kısa, öz ama bilgi dolu olsun."""
 
     elif analysis_type == "anomaly":
         prompt += """
-**GÖREV**: Anomali ve aykırı değer tespitini detaylı raporla:
-1. Tespit edilen anomalilerin listesi ve ciddiyet seviyeleri
-2. Her anomalinin olası nedenleri (veri hatası mı, gerçek sapma mı?)
-3. Hangi sütunlar en fazla anomali içeriyor ve bunun anlamı
-4. Anomalilerin iş süreçlerine potansiyel etkisi
-5. Temizleme/düzeltme tavsiyeler (hangileri silinmeli, hangileri araştırılmalı)
-6. Anomalilerin kök neden analizi
-Her bulguyu IQR ve Z-Score değerleriyle destekle."""
+**GÖREV**: Çok-yöntemli anomali tespitini detaylı raporla:
+1. Tespit edilen anomalilerin seviye dağılımı (Kritik/Orta/Hafif) ve anlamları
+2. Hangi yöntemler (IQR, Z-Score, Modified Z-Score, Rolling Window) hangi anomalileri yakaladı
+3. Grubbs testi sonuçları — en uç değer istatistiksel olarak gerçek aykırı mı?
+4. Rolling window anomalileri — trend değişimi mi yoksa tek seferlik sapma mı?
+5. Her anomalinin olası nedenleri (veri hatası mı, gerçek sapma mı?)
+6. Temizleme stratejisi: Silinmeli / araştırılmalı / düzeltilmeli
+7. Anomalilerin iş süreçlerine potansiyel etkisi
+Her bulguyu birden fazla istatistiksel yöntemle destekle."""
 
     elif analysis_type == "correlation":
         prompt += """
-**GÖREV**: Korelasyon ilişkilerini iş perspektifinden yorumla:
-1. En güçlü pozitif ve negatif ilişkiler ve ne anlama geldikleri
-2. Beklenmeyen veya ilginç ilişkiler (neden-sonuç tartışması)
-3. İş kararlarında kullanılabilecek ilişki önerileri
-4. Korelasyon ≠ nedensellik uyarısı ile yorumlar
+**GÖREV**: Pearson + Spearman korelasyon ilişkilerini iş perspektifinden yorumla:
+1. En güçlü pozitif ve negatif ilişkiler (Pearson vs Spearman karşılaştırması)
+2. Doğrusal vs doğrusal olmayan ilişkiler — Spearman>Pearson olan çiftler ne anlama geliyor?
+3. İstatistiksel anlamlılık — p-value<0.05 olan ilişkiler güvenilir, diğerleri rastlantısal olabilir
+4. Beklenmeyen ilişkiler (neden-sonuç tartışması, korelasyon ≠ nedensellik uyarısı)
 5. Birbirine bağımlı değişken grupları (cluster)
 6. Stratejik öneriler: "X'i artırırsanız Y de artma/azalma eğiliminde"
-Her ilişkiyi korelasyon katsayısıyla birlikte sun."""
+Her ilişkiyi hem Pearson hem Spearman katsayısıyla birlikte sun."""
 
     elif analysis_type == "distribution":
         prompt += """
-**GÖREV**: Veri dağılımlarını detaylı analiz et:
-1. Her sütunun dağılım tipi ve bunun anlamı
-2. Normal dağılımdan sapmaların yorumu (çarpıklık, basıklık)
-3. Yüzdelik dilim analizi — değerlerin nerede yoğunlaştığı
-4. Ortalama vs Medyan farkının gösterdiği dengesizlik
-5. Değişkenlik katsayısı (CV) ile tutarlılık değerlendirmesi
-6. Verinin hangi aralıklarda yoğunlaştığı ve uç değerler
+**GÖREV**: Veri dağılımlarını normallik testleriyle birlikte analiz et:
+1. Her sütunun dağılım tipi ve normallik testi sonucu (Shapiro-Wilk/KS p-value)
+2. Normal dağılan sütunlar → parametrik testler güvenilir
+3. Normal dağılmayan sütunlar → medyan bazlı analiz tercih edilmeli
+4. Çarpıklık/basıklık: Verilerin nerede yoğunlaştığı ve uç değer riski
+5. P99 yüzdelik vs P75 farkı — üst uçtaki yayılma
+6. Yoğunlaşma (IQR kapsamı) — verinin ne kadarı merkeze yakın?
+7. Değişkenlik katsayısı (CV) ile tutarlılık değerlendirmesi
 İstatistiksel terimleri anlaşılır iş diline çevir."""
 
     elif analysis_type == "forecast":
         prompt += """
-**GÖREV**: Tahminleme sonuçlarını yorumla ve iş önerileri sun:
-1. Mevcut trendin gücü ve güvenilirliği (R² ve güven seviyesi)
-2. Lineer ve hareketli ortalama tahminlerinin karşılaştırması
-3. Tahmin edilen değişim yönü ve büyüklüğü
-4. En iyi/en kötü senaryo tahminleri
-5. Tahminlerin kısıtlamaları ve varsayımları
+**GÖREV**: Çok modelli tahminleme sonuçlarını profesyonelce yorumla:
+1. Model karşılaştırma tablosu — hangi model en düşük MAPE ile kazandı ve neden?
+2. Modeller arası tutarlılık: Hepsi aynı yönü mü gösteriyor?
+3. ARIMA/Holt-Winters gibi gelişmiş modeller lineerden ne kadar farklı?
+4. Güven aralıkları — tahminlerin belirsizlik düzeyi
+5. En iyi/en kötü senaryo tahminleri (güven aralığı alt-üst)
 6. Bu tahminlere göre alınması gereken stratejik aksiyonlar
-⚠️ Basit modeller olduğunu belirt, kesin olmadığını vurgula."""
+7. Model kısıtlamaları: Veri yetersizliği, mevsimsellik tespiti, değişen trendler
+⚠️ İstatistiksel modeller geçmiş verilere dayanır, gelecek garantisi değildir."""
 
     elif analysis_type == "pareto":
         prompt += """
@@ -1347,13 +1867,15 @@ Her öneriyi katkı yüzdeleriyle destekle."""
 
     elif analysis_type == "quality":
         prompt += """
-**GÖREV**: Veri kalitesi denetim raporunu profesyonelce sun:
+**GÖREV**: Veri kalitesi denetim raporunu 4 boyutta (Bütünlük, Teksillik, Tutarlılık, Geçerlilik) profesyonelce sun:
 1. Genel kalite skoru ve notunun değerlendirmesi
-2. Bütünlük — eksik verilerin etkisi ve çözüm önerileri
-3. Teksillik — tekrar satırların neden oluştuğu ve temizleme stratejisi
+2. Bütünlük — eksik verilerin desenleri (birlikte boş olan sütunlar) ve etkisi
+3. Teksillik — tekrar satırlar + near-duplicate (whitespace/büyük-küçük harf farklılıkları)
 4. Tutarlılık — tip uyumsuzlukları ve düzeltme adımları
-5. Öncelikli iyileştirme planı (en kritikten en az kritiğe)
-6. Veri kalitesi iyileştikten sonra beklenen analiz doğruluğu artışı
+5. Geçerlilik — tarih formatı sorunları, mantıksız aralıklar, çapraz kontrol ihlalleri
+6. Kardinalite — olası ID sütunları ve düşük kardinalite uyarıları
+7. Öncelikli iyileştirme planı (en kritikten en az kritiğe)
+8. Veri kalitesi iyileştikten sonra beklenen analiz doğruluğu artışı
 Bu raporu veri mühendisliği ekibine sunulacakmış gibi yaz."""
 
     else:  # full

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { adminApi, aiApi, memoryApi } from '../services/api'
 import {
     Users,
@@ -17,6 +17,15 @@ import {
     BarChart3,
     TrendingUp,
     Cpu,
+    Package,
+    HeartPulse,
+    Eye,
+    UserCheck,
+    Bell,
+    RefreshCw,
+    GitBranch,
+    Layers,
+    Sparkles,
 } from 'lucide-react'
 import {
     XAxis,
@@ -54,6 +63,12 @@ const MODULE_LABELS: Record<string, string> = {
     sql_generator: 'SQL Üretici',
     export: 'Dışa Aktarma',
     web_search: 'Web Arama',
+    model_registry: 'Model Registry',
+    data_versioning: 'Data Versioning',
+    human_in_the_loop: 'İnsan Onayı (HITL)',
+    monitoring: 'Monitoring',
+    textile_vision: 'Tekstil Vision',
+    explainability: 'Açıklanabilir AI',
 }
 
 const DEPT_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#10b981', '#ef4444', '#06b6d4', '#ec4899', '#f97316']
@@ -104,6 +119,49 @@ export default function Dashboard() {
         queryKey: ['dept-query-stats'],
         queryFn: adminApi.getDeptQueryStats,
         refetchInterval: 60000,
+    })
+
+    // v3.4.0 — Yeni modül verileri
+    const { data: modelRegistry } = useQuery({
+        queryKey: ['model-registry'],
+        queryFn: adminApi.getModelRegistry,
+        refetchInterval: 60000,
+    })
+
+    const { data: hitlData } = useQuery({
+        queryKey: ['hitl-dashboard'],
+        queryFn: adminApi.getHitlDashboard,
+        refetchInterval: 15000,
+    })
+
+    const { data: healthScore } = useQuery({
+        queryKey: ['health-score'],
+        queryFn: adminApi.getHealthScore,
+        refetchInterval: 15000,
+    })
+
+    const { data: alertsData } = useQuery({
+        queryKey: ['monitoring-alerts'],
+        queryFn: adminApi.getAlerts,
+        refetchInterval: 15000,
+    })
+
+    const { data: xaiData } = useQuery({
+        queryKey: ['xai-dashboard'],
+        queryFn: adminApi.getXaiDashboard,
+        refetchInterval: 60000,
+    })
+
+    const queryClient = useQueryClient()
+
+    const syncModelsMutation = useMutation({
+        mutationFn: adminApi.syncModels,
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['model-registry'] }),
+    })
+
+    const ackAlertMutation = useMutation({
+        mutationFn: (alertId: string) => adminApi.acknowledgeAlert(alertId),
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['monitoring-alerts'] }),
     })
 
     const fmtChange = (val?: number) => {
@@ -520,6 +578,292 @@ export default function Dashboard() {
                         </div>
                     )}
                 </div>
+            </div>
+
+            {/* ══════════════════════════════════════════════════════════ */}
+            {/* v3.4.0 — MLOps & Platform Panelleri                      */}
+            {/* ══════════════════════════════════════════════════════════ */}
+
+            {/* ── Sistem Sağlığı + Monitoring Telemetry ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Health Score */}
+                <div className="card">
+                    <div className="flex items-center gap-3 mb-6">
+                        <HeartPulse className="w-5 h-5 text-rose-500" />
+                        <h3 className="text-lg font-medium text-white">Sistem Sağlığı</h3>
+                    </div>
+                    {healthScore?.available ? (
+                        <div className="flex flex-col items-center">
+                            <div className={clsx(
+                                'w-28 h-28 rounded-full flex items-center justify-center border-4',
+                                healthScore.grade === 'A' ? 'border-green-500 bg-green-500/10' :
+                                healthScore.grade === 'B' ? 'border-blue-500 bg-blue-500/10' :
+                                healthScore.grade === 'C' ? 'border-yellow-500 bg-yellow-500/10' :
+                                healthScore.grade === 'D' ? 'border-orange-500 bg-orange-500/10' :
+                                'border-red-500 bg-red-500/10'
+                            )}>
+                                <div className="text-center">
+                                    <span className={clsx(
+                                        'text-3xl font-bold',
+                                        healthScore.grade === 'A' ? 'text-green-400' :
+                                        healthScore.grade === 'B' ? 'text-blue-400' :
+                                        healthScore.grade === 'C' ? 'text-yellow-400' :
+                                        healthScore.grade === 'D' ? 'text-orange-400' : 'text-red-400'
+                                    )}>
+                                        {healthScore.score}
+                                    </span>
+                                    <p className="text-xs text-dark-400">{healthScore.grade} Sınıf</p>
+                                </div>
+                            </div>
+                            <p className="mt-4 text-sm text-dark-300 text-center">
+                                {healthScore.score >= 90 ? 'Mükemmel performans' :
+                                 healthScore.score >= 70 ? 'İyi durumda' :
+                                 healthScore.score >= 50 ? 'İyileştirme gerekli' : 'Dikkat gerekiyor'}
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-8 text-dark-400">
+                            <HeartPulse className="w-10 h-10 mb-3 opacity-30" />
+                            <p className="text-sm">Sağlık verisi yükleniyor...</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Aktif Alarmlar */}
+                <div className="card lg:col-span-2">
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                            <Bell className="w-5 h-5 text-amber-500" />
+                            <h3 className="text-lg font-medium text-white">Aktif Alarmlar</h3>
+                        </div>
+                        <span className={clsx(
+                            'px-3 py-1 text-sm font-medium rounded-full',
+                            (alertsData?.count || 0) > 0 ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'
+                        )}>
+                            {alertsData?.count || 0} alarm
+                        </span>
+                    </div>
+                    {(alertsData?.alerts || []).length > 0 ? (
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                            {alertsData.alerts.map((alert: any, i: number) => (
+                                <div key={i} className="flex items-center justify-between px-3 py-2 bg-dark-800/50 rounded-lg">
+                                    <div className="flex items-center gap-2">
+                                        <AlertTriangle className={clsx('w-4 h-4 flex-shrink-0',
+                                            alert.severity === 'critical' ? 'text-red-500' :
+                                            alert.severity === 'warning' ? 'text-yellow-500' : 'text-blue-500'
+                                        )} />
+                                        <div>
+                                            <p className="text-sm text-dark-200">{alert.message || alert.type}</p>
+                                            <p className="text-xs text-dark-500">{alert.metric}: {alert.value}</p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => ackAlertMutation.mutate(alert.id)}
+                                        className="text-xs px-2 py-1 bg-dark-700 hover:bg-dark-600 text-dark-300 rounded transition-colors"
+                                    >
+                                        Onayla
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-2 px-3 py-4 bg-green-500/5 rounded-lg border border-green-500/20">
+                            <CheckCircle2 className="w-5 h-5 text-green-500" />
+                            <span className="text-sm text-green-400">Tüm sistemler normal — aktif alarm yok</span>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* ── Model Registry + HITL ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Model Registry */}
+                <div className="card">
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                            <Package className="w-5 h-5 text-indigo-500" />
+                            <h3 className="text-lg font-medium text-white">Model Registry</h3>
+                        </div>
+                        <button
+                            onClick={() => syncModelsMutation.mutate()}
+                            disabled={syncModelsMutation.isPending}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                            <RefreshCw className={clsx('w-3.5 h-3.5', syncModelsMutation.isPending && 'animate-spin')} />
+                            Senkronize Et
+                        </button>
+                    </div>
+                    {modelRegistry?.available ? (
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-3 gap-3">
+                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-2xl font-bold text-white">{modelRegistry.total_models || 0}</p>
+                                    <p className="text-xs text-dark-400 mt-1">Toplam Model</p>
+                                </div>
+                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-2xl font-bold text-green-400">{modelRegistry.production_count || 0}</p>
+                                    <p className="text-xs text-dark-400 mt-1">Production</p>
+                                </div>
+                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-2xl font-bold text-blue-400">{modelRegistry.staging_count || 0}</p>
+                                    <p className="text-xs text-dark-400 mt-1">Staging</p>
+                                </div>
+                            </div>
+                            {modelRegistry.production_model && (
+                                <div className="flex items-center gap-2 px-3 py-2 bg-green-500/5 rounded-lg border border-green-500/20">
+                                    <GitBranch className="w-4 h-4 text-green-500" />
+                                    <span className="text-sm text-green-400">
+                                        Production: <strong>{modelRegistry.production_model}</strong>
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-8 text-dark-400">
+                            <Package className="w-10 h-10 mb-3 opacity-30" />
+                            <p className="text-sm">Henüz kayıtlı model yok</p>
+                            <button
+                                onClick={() => syncModelsMutation.mutate()}
+                                className="mt-3 text-xs text-indigo-400 hover:text-indigo-300"
+                            >
+                                Ollama'dan senkronize et →
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* HITL — İnsan Onay Kuyruğu */}
+                <div className="card">
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                            <UserCheck className="w-5 h-5 text-teal-500" />
+                            <h3 className="text-lg font-medium text-white">İnsan Onayı (HITL)</h3>
+                        </div>
+                        {hitlData?.available && (
+                            <span className={clsx(
+                                'px-3 py-1 text-sm font-medium rounded-full',
+                                (hitlData.pending_count || 0) > 0 ? 'bg-amber-500/10 text-amber-400' : 'bg-green-500/10 text-green-400'
+                            )}>
+                                {hitlData.pending_count || 0} bekleyen
+                            </span>
+                        )}
+                    </div>
+                    {hitlData?.available ? (
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-3 gap-3">
+                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-2xl font-bold text-amber-400">{hitlData.pending_count || 0}</p>
+                                    <p className="text-xs text-dark-400 mt-1">Bekleyen</p>
+                                </div>
+                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-2xl font-bold text-green-400">{hitlData.feedback_stats?.approved || 0}</p>
+                                    <p className="text-xs text-dark-400 mt-1">Onaylanan</p>
+                                </div>
+                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-2xl font-bold text-red-400">{hitlData.feedback_stats?.rejected || 0}</p>
+                                    <p className="text-xs text-dark-400 mt-1">Reddedilen</p>
+                                </div>
+                            </div>
+                            {hitlData.pending_tasks?.length > 0 ? (
+                                <div className="space-y-2 max-h-36 overflow-y-auto">
+                                    {hitlData.pending_tasks.map((task: any, i: number) => (
+                                        <div key={i} className="flex items-center justify-between px-3 py-2 bg-dark-800/30 rounded-lg">
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm text-dark-200 truncate">{task.query || task.id}</p>
+                                                <p className="text-xs text-dark-500">{task.reason || 'Onay gerekli'}</p>
+                                            </div>
+                                            <div className="flex items-center gap-1 ml-2">
+                                                <span className={clsx(
+                                                    'px-1.5 py-0.5 text-[10px] font-medium rounded',
+                                                    task.risk_level === 'yüksek' ? 'bg-red-500/10 text-red-400' :
+                                                    task.risk_level === 'orta' ? 'bg-yellow-500/10 text-yellow-400' :
+                                                    'bg-green-500/10 text-green-400'
+                                                )}>
+                                                    {task.risk_level || 'normal'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-2 px-3 py-3 bg-green-500/5 rounded-lg border border-green-500/20">
+                                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                    <span className="text-sm text-green-400">Tüm görevler değerlendirildi</span>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-8 text-dark-400">
+                            <UserCheck className="w-10 h-10 mb-3 opacity-30" />
+                            <p className="text-sm">HITL verisi yükleniyor...</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* ── XAI Açıklanabilirlik ── */}
+            <div className="card">
+                <div className="flex items-center gap-3 mb-6">
+                    <Sparkles className="w-5 h-5 text-violet-500" />
+                    <h3 className="text-lg font-medium text-white">Açıklanabilir AI (XAI)</h3>
+                </div>
+                {xaiData?.available ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div className="p-4 bg-dark-800/50 rounded-lg">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Layers className="w-4 h-4 text-violet-400" />
+                                <h4 className="text-sm font-medium text-dark-200">Karar Faktörleri</h4>
+                            </div>
+                            <div className="space-y-2">
+                                {(xaiData.factors || []).map((factor: string, i: number) => (
+                                    <div key={i} className="flex items-center gap-2">
+                                        <div className="w-2 h-2 rounded-full bg-violet-500" />
+                                        <span className="text-xs text-dark-300">{factor.replace(/_/g, ' ')}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="p-4 bg-dark-800/50 rounded-lg">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Eye className="w-4 h-4 text-violet-400" />
+                                <h4 className="text-sm font-medium text-dark-200">Yetenekler</h4>
+                            </div>
+                            <div className="space-y-2">
+                                {(xaiData.capabilities || []).slice(0, 6).map((cap: string, i: number) => (
+                                    <div key={i} className="flex items-center gap-2">
+                                        <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
+                                        <span className="text-xs text-dark-300">{cap}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="p-4 bg-dark-800/50 rounded-lg">
+                            <div className="flex items-center gap-2 mb-3">
+                                <TrendingUp className="w-4 h-4 text-violet-400" />
+                                <h4 className="text-sm font-medium text-dark-200">Modül Bilgisi</h4>
+                            </div>
+                            <div className="space-y-3">
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-dark-400">Versiyon</span>
+                                    <span className="text-dark-200 font-medium">{xaiData.version || '1.0.0'}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-dark-400">Faktör Sayısı</span>
+                                    <span className="text-dark-200 font-medium">{xaiData.factor_count || 0}</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-dark-400">Durum</span>
+                                    <span className="text-green-400 font-medium">Aktif</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-dark-400">
+                        <Sparkles className="w-10 h-10 mb-3 opacity-30" />
+                        <p className="text-sm">XAI verisi yükleniyor...</p>
+                    </div>
+                )}
             </div>
         </div>
     )

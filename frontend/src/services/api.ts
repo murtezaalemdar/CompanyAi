@@ -241,6 +241,80 @@ export const adminApi = {
         const response = await api.get(`/admin/audit-logs?limit=${limit}`)
         return response.data
     },
+
+    // v3.4.0 — Yeni Modül API'leri
+
+    // Model Registry
+    getModelRegistry: async () => {
+        const response = await api.get('/admin/model-registry')
+        return response.data
+    },
+    getRegisteredModels: async () => {
+        const response = await api.get('/admin/model-registry/models')
+        return response.data
+    },
+    syncModels: async () => {
+        const response = await api.post('/admin/model-registry/sync')
+        return response.data
+    },
+    promoteModel: async (modelName: string) => {
+        const response = await api.post(`/admin/model-registry/promote/${modelName}`)
+        return response.data
+    },
+
+    // Data Versioning
+    getDataVersions: async () => {
+        const response = await api.get('/admin/data-versions')
+        return response.data
+    },
+    getDatasets: async () => {
+        const response = await api.get('/admin/data-versions/datasets')
+        return response.data
+    },
+    createSnapshot: async () => {
+        const response = await api.post('/admin/data-versions/snapshot')
+        return response.data
+    },
+
+    // HITL
+    getHitlDashboard: async () => {
+        const response = await api.get('/admin/hitl')
+        return response.data
+    },
+    reviewHitlTask: async (taskId: string, action: string, feedback: string = '') => {
+        const response = await api.put(`/admin/hitl/review/${taskId}?action=${action}&feedback=${encodeURIComponent(feedback)}`)
+        return response.data
+    },
+
+    // Monitoring
+    getTelemetry: async () => {
+        const response = await api.get('/admin/monitoring/telemetry')
+        return response.data
+    },
+    getHealthScore: async () => {
+        const response = await api.get('/admin/monitoring/health')
+        return response.data
+    },
+    getAlerts: async () => {
+        const response = await api.get('/admin/monitoring/alerts')
+        return response.data
+    },
+    acknowledgeAlert: async (alertId: string) => {
+        const response = await api.post(`/admin/monitoring/alerts/${alertId}/acknowledge`)
+        return response.data
+    },
+
+    // Textile Vision
+    getTextileVisionCaps: async () => {
+        const response = await api.get('/admin/textile-vision/capabilities')
+        return response.data
+    },
+
+    // Explainability (XAI)
+    getXaiDashboard: async () => {
+        const response = await api.get('/admin/explainability')
+        return response.data
+    },
 }
 
 // RAG API

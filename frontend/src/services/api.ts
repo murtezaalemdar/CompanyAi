@@ -219,6 +219,27 @@ export const adminApi = {
         const response = await api.delete(`/admin/users/${userId}`)
         return response.data
     },
+
+    // v3.3.0 — AI Modül & Governance Dashboard
+    getAiModules: async () => {
+        const response = await api.get('/admin/stats/ai-modules')
+        return response.data
+    },
+
+    getGovernanceMetrics: async () => {
+        const response = await api.get('/admin/stats/governance')
+        return response.data
+    },
+
+    getDeptQueryStats: async () => {
+        const response = await api.get('/admin/stats/dept-queries')
+        return response.data
+    },
+
+    getAuditLogs: async (limit = 50) => {
+        const response = await api.get(`/admin/audit-logs?limit=${limit}`)
+        return response.data
+    },
 }
 
 // RAG API

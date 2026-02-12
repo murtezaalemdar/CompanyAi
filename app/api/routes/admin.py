@@ -604,3 +604,82 @@ async def list_audit_logs(
         }
         for a in logs
     ]
+
+
+# ── AI Modül Durumu (v3.3.0) ─────────────────────────────────────
+
+@router.get("/stats/ai-modules")
+async def get_ai_modules_status(
+    current_user: User = Depends(get_current_user),
+):
+    """Tüm AI modüllerinin aktiflik durumunu döner."""
+    check_admin_or_manager(current_user)
+    
+    try:
+        from app.core.engine import get_system_status
+        status = await get_system_status()
+        return {
+            "modules": status.get("modules", {}),
+            "llm_available": status.get("llm_available", False),
+            "llm_model": status.get("llm_model", "N/A"),
+            "memory_entries": status.get("memory_entries", 0),
+            "rag": status.get("rag", {}),
+        }
+    except Exception as e:
+        return {"error": str(e), "modules": {}}
+
+
+@router.get("/stats/governance")
+async def get_governance_metrics(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI Governance metrikleri — bias/drift/confidence istatistikleri."""
+    check_admin_or_manager(current_user)
+    
+    try:
+        from app.core.governance import governance_engine
+        if governance_engine is None:
+            return {"available": False, "error": "Governance modülü yüklü değil"}
+        
+        dashboard = governance_engine.get_dashboard()
+        return {
+            "available": True,
+            "total_queries_monitored": dashboard.get("total_queries_monitored", 0),
+            "avg_confidence": dashboard.get("avg_confidence", 0),
+            "bias_alerts": dashboard.get("bias_alerts", 0),
+            "drift_detected": dashboard.get("drift_detected", False),
+            "confidence_distribution": dashboard.get("confidence_distribution", {}),
+            "department_stats": dashboard.get("department_stats", {}),
+            "recent_alerts": dashboard.get("recent_alerts", [])[:10],
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/stats/dept-queries")
+async def get_department_query_stats(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Departman bazlı sorgu dağılımını döner."""
+    check_admin_or_manager(current_user)
+    
+    rows = await db.execute(
+        select(
+            Query.department,
+            func.count(Query.id).label("count"),
+            func.avg(Query.processing_time_ms).label("avg_time"),
+        )
+        .group_by(Query.department)
+        .order_by(func.count(Query.id).desc())
+    )
+    
+    return [
+        {
+            "department": r.department or "Genel",
+            "count": r.count,
+            "avg_time_ms": round(r.avg_time, 0) if r.avg_time else 0,
+        }
+        for r in rows
+    ]

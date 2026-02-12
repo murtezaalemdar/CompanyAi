@@ -93,6 +93,69 @@ try:
 except ImportError:
     RISK_AVAILABLE = False
 
+# Reflection Layer (Self-Evaluation)
+try:
+    from app.core.reflection import quick_evaluate, build_retry_prompt, format_reflection_footer, format_confidence_badge
+    REFLECTION_AVAILABLE = True
+except ImportError:
+    REFLECTION_AVAILABLE = False
+
+# Multi-Agent Pipeline
+try:
+    from app.core.agent_pipeline import should_use_pipeline, execute_agent_pipeline, format_pipeline_summary
+    AGENT_PIPELINE_AVAILABLE = True
+except ImportError:
+    AGENT_PIPELINE_AVAILABLE = False
+
+# Scenario Engine
+try:
+    from app.core.scenario_engine import simulate_scenarios, project_financial_impact, format_scenario_table, format_financial_impact
+    SCENARIO_AVAILABLE = True
+except ImportError:
+    SCENARIO_AVAILABLE = False
+
+# Monte Carlo Risk Engine
+try:
+    from app.core.monte_carlo import monte_carlo_simulate, format_monte_carlo_table
+    MONTE_CARLO_AVAILABLE = True
+except ImportError:
+    MONTE_CARLO_AVAILABLE = False
+
+# Decision Impact Ranking
+try:
+    from app.core.decision_ranking import rank_decisions, extract_decisions_from_llm, format_ranking_table
+    DECISION_RANKING_AVAILABLE = True
+except ImportError:
+    DECISION_RANKING_AVAILABLE = False
+
+# AI Governance
+try:
+    from app.core.governance import governance_engine, format_governance_alert
+    GOVERNANCE_AVAILABLE = True
+except ImportError:
+    GOVERNANCE_AVAILABLE = False
+    governance_engine = None
+
+# Experiment Layer (A/B + Cross-Dept)
+try:
+    from app.core.experiment_layer import simulate_ab_strategy, analyze_cross_dept_impact, format_ab_result, format_cross_dept_impact
+    EXPERIMENT_AVAILABLE = True
+except ImportError:
+    EXPERIMENT_AVAILABLE = False
+
+# Graph Impact Mapping
+try:
+    from app.core.graph_impact import auto_graph_analysis, format_graph_impact
+    GRAPH_IMPACT_AVAILABLE = True
+except ImportError:
+    GRAPH_IMPACT_AVAILABLE = False
+
+# ARIMA / SARIMA Forecasting (v3.3.0)
+try:
+    from app.core.forecasting import STATSMODELS_AVAILABLE as ARIMA_AVAILABLE
+except ImportError:
+    ARIMA_AVAILABLE = False
+
 # SQL Generator
 try:
     from app.core.sql_generator import generate_sql, build_sql_prompt
@@ -311,6 +374,142 @@ async def process_question(
         except Exception as e:
             logger.debug("structured_output_skipped", error=str(e))
     
+    # ── 5d. REFLECTION LAYER — Yanıt Kalite Kontrolü ──
+    reflection_data = None
+    dynamic_confidence = 0.85  # Default
+    if REFLECTION_AVAILABLE and llm_answer and not llm_answer.startswith("[Hata]"):
+        try:
+            evaluation = quick_evaluate(llm_answer, question, context.get("mode", "Sohbet"))
+            reflection_data = evaluation
+            dynamic_confidence = evaluation["confidence"] / 100.0  # 0-1 arası
+            
+            # Düşük güvenli yanıtlarda retry (Analiz/Rapor/Öneri modunda)
+            if evaluation.get("should_retry") and not llm_answer.startswith("[Hata]"):
+                logger.info("reflection_retry_triggered", 
+                           confidence=evaluation["confidence"],
+                           issues=evaluation.get("issues", []))
+                try:
+                    retry_prompt = build_retry_prompt(question, evaluation)
+                    retry_answer = await ollama_client.generate(
+                        prompt=retry_prompt,
+                        system_prompt=system_prompt,
+                        temperature=0.2,
+                        max_tokens=600,
+                        history=chat_history if chat_history else None,
+                    )
+                    if retry_answer and len(retry_answer) > len(llm_answer) * 0.5:
+                        llm_answer = retry_answer
+                        # Retry sonrası tekrar değerlendir
+                        evaluation = quick_evaluate(llm_answer, question, context.get("mode", "Sohbet"))
+                        reflection_data = evaluation
+                        dynamic_confidence = evaluation["confidence"] / 100.0
+                        logger.info("reflection_retry_success", new_confidence=evaluation["confidence"])
+                except Exception as retry_err:
+                    logger.warning("reflection_retry_failed", error=str(retry_err))
+            
+            # Confidence badge — sadece Analiz/Rapor modlarında göster
+            if context.get("mode") in ["Analiz", "Rapor", "Öneri", "Acil"]:
+                badge = format_confidence_badge(evaluation["confidence"])
+                llm_answer += f"\n\n---\n{badge}"
+            
+            logger.info("reflection_evaluated", 
+                        confidence=evaluation["confidence"],
+                        passed=evaluation["pass"])
+        except Exception as e:
+            logger.debug("reflection_skipped", error=str(e))
+    
+    # ── 5e. MULTI-AGENT PIPELINE — Karmaşık Analiz Sorularında ──
+    pipeline_data = None
+    if AGENT_PIPELINE_AVAILABLE and should_use_pipeline(question, context.get("mode", ""), intent):
+        try:
+            # Bağlam oluştur
+            pipeline_context = ""
+            if relevant_docs:
+                pipeline_context = "\n".join(
+                    doc.get("content", "")[:200] for doc in relevant_docs[:3]
+                )
+            if web_results:
+                pipeline_context += f"\n{web_results[:500]}"
+            
+            pipeline_result = await execute_agent_pipeline(
+                question=question,
+                context=pipeline_context,
+                llm_generate=ollama_client.generate,
+                mode=context.get("mode", "Analiz"),
+            )
+            
+            if pipeline_result and pipeline_result.final_answer:
+                # Pipeline çıktısını ana yanıta ekle
+                llm_answer += f"\n\n{pipeline_result.final_answer}"
+                llm_answer += format_pipeline_summary(pipeline_result)
+                pipeline_data = pipeline_result.to_dict()
+                # Pipeline confidence ile override
+                if pipeline_result.overall_confidence > dynamic_confidence * 100:
+                    dynamic_confidence = pipeline_result.overall_confidence / 100.0
+                logger.info("agent_pipeline_completed", 
+                           agents=len(pipeline_result.agent_results))
+        except Exception as e:
+            logger.warning("agent_pipeline_error", error=str(e))
+    
+    # ── 5f. AI GOVERNANCE — Bias / Drift / Confidence Monitoring ──
+    governance_data = None
+    if GOVERNANCE_AVAILABLE and governance_engine and llm_answer and not llm_answer.startswith("[Hata]"):
+        try:
+            gov_record = governance_engine.evaluate(
+                question=question,
+                answer=llm_answer,
+                mode=context.get("mode", "Sohbet"),
+                confidence=dynamic_confidence * 100 if dynamic_confidence <= 1 else dynamic_confidence,
+            )
+            if gov_record.alert_triggered:
+                alert_text = format_governance_alert(gov_record)
+                if alert_text and context.get("mode") in ["Analiz", "Rapor", "Öneri", "Acil"]:
+                    llm_answer += f"\n\n{alert_text}"
+            governance_data = {
+                "confidence": gov_record.confidence,
+                "bias_score": gov_record.bias_score,
+                "drift_detected": gov_record.drift_detected,
+                "alert": gov_record.alert_reason if gov_record.alert_triggered else None,
+            }
+            logger.info("governance_evaluated", bias=gov_record.bias_score, drift=gov_record.drift_detected)
+        except Exception as e:
+            logger.debug("governance_skipped", error=str(e))
+    
+    # ── 5g. DECISION IMPACT RANKING — Analiz modunda kararları sırala ──
+    ranking_data = None
+    if DECISION_RANKING_AVAILABLE and llm_answer and context.get("mode") in ["Analiz", "Rapor", "Öneri"]:
+        try:
+            decisions = extract_decisions_from_llm(llm_answer, question)
+            if decisions and len(decisions) >= 2:
+                ranking_result = rank_decisions(decisions)
+                ranking_table = format_ranking_table(ranking_result)
+                llm_answer += f"\n{ranking_table}"
+                ranking_data = {
+                    "total": ranking_result.total_evaluated,
+                    "top_action": ranking_result.top_action,
+                }
+                logger.info("decision_ranking_applied", count=len(decisions))
+        except Exception as e:
+            logger.debug("decision_ranking_skipped", error=str(e))
+    
+    # ── 5h. GRAPH IMPACT MAPPING — KPI/Risk/Departman ilişki grafiği ──
+    graph_data = None
+    if GRAPH_IMPACT_AVAILABLE and llm_answer and context.get("mode") in ["Analiz", "Rapor", "Öneri"]:
+        try:
+            graph_result = auto_graph_analysis(question, llm_answer)
+            if graph_result and graph_result.total_nodes_affected > 0:
+                graph_table = format_graph_impact(graph_result)
+                llm_answer += f"\n{graph_table}"
+                graph_data = {
+                    "focus": graph_result.focus_node,
+                    "affected": graph_result.total_nodes_affected,
+                    "critical_chain": graph_result.critical_chain,
+                }
+                logger.info("graph_impact_applied", focus=graph_result.focus_node,
+                           affected=graph_result.total_nodes_affected)
+        except Exception as e:
+            logger.debug("graph_impact_skipped", error=str(e))
+    
     # 6. Sonuç
     sources = []
     if relevant_docs:
@@ -354,12 +553,17 @@ async def process_question(
         "mode": context["mode"],
         "risk": context["risk"],
         "intent": intent,
-        "confidence": 0.85 if not relevant_docs else 0.92,
+        "confidence": dynamic_confidence if REFLECTION_AVAILABLE else (0.85 if not relevant_docs else 0.92),
         "sources": sources,
         "web_searched": web_results is not None,
         "rich_data": rich_data if rich_data else None,
         "tool_results": tool_results if tool_results else None,
         "structured_data": structured_data,
+        "reflection": reflection_data,
+        "pipeline": pipeline_data,
+        "governance": governance_data,
+        "ranking": ranking_data,
+        "graph_impact": graph_data,
     }
     
     # 7. Hafızaya kaydet (öğrenme)
@@ -426,6 +630,15 @@ async def get_system_status() -> dict:
             "kpi_engine": KPI_ENGINE_AVAILABLE,
             "textile_knowledge": TEXTILE_AVAILABLE,
             "risk_analyzer": RISK_AVAILABLE,
+            "reflection": REFLECTION_AVAILABLE,
+            "agent_pipeline": AGENT_PIPELINE_AVAILABLE,
+            "scenario_engine": SCENARIO_AVAILABLE,
+            "monte_carlo": MONTE_CARLO_AVAILABLE,
+            "decision_ranking": DECISION_RANKING_AVAILABLE,
+            "governance": GOVERNANCE_AVAILABLE,
+            "experiment_layer": EXPERIMENT_AVAILABLE,
+            "graph_impact": GRAPH_IMPACT_AVAILABLE,
+            "arima_forecasting": ARIMA_AVAILABLE,
             "sql_generator": SQL_AVAILABLE,
             "export": EXPORT_AVAILABLE,
             "web_search": WEB_SEARCH_AVAILABLE,

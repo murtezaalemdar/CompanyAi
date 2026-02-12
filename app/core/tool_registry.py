@@ -201,6 +201,86 @@ class ToolRegistry:
             handler=_tool_waste_rate,
             category="production",
         ))
+        
+        # 8. Senaryo Simülasyonu
+        self.register(Tool(
+            name="scenario_simulate",
+            description="Best/Expected/Worst Case senaryo simülasyonu yapar. KPI veya metrik için 3 senaryo hesaplar.",
+            parameters={
+                "current_value": {"type": "number", "description": "Mevcut değer", "required": True},
+                "target_value": {"type": "number", "description": "Hedef değer", "required": False},
+                "trend_pct": {"type": "number", "description": "Mevcut trend yüzdesi (örn: 5.2 veya -3.1)", "required": False},
+                "risk_score": {"type": "number", "description": "Risk skoru 0-100", "required": False},
+                "metric_name": {"type": "string", "description": "Metrik adı", "required": False},
+                "unit": {"type": "string", "description": "Birim (%, ₺, kg vb.)", "required": False},
+            },
+            handler=_tool_scenario_simulate,
+            category="analysis",
+        ))
+        
+        # 9. Finansal Etki Projeksiyonu
+        self.register(Tool(
+            name="financial_impact",
+            description="Gelir/maliyet değişiminin finansal etkisini hesaplar ve projeksiyonunu yapar.",
+            parameters={
+                "revenue": {"type": "number", "description": "Mevcut gelir", "required": False},
+                "cost": {"type": "number", "description": "Mevcut maliyet", "required": False},
+                "revenue_change_pct": {"type": "number", "description": "Tahmini gelir değişimi %", "required": False},
+                "cost_change_pct": {"type": "number", "description": "Tahmini maliyet değişimi %", "required": False},
+                "investment": {"type": "number", "description": "Gereken yatırım", "required": False},
+                "payback_months": {"type": "number", "description": "Geri ödeme süresi (ay)", "required": False},
+            },
+            handler=_tool_financial_impact,
+            category="finance",
+        ))
+        
+        # 10. Monte Carlo Risk Simülasyonu
+        self.register(Tool(
+            name="monte_carlo",
+            description="Monte Carlo simülasyonu ile risk olasılığı ve kayıp dağılımı hesaplar.",
+            parameters={
+                "base_value": {"type": "number", "description": "Temel değer (gelir, üretim vb.)", "required": True},
+                "volatility": {"type": "number", "description": "Oynaklık yüzdesi (%)", "required": False},
+                "target": {"type": "number", "description": "Hedef değer (başarısızlık eşiği)", "required": False},
+            },
+            handler=_tool_monte_carlo,
+            category="risk",
+        ))
+        
+        # 11. A/B Strateji Simülasyonu
+        self.register(Tool(
+            name="ab_strategy",
+            description="İki strateji alternatifini simüle ederek karşılaştırır.",
+            parameters={
+                "strategy_a": {"type": "string", "description": "Birinci strateji açıklaması", "required": True},
+                "strategy_b": {"type": "string", "description": "İkinci strateji açıklaması", "required": True},
+            },
+            handler=_tool_ab_strategy,
+            category="strategy",
+        ))
+        
+        # 12. Çapraz Departman Etki Analizi
+        self.register(Tool(
+            name="cross_dept_impact",
+            description="Bir departmandaki değişikliğin diğer departmanlara etkisini analiz eder.",
+            parameters={
+                "department": {"type": "string", "description": "Kaynak departman", "required": True},
+                "change": {"type": "string", "description": "Değişiklik açıklaması", "required": True},
+            },
+            handler=_tool_cross_dept,
+            category="strategy",
+        ))
+        
+        # 13. Graf Etki Haritası
+        self.register(Tool(
+            name="graph_impact",
+            description="KPI, Departman, Risk ve Finansal Metrikler arası ilişki graf haritasını analiz eder.",
+            parameters={
+                "keyword": {"type": "string", "description": "Analiz edilecek anahtar kelime (OEE, fire, maliyet vb.)", "required": True},
+            },
+            handler=_tool_graph_impact,
+            category="analytics",
+        ))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -561,6 +641,92 @@ def _detect_implicit_tool_calls(text: str) -> list[dict]:
             }})
     
     return calls
+
+
+def _tool_scenario_simulate(**params) -> dict:
+    """Senaryo simülasyonu tool fonksiyonu."""
+    try:
+        from app.core.scenario_engine import simulate_scenarios, format_scenario_table
+        result = simulate_scenarios(
+            current_value=float(params.get("current_value", 0)),
+            target_value=float(params["target_value"]) if params.get("target_value") else None,
+            trend_pct=float(params.get("trend_pct", 0)),
+            risk_score=float(params.get("risk_score", 50)),
+            metric_name=str(params.get("metric_name", "Metrik")),
+            unit=str(params.get("unit", "")),
+        )
+        return {"formatted": format_scenario_table(result), **result}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_financial_impact(**params) -> dict:
+    """Finansal etki projeksiyonu tool fonksiyonu."""
+    try:
+        from app.core.scenario_engine import project_financial_impact, format_financial_impact
+        result = project_financial_impact(
+            revenue_current=float(params.get("revenue", 0)),
+            cost_current=float(params.get("cost", 0)),
+            revenue_change_pct=float(params.get("revenue_change_pct", 0)),
+            cost_change_pct=float(params.get("cost_change_pct", 0)),
+            investment_required=float(params.get("investment", 0)),
+            payback_months=int(params.get("payback_months", 0)),
+        )
+        return {"formatted": format_financial_impact(result), **result}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_monte_carlo(**params) -> dict:
+    """Monte Carlo risk simülasyonu tool fonksiyonu."""
+    try:
+        from app.core.monte_carlo import monte_carlo_simulate, format_monte_carlo_table
+        result = monte_carlo_simulate(
+            base_value=float(params.get("base_value", 1000000)),
+            volatility_pct=float(params.get("volatility", 15)),
+            target_value=float(params.get("target", 0)) or None,
+        )
+        return {"formatted": format_monte_carlo_table(result), **result}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_ab_strategy(**params) -> dict:
+    """A/B strateji simülasyonu tool fonksiyonu."""
+    try:
+        from app.core.experiment_layer import simulate_ab_strategy, format_ab_result
+        result = simulate_ab_strategy(
+            strategy_a_desc=str(params.get("strategy_a", "")),
+            strategy_b_desc=str(params.get("strategy_b", "")),
+        )
+        return {"formatted": format_ab_result(result), "recommended": result.recommended}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_cross_dept(**params) -> dict:
+    """Çapraz departman etki analizi tool fonksiyonu."""
+    try:
+        from app.core.experiment_layer import analyze_cross_dept_impact, format_cross_dept_impact
+        result = analyze_cross_dept_impact(
+            source_department=str(params.get("department", "Üretim")),
+            change_description=str(params.get("change", "")),
+        )
+        return {"formatted": format_cross_dept_impact(result), "positive": result.total_positive, "negative": result.total_negative}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_graph_impact(**params) -> dict:
+    """Graf etki haritası tool fonksiyonu."""
+    try:
+        from app.core.graph_impact import impact_graph, format_graph_impact
+        result = impact_graph.analyze_impact(
+            focus_keyword=str(params.get("keyword", "")),
+        )
+        return {"formatted": format_graph_impact(result), "affected": result.total_nodes_affected}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # Singleton

@@ -1,6 +1,7 @@
 """Forecasting & Anomaly Detection Engine
 
 Zaman serisi tahminleme ve anomali tespiti:
+- ARIMA / SARIMA (statsmodels)          ← v3.3.0
 - Exponential Smoothing (Holt-Winters)
 - Moving Average Forecasting
 - Seasonal Decomposition
@@ -15,6 +16,15 @@ from typing import Optional
 import structlog
 
 logger = structlog.get_logger()
+
+# statsmodels opsiyonel — yoksa ARIMA devre dışı
+try:
+    from statsmodels.tsa.arima.model import ARIMA as _ARIMA
+    from statsmodels.tsa.statespace.sarimax import SARIMAX as _SARIMAX
+    from statsmodels.tsa.stattools import adfuller, acf, pacf
+    STATSMODELS_AVAILABLE = True
+except ImportError:
+    STATSMODELS_AVAILABLE = False
 
 
 # ══════════════════════════════════════════════════════════════
@@ -184,6 +194,294 @@ def holt_winters_seasonal(
     }
 
 
+# ──────────────────────────────────────────────────────────────
+# 1b. ARIMA / SARIMA — İstatistiksel Model Tahminleme (v3.3.0)
+# ──────────────────────────────────────────────────────────────
+
+def _adf_test(values: list[float]) -> dict:
+    """Augmented Dickey-Fuller durağanlık testi."""
+    if not STATSMODELS_AVAILABLE:
+        return {"stationary": None, "error": "statsmodels yüklü değil"}
+    try:
+        result = adfuller(values, autolag="AIC")
+        return {
+            "statistic": round(result[0], 4),
+            "p_value": round(result[1], 4),
+            "lags_used": result[2],
+            "stationary": result[1] < 0.05,  # p < 0.05 → durağan
+        }
+    except Exception as e:
+        return {"stationary": None, "error": str(e)}
+
+
+def _auto_arima_order(values: list[float], max_p: int = 4, max_q: int = 4) -> tuple:
+    """AIC bazlı otomatik (p,d,q) sıra seçimi.
+    
+    Basit grid-search — statsmodels auto_arima gerektirmez.
+    """
+    import warnings
+    warnings.filterwarnings("ignore")
+    
+    arr = np.array(values, dtype=float)
+    
+    # Durağanlık testi → d belirle
+    adf = _adf_test(values)
+    if adf.get("stationary"):
+        d = 0
+    else:
+        d = 1
+        # Bir kez fark al ve tekrar test et
+        diff = np.diff(arr)
+        adf2 = _adf_test(diff.tolist())
+        if not adf2.get("stationary"):
+            d = 2
+    
+    best_aic = float("inf")
+    best_order = (1, d, 1)
+    
+    for p in range(0, max_p + 1):
+        for q in range(0, max_q + 1):
+            if p == 0 and q == 0:
+                continue
+            try:
+                model = _ARIMA(arr, order=(p, d, q))
+                fit = model.fit()
+                if fit.aic < best_aic:
+                    best_aic = fit.aic
+                    best_order = (p, d, q)
+            except Exception:
+                continue
+    
+    return best_order, best_aic
+
+
+def arima_forecast(
+    values: list[float],
+    order: tuple = None,
+    forecast_periods: int = 6,
+    auto_select: bool = True,
+) -> dict:
+    """ARIMA tahmin motoru — otomatik (p,d,q) seçimi ile.
+    
+    Args:
+        values: Zaman serisi verileri
+        order: (p,d,q) tuple — None ise otomatik seçilir
+        forecast_periods: Kaç dönem tahmin edilecek
+        auto_select: True ise AIC ile en iyi sıra seçilir
+    
+    Returns:
+        dict: Tahmin sonuçları + model bilgileri
+    """
+    if not STATSMODELS_AVAILABLE:
+        # Fallback: Holt Linear Trend
+        logger.warning("statsmodels yüklü değil, Holt'a düşülüyor")
+        return holt_linear_trend(values, forecast_periods=forecast_periods)
+    
+    if len(values) < 10:
+        return {"success": False, "error": "ARIMA için en az 10 veri noktası gerekli"}
+    
+    import warnings
+    warnings.filterwarnings("ignore")
+    
+    arr = np.array(values, dtype=float)
+    
+    try:
+        # Sıra seçimi
+        if order is None and auto_select:
+            order, aic = _auto_arima_order(values, max_p=3, max_q=3)
+        elif order is None:
+            order = (1, 1, 1)
+            aic = None
+        else:
+            aic = None
+        
+        # Model fit
+        model = _ARIMA(arr, order=order)
+        fit = model.fit()
+        
+        if aic is None:
+            aic = fit.aic
+        
+        # In-sample fitted
+        fitted = fit.fittedvalues.tolist()
+        
+        # Forecast
+        fc = fit.get_forecast(steps=forecast_periods)
+        forecasts = fc.predicted_mean.tolist()
+        ci = fc.conf_int(alpha=0.05)  # 95% CI
+        # conf_int() DataFrame veya ndarray dönebilir
+        ci_arr = ci.values if hasattr(ci, 'values') else np.asarray(ci)
+        
+        confidence_intervals = []
+        for i in range(forecast_periods):
+            confidence_intervals.append({
+                "lower": round(float(ci_arr[i, 0]), 2),
+                "upper": round(float(ci_arr[i, 1]), 2),
+            })
+        
+        # Diagnostik
+        residuals = fit.resid.tolist()
+        
+        # Trend yönü
+        if len(forecasts) >= 2:
+            trend_dir = "Artış" if forecasts[-1] > forecasts[0] else "Azalma" if forecasts[-1] < forecasts[0] else "Stabil"
+        else:
+            trend_dir = "N/A"
+        
+        # ADF durağanlık bilgisi
+        stationarity = _adf_test(values)
+        
+        return {
+            "success": True,
+            "method": f"ARIMA{order}",
+            "order": {"p": order[0], "d": order[1], "q": order[2]},
+            "aic": round(aic, 2),
+            "bic": round(fit.bic, 2),
+            "fitted_values": [round(f, 2) for f in fitted],
+            "forecasts": [round(f, 2) for f in forecasts],
+            "confidence_intervals": confidence_intervals,
+            "trend_direction": trend_dir,
+            "mape": round(_calculate_mape(values, fitted), 2),
+            "residual_std": round(float(np.std(residuals)), 2),
+            "stationarity": stationarity,
+            "model_summary": {
+                "log_likelihood": round(fit.llf, 2),
+                "n_observations": len(values),
+            },
+        }
+    
+    except Exception as e:
+        logger.error("ARIMA hatası", error=str(e))
+        # Fallback
+        return holt_linear_trend(values, forecast_periods=forecast_periods)
+
+
+def sarima_forecast(
+    values: list[float],
+    seasonal_period: int = 12,
+    order: tuple = None,
+    seasonal_order: tuple = None,
+    forecast_periods: int = 6,
+) -> dict:
+    """SARIMA (Seasonal ARIMA) tahmin motoru.
+    
+    Mevsimsel bileşeni de modelleyen ARIMA — tekstil sektöründe
+    sezon bazlı üretim/satış tahmininde kritik.
+    
+    Args:
+        values: Zaman serisi
+        seasonal_period: Mevsimsel periyot (12=aylık, 4=çeyreklik)
+        order: (p,d,q) — None ise (1,1,1)
+        seasonal_order: (P,D,Q,s) — None ise (1,1,1,s)
+        forecast_periods: Tahmin dönem sayısı
+    """
+    if not STATSMODELS_AVAILABLE:
+        logger.warning("statsmodels yüklü değil, Holt-Winters'a düşülüyor")
+        return holt_winters_seasonal(values, season_length=seasonal_period, forecast_periods=forecast_periods)
+    
+    if len(values) < seasonal_period * 2:
+        return {"success": False, "error": f"SARIMA için en az {seasonal_period * 2} veri noktası gerekli"}
+    
+    import warnings
+    warnings.filterwarnings("ignore")
+    
+    arr = np.array(values, dtype=float)
+    
+    try:
+        if order is None:
+            order = (1, 1, 1)
+        if seasonal_order is None:
+            seasonal_order = (1, 1, 1, seasonal_period)
+        
+        # SARIMA fit — en iyi modeli AIC ile seç
+        best_aic = float("inf")
+        best_fit = None
+        best_order = order
+        best_seasonal = seasonal_order
+        
+        # Küçük grid search
+        for p in range(0, 3):
+            for q in range(0, 3):
+                for P in range(0, 2):
+                    for Q in range(0, 2):
+                        try:
+                            _o = (p, 1, q)
+                            _so = (P, 1, Q, seasonal_period)
+                            m = _SARIMAX(arr, order=_o, seasonal_order=_so,
+                                        enforce_stationarity=False,
+                                        enforce_invertibility=False)
+                            f = m.fit(disp=False, maxiter=50)
+                            if f.aic < best_aic:
+                                best_aic = f.aic
+                                best_fit = f
+                                best_order = _o
+                                best_seasonal = _so
+                        except Exception:
+                            continue
+        
+        if best_fit is None:
+            # Grid search başarısız → basit model
+            m = _SARIMAX(arr, order=order, seasonal_order=seasonal_order,
+                        enforce_stationarity=False, enforce_invertibility=False)
+            best_fit = m.fit(disp=False)
+            best_aic = best_fit.aic
+        
+        # Fitted values
+        fitted = best_fit.fittedvalues.tolist()
+        
+        # Forecast + CI
+        fc = best_fit.get_forecast(steps=forecast_periods)
+        forecasts = fc.predicted_mean.tolist()
+        ci = fc.conf_int(alpha=0.05)
+        ci_arr = ci.values if hasattr(ci, 'values') else np.asarray(ci)
+        
+        confidence_intervals = []
+        for i in range(forecast_periods):
+            confidence_intervals.append({
+                "lower": round(float(ci_arr[i, 0]), 2),
+                "upper": round(float(ci_arr[i, 1]), 2),
+            })
+        
+        # Mevsimsel indeksler çıkar (basit)
+        seasonal_indices = []
+        for s in range(seasonal_period):
+            indices = list(range(s, len(values), seasonal_period))
+            avg = np.mean([values[i] for i in indices if i < len(values)])
+            seasonal_indices.append(round(float(avg), 2))
+        grand_mean = np.mean(values)
+        seasonal_factors = [round(si / grand_mean, 3) if grand_mean != 0 else 1.0 for si in seasonal_indices]
+        
+        # Trend
+        if len(forecasts) >= 2:
+            trend_dir = "Artış" if forecasts[-1] > forecasts[0] else "Azalma" if forecasts[-1] < forecasts[0] else "Stabil"
+        else:
+            trend_dir = "N/A"
+        
+        return {
+            "success": True,
+            "method": f"SARIMA{best_order}x{best_seasonal}",
+            "order": {"p": best_order[0], "d": best_order[1], "q": best_order[2]},
+            "seasonal_order": {"P": best_seasonal[0], "D": best_seasonal[1], "Q": best_seasonal[2], "s": best_seasonal[3]},
+            "aic": round(best_aic, 2),
+            "bic": round(best_fit.bic, 2),
+            "fitted_values": [round(f, 2) for f in fitted],
+            "forecasts": [round(f, 2) for f in forecasts],
+            "confidence_intervals": confidence_intervals,
+            "seasonal_factors": seasonal_factors,
+            "seasonal_period": seasonal_period,
+            "trend_direction": trend_dir,
+            "mape": round(_calculate_mape(values, fitted), 2),
+            "model_summary": {
+                "log_likelihood": round(best_fit.llf, 2),
+                "n_observations": len(values),
+            },
+        }
+    
+    except Exception as e:
+        logger.error("SARIMA hatası", error=str(e))
+        return holt_winters_seasonal(values, season_length=seasonal_period, forecast_periods=forecast_periods)
+
+
 def moving_average_forecast(
     values: list[float],
     window: int = 3,
@@ -225,7 +523,7 @@ def auto_forecast(
     value_col: str = None,
     forecast_periods: int = 6,
 ) -> dict:
-    """Otomatik tahminleme — en iyi yöntemi seçer."""
+    """Otomatik tahminleme — en iyi yöntemi seçer (ARIMA dahil)."""
     # Tarih sütununu bul
     if not date_col:
         for col in df.columns:
@@ -275,6 +573,19 @@ def auto_forecast(
     elif len(values) >= 8:
         hw = holt_winters_seasonal(values, season_length=4, forecast_periods=forecast_periods)
         results["holt_winters"] = hw
+    
+    # 4. ARIMA (statsmodels varsa) — v3.3.0
+    if STATSMODELS_AVAILABLE and len(values) >= 10:
+        arima = arima_forecast(values, forecast_periods=forecast_periods)
+        if arima.get("success"):
+            results["arima"] = arima
+    
+    # 5. SARIMA (mevsimsel + yeterli veri varsa) — v3.3.0
+    if STATSMODELS_AVAILABLE and len(values) >= 30:
+        season_len = 12 if len(values) >= 30 else 4
+        sarima = sarima_forecast(values, seasonal_period=season_len, forecast_periods=forecast_periods)
+        if sarima.get("success"):
+            results["sarima"] = sarima
     
     # En iyi modeli seç (MAPE bazlı)
     best_method = None

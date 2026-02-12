@@ -287,10 +287,32 @@ ANALYSIS_SCHEMA = {
 }
 
 
+# ══════════════════════════════════════════════════════════════
+# 6. EXECUTIVE OUTPUT SCHEMA — Tier-0 Enterprise Çıktı Şeması
+# ══════════════════════════════════════════════════════════════
+
+EXECUTIVE_SCHEMA = {
+    "executive_summary": {"type": "string", "default": ""},
+    "data_integrity_score": {"type": "number", "default": 70},
+    "kpi_analysis": {"type": "dict", "default": {}},
+    "risk_analysis": {"type": "dict", "default": {}},
+    "financial_impact_projection": {"type": "dict", "default": {}},
+    "graph_impact_analysis": {"type": "dict", "default": {}},
+    "scenario_simulation": {
+        "type": "dict",
+        "default": {"best_case": "", "expected_case": "", "worst_case": ""},
+    },
+    "decision_priority_ranking": {"type": "list", "default": []},
+    "strategic_recommendations": {"type": "dict", "default": {}},
+    "confidence": {"type": "number", "default": 0.7},
+}
+
+
 def get_schema_for_mode(mode: str) -> Optional[dict]:
     """Moda göre uygun schema döndür."""
     schemas = {
         "Rapor": REPORT_SCHEMA,
         "Analiz": ANALYSIS_SCHEMA,
+        "Executive": EXECUTIVE_SCHEMA,
     }
     return schemas.get(mode)

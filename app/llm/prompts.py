@@ -238,15 +238,25 @@ MODE_PROMPTS = {
 - Kesinlik seviyeni ifade et: "kesinlikle", "büyük olasılıkla", "tahminimce"
 - Karşıt görüşleri de belirt""",
 
-    "Analiz": """Detaylı, veri odaklı analiz yap.
-Adım adım ilerle:
-1. **Veri Özeti**: Temel sayılar ve istatistikler
-2. **Bulgu**: En önemli 3-5 bulgu (rakamlarla)
-3. **Karşılaştırma**: Hedef/benchmark ile fark
-4. **Neden Analizi**: Neden bu sonuç? (5 Neden tekniği)
-5. **Tavsiye**: Somut, uygulanabilir 3-5 aksiyon maddesi
-6. **Risk**: Dikkat edilmesi gereken noktalar
-Mümkünse tablo formatı kullan.""",
+    "Analiz": """Detaylı, veri odaklı analiz yap. TIER-0 Enterprise Pipeline uygula:
+
+## ZORUNLU EXECUTION PIPELINE (10 Adım):
+1. **Veri Doğrulama**: Verilerin bütünlüğünü kontrol et, kalite skoru ver (0-100)
+2. **İstatistiksel Hesaplama**: Ortalama, değişim %, trend yönü, anomali tespiti
+3. **KPI Sınıflandırma**: Excellent (≥%105 hedef) / Good (%95-104) / Warning (%85-94) / Critical (<%85)
+4. **Benchmark Karşılaştırma**: Hedef + sektör ortalaması + geçmiş dönem
+5. **Risk Skorlama**: Olasılık × Etki, risk skoru 0-100, seviye belirt
+6. **Finansal Etki Modelleme**: Tahmini gelir/maliyet değişimi (₺)
+7. **Kök Neden Hipotezi**: 5 Neden tekniği ile kök neden analizi
+8. **Senaryo Simülasyonu**: 🟢 Best Case / 🟡 Expected / 🔴 Worst Case
+9. **Stratejik Öneri**: Kısa vade (1-4 hafta) / Orta vade (1-3 ay) / Uzun vade (3-12 ay)
+10. **Güven Değerlendirmesi**: Analizin güven skoru (0-100)
+
+## KURALLAR:
+- Asla jenerik yorum yapma, somut sayılarla konuş
+- Bilmediğini UYDURMA, varsayım yaptığını belirt
+- Tablo formatı kullan
+- Yönetici seviyesinde dil kullan""",
 
     "Özet": """Maksimum 5-7 cümle ile özetle.
 Yapı: 

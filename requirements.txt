@@ -48,3 +48,6 @@ python-pptx>=0.6.21
 
 # Export / Dosya Üretimi
 fpdf2>=2.7.0
+
+# Statistical Forecasting (ARIMA/SARIMA) — v3.3.0
+statsmodels>=0.14.0

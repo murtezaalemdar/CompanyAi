@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { aiApi, logoApi } from '../services/api'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { aiApi, logoApi, adminApi } from '../services/api'
 import {
     Send,
     Loader2,
@@ -31,9 +31,17 @@ import {
     Calculator,
     Globe,
     BookOpen,
-    AudioLines
+    AudioLines,
+    LayoutDashboard,
+    Users as UsersIcon,
+    Settings,
+    Activity,
+    Cpu,
+    Shield,
+    Zap,
 } from 'lucide-react'
 import clsx from 'clsx'
+import { useNavigate } from 'react-router-dom'
 import FileUploadModal from '../components/FileUploadModal'
 import WeatherCard from '../components/WeatherCard'
 import ImageResultsCard from '../components/ImageResultsCard'
@@ -112,6 +120,8 @@ export default function Ask() {
     })() : []
 
     const isRestricted = user?.role === 'user'
+    const isAdmin = user?.role === 'admin' || user?.role === 'manager'
+    const navigate = useNavigate()
 
     const availableDepartments = isRestricted && userDepartments.length > 0
         ? userDepartments
@@ -120,6 +130,21 @@ export default function Ask() {
     const [selectedDepartment, setSelectedDepartment] = useState<string>(availableDepartments[0] || 'Genel')
     const [memoryCount, setMemoryCount] = useState<number>(0)
     const [showForgetConfirm, setShowForgetConfirm] = useState(false)
+
+    // Admin/Manager için hızlı istatistikler
+    const { data: adminStats } = useQuery({
+        queryKey: ['admin-quick-stats'],
+        queryFn: adminApi.getDashboardStats,
+        enabled: isAdmin,
+        refetchInterval: 60000,
+    })
+
+    const { data: adminModules } = useQuery({
+        queryKey: ['admin-modules-quick'],
+        queryFn: adminApi.getAiModules,
+        enabled: isAdmin,
+        refetchInterval: 120000,
+    })
 
     // Company logo yükle
     useEffect(() => {
@@ -664,6 +689,47 @@ export default function Ask() {
                                 Bugün size nasıl yardımcı olabilirim?
                             </p>
 
+                            {/* ── Admin/Manager Quick Stats Bar ── */}
+                            {isAdmin && adminStats && (
+                                <div className="w-full max-w-2xl mb-6">
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                        <div className="bg-dark-800/60 border border-dark-700/50 rounded-xl p-3 text-left">
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <UsersIcon className="w-4 h-4 text-blue-400" />
+                                                <span className="text-[11px] text-dark-400 uppercase font-medium">Kullanıcılar</span>
+                                            </div>
+                                            <p className="text-xl font-bold text-white">{adminStats.total_users || 0}</p>
+                                        </div>
+                                        <div className="bg-dark-800/60 border border-dark-700/50 rounded-xl p-3 text-left">
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <Activity className="w-4 h-4 text-green-400" />
+                                                <span className="text-[11px] text-dark-400 uppercase font-medium">Günlük Sorgu</span>
+                                            </div>
+                                            <p className="text-xl font-bold text-white">{adminStats.queries_today || 0}</p>
+                                        </div>
+                                        <div className="bg-dark-800/60 border border-dark-700/50 rounded-xl p-3 text-left">
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <Zap className="w-4 h-4 text-yellow-400" />
+                                                <span className="text-[11px] text-dark-400 uppercase font-medium">Ort. Yanıt</span>
+                                            </div>
+                                            <p className="text-xl font-bold text-white">{Math.round(adminStats.avg_response_time_ms || 0)}ms</p>
+                                        </div>
+                                        <div className="bg-dark-800/60 border border-dark-700/50 rounded-xl p-3 text-left">
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <Cpu className="w-4 h-4 text-purple-400" />
+                                                <span className="text-[11px] text-dark-400 uppercase font-medium">AI Modül</span>
+                                            </div>
+                                            <p className="text-xl font-bold text-white">
+                                                {adminModules?.modules ? Object.values(adminModules.modules).filter(Boolean).length : '—'}
+                                                <span className="text-sm font-normal text-dark-400">
+                                                    /{adminModules?.modules ? Object.keys(adminModules.modules).length : '—'}
+                                                </span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Suggestion Cards Grid */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
                                 {[
@@ -693,6 +759,58 @@ export default function Ask() {
                                     </button>
                                 ))}
                             </div>
+
+                            {/* ── Admin Quick Links ── */}
+                            {isAdmin && (
+                                <div className="w-full max-w-2xl mt-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+                                        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-500/50 flex items-center gap-1">
+                                            <Shield className="w-3 h-3" />
+                                            Yönetim Araçları
+                                        </span>
+                                        <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        <button
+                                            onClick={() => navigate('/')}
+                                            className="group flex items-center gap-3 p-3 rounded-xl bg-amber-500/5 hover:bg-amber-500/10 border border-amber-500/20 hover:border-amber-500/40 transition-all text-left"
+                                        >
+                                            <div className="w-8 h-8 rounded-lg bg-amber-500/10 group-hover:bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                                                <LayoutDashboard className="w-4 h-4 text-amber-400" />
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-medium text-amber-300">Yönetim Paneli</p>
+                                                <p className="text-[11px] text-dark-500">KPI, Modüller, Governance</p>
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => navigate('/users')}
+                                            className="group flex items-center gap-3 p-3 rounded-xl bg-amber-500/5 hover:bg-amber-500/10 border border-amber-500/20 hover:border-amber-500/40 transition-all text-left"
+                                        >
+                                            <div className="w-8 h-8 rounded-lg bg-amber-500/10 group-hover:bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                                                <UsersIcon className="w-4 h-4 text-amber-400" />
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-medium text-amber-300">Kullanıcılar</p>
+                                                <p className="text-[11px] text-dark-500">Kullanıcı yönetimi</p>
+                                            </div>
+                                        </button>
+                                        <button
+                                            onClick={() => navigate('/settings')}
+                                            className="group flex items-center gap-3 p-3 rounded-xl bg-amber-500/5 hover:bg-amber-500/10 border border-amber-500/20 hover:border-amber-500/40 transition-all text-left"
+                                        >
+                                            <div className="w-8 h-8 rounded-lg bg-amber-500/10 group-hover:bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                                                <Settings className="w-4 h-4 text-amber-400" />
+                                            </div>
+                                            <div>
+                                                <p className="text-sm font-medium text-amber-300">Ayarlar</p>
+                                                <p className="text-[11px] text-dark-500">Sistem yapılandırması</p>
+                                            </div>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* RAG badge */}
                             <div className="flex items-center gap-2 mt-6 text-xs text-dark-500">

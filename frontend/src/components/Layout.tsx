@@ -13,6 +13,8 @@ import {
     FileText,
     Users,
     BarChart3,
+    Shield,
+    Crown,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { APP_VERSION } from '../constants'
@@ -23,15 +25,31 @@ export default function Layout() {
     const location = useLocation()
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
-    const navigation = [
-        { name: 'Panel', href: '/', icon: LayoutDashboard, roles: ['admin', 'manager'] },
+    const isAdmin = user?.role === 'admin' || user?.role === 'manager'
+
+    const userNavigation = [
         { name: 'AI Asistan', href: '/ask', icon: MessageSquare, roles: ['admin', 'manager', 'user'] },
         { name: 'Dokümanlar', href: '/documents', icon: FileText, roles: ['admin', 'manager', 'user'] },
         { name: 'Analiz', href: '/analyze', icon: BarChart3, roles: ['admin', 'manager', 'user'] },
-        { name: 'Kullanıcılar', href: '/users', icon: Users, roles: ['admin', 'manager'] },
         { name: 'Sorgu Geçmişi', href: '/queries', icon: History, roles: ['admin', 'manager', 'user'] },
-        { name: 'Ayarlar', href: '/settings', icon: Settings, roles: ['admin', 'manager'] },
     ].filter(item => item.roles.includes(user?.role || 'user'))
+
+    const adminNavigation = [
+        { name: 'Yönetim Paneli', href: '/', icon: LayoutDashboard },
+        { name: 'Kullanıcılar', href: '/users', icon: Users },
+        { name: 'Ayarlar', href: '/settings', icon: Settings },
+    ]
+
+    const navigation = isAdmin
+        ? [...userNavigation, ...adminNavigation.map(item => ({ ...item, roles: ['admin', 'manager'] }))]
+        : userNavigation
+
+    const roleLabel = user?.role === 'admin' ? 'Admin' : user?.role === 'manager' ? 'Yönetici' : 'Kullanıcı'
+    const roleBadgeClass = user?.role === 'admin'
+        ? 'bg-red-500/10 text-red-400 border-red-500/20'
+        : user?.role === 'manager'
+            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+            : 'bg-dark-700 text-dark-400 border-dark-600'
 
     const handleLogout = () => {
         logout()
@@ -53,7 +71,7 @@ export default function Layout() {
                 </div>
 
                 <nav className="flex-1 px-4 py-6 space-y-1">
-                    {navigation.map((item) => {
+                    {userNavigation.map((item) => {
                         const Icon = item.icon
                         const isActive = location.pathname === item.href
                         return (
@@ -72,17 +90,68 @@ export default function Layout() {
                             </button>
                         )
                     })}
+
+                    {/* Admin/Manager Section */}
+                    {isAdmin && (
+                        <>
+                            <div className="pt-4 pb-2 px-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="h-[1px] flex-1 bg-gradient-to-r from-amber-500/30 to-transparent" />
+                                    <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-500/60 flex items-center gap-1">
+                                        <Shield className="w-3 h-3" />
+                                        Yönetim
+                                    </span>
+                                    <div className="h-[1px] flex-1 bg-gradient-to-l from-amber-500/30 to-transparent" />
+                                </div>
+                            </div>
+                            {adminNavigation.map((item) => {
+                                const Icon = item.icon
+                                const isActive = location.pathname === item.href
+                                return (
+                                    <button
+                                        key={item.name}
+                                        onClick={() => navigate(item.href)}
+                                        className={clsx(
+                                            'w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-all duration-200',
+                                            isActive
+                                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                                : 'text-dark-400 hover:bg-amber-500/5 hover:text-amber-300'
+                                        )}
+                                    >
+                                        <Icon className="w-5 h-5" />
+                                        {item.name}
+                                    </button>
+                                )
+                            })}
+                        </>
+                    )}
                 </nav>
 
                 <div className="p-4 border-t border-dark-800">
                     <div className="flex items-center gap-3 mb-4 px-4">
-                        <div className="w-8 h-8 rounded-full bg-primary-500/20 flex items-center justify-center text-primary-400 font-bold border border-primary-500/10">
-                            {user?.full_name?.charAt(0) || user?.email.charAt(0).toUpperCase()}
+                        <div className={clsx(
+                            "w-8 h-8 rounded-full flex items-center justify-center font-bold border",
+                            isAdmin
+                                ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                                : "bg-primary-500/20 text-primary-400 border-primary-500/10"
+                        )}>
+                            {isAdmin
+                                ? <Crown className="w-4 h-4" />
+                                : (user?.full_name?.charAt(0) || user?.email.charAt(0).toUpperCase())
+                            }
                         </div>
                         <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-white truncate">
-                                {user?.full_name || 'Kullanıcı'}
-                            </p>
+                            <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium text-white truncate">
+                                    {user?.full_name || 'Kullanıcı'}
+                                </p>
+                                <span className={clsx(
+                                    "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border",
+                                    roleBadgeClass
+                                )}>
+                                    {roleLabel}
+                                </span>
+                            </div>
                             <p className="text-xs text-dark-500 truncate">{user?.email}</p>
                         </div>
                     </div>
@@ -126,7 +195,7 @@ export default function Layout() {
             {isMobileMenuOpen && (
                 <div className="md:hidden fixed inset-0 z-40 bg-dark-950/90 backdrop-blur-sm pt-16">
                     <nav className="p-4 space-y-2">
-                        {navigation.map((item) => {
+                        {userNavigation.map((item) => {
                             const Icon = item.icon
                             const isActive = location.pathname === item.href
                             return (
@@ -148,6 +217,45 @@ export default function Layout() {
                                 </button>
                             )
                         })}
+
+                        {/* Mobile Admin Section */}
+                        {isAdmin && (
+                            <>
+                                <div className="pt-3 pb-1 px-4">
+                                    <div className="flex items-center gap-2">
+                                        <div className="h-[1px] flex-1 bg-gradient-to-r from-amber-500/30 to-transparent" />
+                                        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-500/60 flex items-center gap-1">
+                                            <Shield className="w-3 h-3" />
+                                            Yönetim
+                                        </span>
+                                        <div className="h-[1px] flex-1 bg-gradient-to-l from-amber-500/30 to-transparent" />
+                                    </div>
+                                </div>
+                                {adminNavigation.map((item) => {
+                                    const Icon = item.icon
+                                    const isActive = location.pathname === item.href
+                                    return (
+                                        <button
+                                            key={item.name}
+                                            onClick={() => {
+                                                navigate(item.href)
+                                                setIsMobileMenuOpen(false)
+                                            }}
+                                            className={clsx(
+                                                'w-full flex items-center gap-3 px-4 py-4 text-base font-medium rounded-lg transition-colors',
+                                                isActive
+                                                    ? 'bg-amber-500/10 text-amber-400'
+                                                    : 'text-dark-400 hover:bg-amber-500/5 hover:text-amber-300'
+                                            )}
+                                        >
+                                            <Icon className="w-6 h-6" />
+                                            {item.name}
+                                        </button>
+                                    )
+                                })}
+                            </>
+                        )}
+
                         <button
                             onClick={handleLogout}
                             className="w-full flex items-center gap-3 px-4 py-4 text-base font-medium text-red-400 hover:bg-red-500/10 rounded-lg mt-4"
@@ -178,13 +286,22 @@ export default function Layout() {
                     <header className="hidden md:flex items-center justify-between mb-8">
                         <div>
                             <h2 className="text-2xl font-bold text-white">
-                                {navigation.find((i) => i.href === location.pathname)?.name || 'Dashboard'}
+                                {[...userNavigation, ...adminNavigation].find((i) => i.href === location.pathname)?.name || 'Dashboard'}
                             </h2>
                             <p className="text-dark-400 text-sm mt-1">
                                 Hoş geldiniz, bugün size nasıl yardımcı olabilirim?
                             </p>
                         </div>
-                        <div className="text-right">
+                        <div className="flex items-center gap-3">
+                            {isAdmin && (
+                                <span className={clsx(
+                                    "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border",
+                                    roleBadgeClass
+                                )}>
+                                    <Crown className="w-3 h-3" />
+                                    {roleLabel}
+                                </span>
+                            )}
                             <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20">
                                 Sistem Online
                             </span>

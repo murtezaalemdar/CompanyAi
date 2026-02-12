@@ -29,6 +29,18 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <>{children}</>
 }
 
+// Admin/Manager Route wrapper
+function AdminRoute({ children }: { children: React.ReactNode }) {
+    const { user } = useAuth()
+    const isAdmin = user?.role === 'admin' || user?.role === 'manager'
+
+    if (!isAdmin) {
+        return <Navigate to="/ask" replace />
+    }
+
+    return <>{children}</>
+}
+
 function App() {
     return (
         <BrowserRouter>
@@ -43,13 +55,13 @@ function App() {
                             </ProtectedRoute>
                         }
                     >
-                        <Route index element={<Dashboard />} />
+                        <Route index element={<AdminRoute><Dashboard /></AdminRoute>} />
                         <Route path="queries" element={<Queries />} />
                         <Route path="ask" element={<Ask />} />
                         <Route path="documents" element={<Documents />} />
                         <Route path="analyze" element={<Analyze />} />
-                        <Route path="users" element={<Users />} />
-                        <Route path="settings" element={<Settings />} />
+                        <Route path="users" element={<AdminRoute><Users /></AdminRoute>} />
+                        <Route path="settings" element={<AdminRoute><Settings /></AdminRoute>} />
                     </Route>
                 </Routes>
             </AuthProvider>

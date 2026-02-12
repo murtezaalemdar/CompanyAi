@@ -18,6 +18,12 @@ import {
     Trash2,
     Download,
     Info,
+    AlertTriangle,
+    GitBranch,
+    Activity,
+    Target,
+    Layers,
+    ShieldCheck,
 } from 'lucide-react'
 import { analyzeApi } from '../services/api'
 
@@ -62,6 +68,12 @@ const ANALYSIS_TYPES = [
     { value: 'summary', label: 'Özet', icon: FileText, description: 'Hızlı özet rapor', color: 'text-cyan-400' },
     { value: 'recommend', label: 'Tavsiye', icon: Lightbulb, description: 'Aksiyon önerileri ve tavsiyeler', color: 'text-yellow-400' },
     { value: 'report', label: 'Rapor', icon: FileSpreadsheet, description: 'Profesyonel rapor formatı', color: 'text-rose-400' },
+    { value: 'anomaly', label: 'Anomali Tespiti', icon: AlertTriangle, description: 'Aykırı değer ve anomali tarama', color: 'text-red-400' },
+    { value: 'correlation', label: 'Korelasyon', icon: GitBranch, description: 'Değişkenler arası ilişki analizi', color: 'text-indigo-400' },
+    { value: 'distribution', label: 'Dağılım', icon: Activity, description: 'Veri dağılım profili ve istatistik', color: 'text-teal-400' },
+    { value: 'forecast', label: 'Tahminleme', icon: Target, description: 'Gelecek dönem projeksiyonu', color: 'text-amber-400' },
+    { value: 'pareto', label: 'Pareto / ABC', icon: Layers, description: '80/20 kuralı ve ABC sınıflandırması', color: 'text-pink-400' },
+    { value: 'quality', label: 'Veri Kalitesi', icon: ShieldCheck, description: 'Eksik, tekrar ve tutarlılık denetimi', color: 'text-emerald-400' },
 ]
 
 export default function Analyze() {
@@ -410,7 +422,7 @@ export default function Analyze() {
                         Analiz Tipi Seçin
                     </h2>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-3">
                         {ANALYSIS_TYPES.filter(t =>
                             !dataInfo?.available_analyses || dataInfo.available_analyses.includes(t.value)
                         ).map(type => (

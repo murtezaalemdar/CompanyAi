@@ -43,6 +43,12 @@ try:
         comparison_analysis,
         natural_language_query,
         format_analysis_for_llm,
+        anomaly_detection,
+        correlation_analysis,
+        distribution_analysis,
+        forecast_analysis,
+        pareto_analysis,
+        data_quality_analysis,
     )
     ANALYZER_AVAILABLE = True
 except ImportError as e:
@@ -57,6 +63,29 @@ except ImportError:
     EXTRACTOR_AVAILABLE = False
 
 router = APIRouter()
+
+# ── Tip-spesifik sistem prompt'ları ──
+def _get_analysis_system_prompt(analysis_type: str) -> str:
+    """Analiz tipine göre optimize edilmiş sistem prompt'u döndür"""
+    base = "Sen deneyimli bir veri analisti ve iş zekası uzmanısın. Türkçe yanıt ver. Sayısal değerleri daima belirt."
+    
+    type_prompts = {
+        "full": f"{base} Kapsamlı analiz yap. Tablolar, karşılaştırmalar, trendler ve somut tavsiyeler sun. Her bölümü detaylı ele al.",
+        "pivot": f"{base} Pivot tablo uzmanısın. Çapraz tabloları, kategori kıyaslamalarını ve yüzdeleri detaylı analiz et.",
+        "trend": f"{base} Zaman serisi ve trend analizi uzmanısın. Hareketli ortalamaları, momentum sinyallerini ve döngüsel paternleri yorumla. Gelecek öngörülerini sun.",
+        "compare": f"{base} Karşılaştırmalı analiz uzmanısın. Gruplar arası performans farklarını, medyan/ortalama ayrışmasını ve tutarlılığı değerlendir.",
+        "summary": f"{base} Veriden çarpıcı bir yönetici özeti çıkar. Kısa, yoğun ve bilgi dolu yaz. En önemli 3-4 bulguya odaklan.",
+        "recommend": f"{base} Stratejik danışman gibi düşün. Her tavsiyeyi verilerle destekle, önceliklendirr ve risk-fayda analizi yap.",
+        "report": f"{base} Profesyonel rapor yaz. Yönetici özeti, KPI tablosu, detaylı bulgular ve aksiyon planı içersin. Resmi ve yapılandırılmış format kullan.",
+        "anomaly": f"{base} Anomali tespiti uzmanısın. IQR ve Z-Score bulgularını iş süreçleri perspektifinden yorumla. Kök neden analizi yap.",
+        "correlation": f"{base} İstatistiksel ilişki analizi uzmanısın. Korelasyonları neden-sonuç bağlamında yorumla. Çoklu bağımlılık paternlerini bul.",
+        "distribution": f"{base} İstatistiksel dağılım uzmanısın. Çarpıklık, basıklık, yüzdelik dilimleri anlaşılır iş diline çevir.",
+        "forecast": f"{base} Tahminleme uzmanısın. Modellerin güven aralığını, varsayımlarını belirt. İyimser/kötümser senaryoları sun.",
+        "pareto": f"{base} Pareto ve ABC analizi uzmanısın. 80/20 kuralını iş stratejisiyle birleştir. Kaynak optimizasyonu öner.",
+        "quality": f"{base} Veri kalitesi denetçisisin. Eksiklik, tutarsızlık, tekrar sorunlarını tespit et. Veri mühendisliği ekibine teslim edilecek bir temizlik planı sun.",
+    }
+    
+    return type_prompts.get(analysis_type, type_prompts["full"])
 
 # ── Aktif analiz dosyaları cache (kullanıcı bazlı) ──
 _analysis_cache: dict[int, dict] = {}
@@ -174,10 +203,7 @@ async def upload_and_analyze(
             )
             
             # LLM'den analiz al
-            system_prompt = """Sen bir veri analisti ve iş zekası uzmanısın. Türkçe yanıt ver.
-Verilen veriyi detaylı analiz et. Tablolar, karşılaştırmalar ve net bulgular sun.
-Sayısal değerleri daima belirt. Profesyonel ama anlaşılır bir dil kullan.
-Tavsiyelerini somut ve uygulanabilir yap. Her bulguyu veriyle destekle."""
+            system_prompt = _get_analysis_system_prompt(analysis_type)
 
             llm_answer = ""
             if await ollama_client.is_available():
@@ -334,10 +360,7 @@ async def upload_and_analyze_stream(
         )
         data_info = {"type": doc_type, "chars": len(text_content)}
     
-    system_prompt = """Sen bir veri analisti ve iş zekası uzmanısın. Türkçe yanıt ver.
-Verilen veriyi/dokümanı detaylı analiz et. Tablolar, karşılaştırmalar ve net bulgular sun.
-Sayısal değerleri daima belirt. Profesyonel ama anlaşılır bir dil kullan.
-Tavsiyelerini somut ve uygulanabilir yap."""
+    system_prompt = _get_analysis_system_prompt(analysis_type)
 
     async def _event_generator():
         collected = []
@@ -418,12 +441,18 @@ async def discover_uploaded_file(
     })
     
     # Hangi analizler yapılabilir?
-    available = ["full", "summary", "recommend", "report"]
+    available = ["full", "summary", "recommend", "report", "quality"]
     if discovery["categorical_columns"] and discovery["numeric_columns"]:
         available.append("pivot")
         available.append("compare")
+        available.append("pareto")
     if discovery["date_columns"]:
         available.append("trend")
+        available.append("forecast")
+    if len(discovery["numeric_columns"]) >= 2:
+        available.append("correlation")
+        available.append("distribution")
+        available.append("anomaly")
     
     # Sayfalar (Excel)
     sheets = None

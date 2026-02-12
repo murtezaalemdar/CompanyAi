@@ -675,15 +675,25 @@ async def get_governance_metrics(
             return {"available": False, "error": "Governance modülü yüklü değil"}
         
         dashboard = governance_engine.get_dashboard()
+        
+        # Audit log'dan son alert'leri al
+        audit_log = governance_engine.get_audit_log(20)
+        recent_alerts = [
+            {"message": r["alert_reason"], "type": "alert", "bias": r["bias_score"]}
+            for r in audit_log if r.get("alert_triggered")
+        ][-10:]
+        
         return {
             "available": True,
-            "total_queries_monitored": dashboard.get("total_queries_monitored", 0),
-            "avg_confidence": dashboard.get("avg_confidence", 0),
-            "bias_alerts": dashboard.get("bias_alerts", 0),
-            "drift_detected": dashboard.get("drift_detected", False),
-            "confidence_distribution": dashboard.get("confidence_distribution", {}),
-            "department_stats": dashboard.get("department_stats", {}),
-            "recent_alerts": dashboard.get("recent_alerts", [])[:10],
+            "total_queries_monitored": dashboard.total_queries,
+            "avg_confidence": dashboard.avg_confidence / 100.0 if dashboard.avg_confidence > 1 else dashboard.avg_confidence,
+            "bias_alerts": dashboard.bias_alerts,
+            "drift_detected": dashboard.drift_detected,
+            "drift_magnitude": dashboard.drift_magnitude,
+            "confidence_trend": dashboard.confidence_trend,
+            "low_confidence_alerts": dashboard.low_confidence_alerts,
+            "recent_alerts": recent_alerts,
+            "last_alert": dashboard.last_alert,
         }
     except Exception as e:
         return {"available": False, "error": str(e)}
@@ -694,27 +704,43 @@ async def get_department_query_stats(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Departman bazlı sorgu dağılımını döner."""
+    """Departman bazlı sorgu dağılımını döner (kullanıcının gerçek departmanına göre)."""
     check_admin_or_manager(current_user)
     
+    import json as _json
+    
+    # Kullanıcıların gerçek departmanlarına göre sorgu sayısı
     rows = await db.execute(
         select(
-            Query.department,
+            User.department.label("user_dept"),
             func.count(Query.id).label("count"),
             func.avg(Query.processing_time_ms).label("avg_time"),
         )
-        .group_by(Query.department)
+        .join(User, Query.user_id == User.id)
+        .group_by(User.department)
         .order_by(func.count(Query.id).desc())
     )
     
-    return [
-        {
-            "department": r.department or "Genel",
+    result = []
+    for r in rows:
+        # User.department JSON array olabilir: '["Bilgi İşlem"]' veya düz string
+        raw_dept = r.user_dept
+        if raw_dept:
+            try:
+                parsed = _json.loads(raw_dept)
+                dept_name = ", ".join(parsed) if isinstance(parsed, list) else str(parsed)
+            except (ValueError, TypeError):
+                dept_name = str(raw_dept)
+        else:
+            dept_name = "Belirtilmemiş"
+        
+        result.append({
+            "department": dept_name,
             "count": r.count,
             "avg_time_ms": round(r.avg_time, 0) if r.avg_time else 0,
-        }
-        for r in rows
-    ]
+        })
+    
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -988,6 +1014,15 @@ async def textile_quality_report(
 
 # ── Explainability (XAI) ──────────────────────────────────────
 
+class XAIExplainRequest(BaseModel):
+    query: str
+    response: str
+    mode: str = "Sohbet"
+    confidence: float = 0.85
+    sources: list = []
+    module_source: str = "manual"
+
+
 @router.get("/explainability")
 async def xai_dashboard(current_user: User = Depends(get_current_user)):
     check_admin_or_manager(current_user)
@@ -998,11 +1033,78 @@ async def xai_dashboard(current_user: User = Depends(get_current_user)):
 
 @router.post("/explainability/explain")
 async def explain_decision(
+    body: XAIExplainRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """Bir AI kararını açıkla. Body: {query, response, confidence, module_source}"""
+    """Bir AI kararını manuel olarak açıkla."""
     check_admin_or_manager(current_user)
     if not decision_explainer:
         raise HTTPException(status_code=503, detail="XAI modülü yüklü değil")
-    # Örnek kullanım — gerçek kullanımda body'den alınır
-    return {"info": "POST body ile query, response, confidence, module_source gönderin"}
+    result = decision_explainer.explain(
+        query=body.query,
+        response=body.response,
+        mode=body.mode,
+        confidence=body.confidence,
+        sources=body.sources,
+        module_source=body.module_source,
+    )
+    return {"available": True, **result}
+
+
+@router.get("/explainability/history")
+async def xai_history(
+    limit: int = 20,
+    current_user: User = Depends(get_current_user),
+):
+    """Son XAI değerlendirme geçmişini getir."""
+    check_admin_or_manager(current_user)
+    if not decision_explainer:
+        return {"available": False, "records": []}
+    history = list(decision_explainer._history)[-limit:]
+    records = []
+    for r in reversed(history):
+        records.append({
+            "timestamp": r.timestamp,
+            "query_preview": r.query_preview,
+            "mode": r.mode,
+            "weighted_confidence": round(r.weighted_confidence, 3),
+            "risk_level": r.risk_level,
+            "sources_used": r.sources_used,
+            "reasoning_steps": r.reasoning_steps,
+            "user_rating": r.user_rating,
+            "token_attribution": r.token_attribution[:5] if r.token_attribution else [],
+        })
+    return {"available": True, "total": len(records), "records": records}
+
+
+class XAIFeedbackRequest(BaseModel):
+    query_hash: str
+    user_rating: float  # 1-5
+    factor_overrides: dict = {}
+    comment: str = ""
+
+
+@router.post("/explainability/feedback")
+async def xai_feedback(
+    body: XAIFeedbackRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """XAI sonucuna kullanıcı geri bildirimi gönder — kalibrasyon döngüsü."""
+    if not decision_explainer:
+        raise HTTPException(status_code=503, detail="XAI modülü yüklü değil")
+    result = decision_explainer.submit_feedback(
+        query_hash=body.query_hash,
+        user_rating=body.user_rating,
+        factor_overrides=body.factor_overrides if body.factor_overrides else None,
+        comment=body.comment,
+    )
+    return result
+
+
+@router.get("/explainability/calibration")
+async def xai_calibration(current_user: User = Depends(get_current_user)):
+    """Kalibrasyon durumu ve geçmişi."""
+    check_admin_or_manager(current_user)
+    if not decision_explainer:
+        return {"available": False}
+    return {"available": True, **decision_explainer.get_calibration_status()}

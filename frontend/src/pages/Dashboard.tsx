@@ -152,6 +152,12 @@ export default function Dashboard() {
         refetchInterval: 60000,
     })
 
+    const { data: xaiHistory } = useQuery({
+        queryKey: ['xai-history'],
+        queryFn: () => adminApi.getXaiHistory(10),
+        refetchInterval: 60000,
+    })
+
     const queryClient = useQueryClient()
 
     const syncModelsMutation = useMutation({
@@ -512,7 +518,8 @@ export default function Dashboard() {
                     ) : (
                         <div className="flex flex-col items-center justify-center py-8 text-dark-400">
                             <Shield className="w-10 h-10 mb-3 opacity-30" />
-                            <p className="text-sm">Governance verisi yükleniyor...</p>
+                            <p className="text-sm">Henüz governance verisi yok</p>
+                            <p className="text-xs mt-1 opacity-60">AI sorguları yapıldıkça bias, drift ve güven metrikleri burada görünecek</p>
                         </div>
                     )}
                 </div>
@@ -801,67 +808,373 @@ export default function Dashboard() {
                 </div>
             </div>
 
-            {/* ── XAI Açıklanabilirlik ── */}
+            {/* ── XAI Açıklanabilirlik — İnteraktif Panel ── */}
             <div className="card">
-                <div className="flex items-center gap-3 mb-6">
-                    <Sparkles className="w-5 h-5 text-violet-500" />
-                    <h3 className="text-lg font-medium text-white">Açıklanabilir AI (XAI)</h3>
+                <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                        <Sparkles className="w-5 h-5 text-violet-500" />
+                        <h3 className="text-lg font-medium text-white">Açıklanabilir AI (XAI)</h3>
+                        {xaiData?.version && (
+                            <span className="text-xs bg-violet-500/20 text-violet-400 px-2 py-0.5 rounded-full">
+                                v{xaiData.version}
+                            </span>
+                        )}
+                    </div>
+                    {xaiData?.calibration?.calibration_active && (
+                        <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded-full flex items-center gap-1">
+                            <RefreshCw className="w-3 h-3" />
+                            Kalibrasyon Aktif
+                        </span>
+                    )}
                 </div>
                 {xaiData?.available ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div className="p-4 bg-dark-800/50 rounded-lg">
-                            <div className="flex items-center gap-2 mb-3">
-                                <Layers className="w-4 h-4 text-violet-400" />
-                                <h4 className="text-sm font-medium text-dark-200">Karar Faktörleri</h4>
+                    <div className="space-y-6">
+                        {/* ── Üst İstatistik Kartları ── */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="p-3 bg-dark-800/50 rounded-lg text-center">
+                                <div className="text-2xl font-bold text-violet-400">
+                                    {xaiData.stats?.total_evaluations || 0}
+                                </div>
+                                <div className="text-xs text-dark-400 mt-1">Toplam Analiz</div>
                             </div>
-                            <div className="space-y-2">
-                                {(xaiData.factors || []).map((factor: string, i: number) => (
-                                    <div key={i} className="flex items-center gap-2">
-                                        <div className="w-2 h-2 rounded-full bg-violet-500" />
-                                        <span className="text-xs text-dark-300">{factor.replace(/_/g, ' ')}</span>
-                                    </div>
-                                ))}
+                            <div className="p-3 bg-dark-800/50 rounded-lg text-center">
+                                <div className={clsx('text-2xl font-bold', {
+                                    'text-green-400': (xaiData.stats?.avg_confidence_pct || 0) >= 70,
+                                    'text-yellow-400': (xaiData.stats?.avg_confidence_pct || 0) >= 50 && (xaiData.stats?.avg_confidence_pct || 0) < 70,
+                                    'text-red-400': (xaiData.stats?.avg_confidence_pct || 0) < 50,
+                                })}>
+                                    %{xaiData.stats?.avg_confidence_pct || 0}
+                                </div>
+                                <div className="text-xs text-dark-400 mt-1">Ort. Güven</div>
+                            </div>
+                            <div className="p-3 bg-dark-800/50 rounded-lg text-center">
+                                <div className="text-2xl font-bold text-blue-400">
+                                    {xaiData.stats?.confidence_trend === 'yükseliyor' ? '↑' : xaiData.stats?.confidence_trend === 'düşüyor' ? '↓' : '→'}
+                                </div>
+                                <div className="text-xs text-dark-400 mt-1">
+                                    {xaiData.stats?.confidence_trend === 'yükseliyor' ? 'Yükseliyor' :
+                                     xaiData.stats?.confidence_trend === 'düşüyor' ? 'Düşüyor' :
+                                     xaiData.stats?.confidence_trend === 'stabil' ? 'Stabil' : 'Yeterli Veri Yok'}
+                                </div>
+                            </div>
+                            <div className="p-3 bg-dark-800/50 rounded-lg text-center">
+                                <div className="text-2xl font-bold text-amber-400">
+                                    {xaiData.calibration?.total_feedback || 0}
+                                </div>
+                                <div className="text-xs text-dark-400 mt-1">Geri Bildirim</div>
                             </div>
                         </div>
+
+                        {/* ── 2. Satır: Faktör Skorları + Risk Dağılımı ── */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            {/* Faktör Ortalamaları — Bar Chart */}
+                            <div className="p-4 bg-dark-800/50 rounded-lg">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <BarChart3 className="w-4 h-4 text-violet-400" />
+                                    <h4 className="text-sm font-medium text-dark-200">Ortalama Faktör Skorları</h4>
+                                </div>
+                                {xaiData.stats?.avg_factor_scores && Object.keys(xaiData.stats.avg_factor_scores).length > 0 ? (
+                                    <div className="space-y-2">
+                                        {Object.entries(xaiData.stats.avg_factor_scores as Record<string, number>).map(([key, val]: [string, number]) => (
+                                            <div key={key} className="flex items-center gap-2">
+                                                <span className="text-xs text-dark-400 w-28 truncate" title={key.replace(/_/g, ' ')}>
+                                                    {key.replace(/_/g, ' ')}
+                                                </span>
+                                                <div className="flex-1 bg-dark-700 rounded-full h-2">
+                                                    <div
+                                                        className={clsx('h-2 rounded-full transition-all', {
+                                                            'bg-green-500': val >= 70,
+                                                            'bg-yellow-500': val >= 50 && val < 70,
+                                                            'bg-red-500': val < 50,
+                                                        })}
+                                                        style={{ width: `${Math.min(100, val)}%` }}
+                                                    />
+                                                </div>
+                                                <span className="text-xs text-dark-300 w-10 text-right">%{val}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-dark-400">Henüz faktör verisi yok</p>
+                                )}
+                            </div>
+
+                            {/* Risk Dağılımı — Pie */}
+                            <div className="p-4 bg-dark-800/50 rounded-lg">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <AlertTriangle className="w-4 h-4 text-violet-400" />
+                                    <h4 className="text-sm font-medium text-dark-200">Risk Dağılımı</h4>
+                                </div>
+                                {xaiData.stats?.risk_distribution ? (
+                                    <div className="flex items-center gap-6">
+                                        <div className="w-28 h-28">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={[
+                                                            { name: 'Düşük', value: xaiData.stats.risk_distribution['Düşük'] || 0, fill: '#22c55e' },
+                                                            { name: 'Orta', value: xaiData.stats.risk_distribution['Orta'] || 0, fill: '#eab308' },
+                                                            { name: 'Yüksek', value: xaiData.stats.risk_distribution['Yüksek'] || 0, fill: '#ef4444' },
+                                                        ]}
+                                                        dataKey="value"
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={25}
+                                                        outerRadius={45}
+                                                        stroke="none"
+                                                    />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                        <div className="space-y-2 flex-1">
+                                            {[
+                                                { label: 'Düşük', value: xaiData.stats.risk_distribution['Düşük'] || 0, color: 'bg-green-500' },
+                                                { label: 'Orta', value: xaiData.stats.risk_distribution['Orta'] || 0, color: 'bg-yellow-500' },
+                                                { label: 'Yüksek', value: xaiData.stats.risk_distribution['Yüksek'] || 0, color: 'bg-red-500' },
+                                            ].map((item) => (
+                                                <div key={item.label} className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`w-2.5 h-2.5 rounded-full ${item.color}`} />
+                                                        <span className="text-xs text-dark-300">{item.label}</span>
+                                                    </div>
+                                                    <span className="text-xs font-medium text-dark-200">{item.value}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-dark-400">Risk verisi yok</p>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* ── 3. Satır: Güven Trendi Grafiği ── */}
+                        {xaiData.stats?.confidence_trend_data && xaiData.stats.confidence_trend_data.length > 0 && (
+                            <div className="p-4 bg-dark-800/50 rounded-lg">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <TrendingUp className="w-4 h-4 text-violet-400" />
+                                    <h4 className="text-sm font-medium text-dark-200">Güven Skoru Trendi</h4>
+                                </div>
+                                <div className="h-40">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <AreaChart data={xaiData.stats.confidence_trend_data}>
+                                            <defs>
+                                                <linearGradient id="xaiGrad" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                                                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                                                </linearGradient>
+                                            </defs>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                                            <XAxis dataKey="mode" tick={{ fill: '#9ca3af', fontSize: 10 }} />
+                                            <YAxis domain={[0, 100]} tick={{ fill: '#9ca3af', fontSize: 10 }} />
+                                            <Tooltip
+                                                contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: 8 }}
+                                                labelStyle={{ color: '#d1d5db' }}
+                                            />
+                                            <Area
+                                                type="monotone"
+                                                dataKey="confidence"
+                                                stroke="#8b5cf6"
+                                                strokeWidth={2}
+                                                fill="url(#xaiGrad)"
+                                                name="Güven %"
+                                            />
+                                        </AreaChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ── 4. Satır: Güven Dağılımı + Mod Kırılımı + Kalibrasyon ── */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                            {/* Güven Dağılımı Histogram */}
+                            <div className="p-4 bg-dark-800/50 rounded-lg">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <BarChart3 className="w-4 h-4 text-violet-400" />
+                                    <h4 className="text-sm font-medium text-dark-200">Güven Dağılımı</h4>
+                                </div>
+                                {xaiData.stats?.conf_distribution ? (
+                                    <div className="space-y-1.5">
+                                        {Object.entries(xaiData.stats.conf_distribution as Record<string, number>).map(([range, count]: [string, number]) => {
+                                            const total = xaiData.stats?.total_evaluations || 1
+                                            const pct = Math.round((count / total) * 100)
+                                            return (
+                                                <div key={range} className="flex items-center gap-2">
+                                                    <span className="text-xs text-dark-400 w-12">%{range}</span>
+                                                    <div className="flex-1 bg-dark-700 rounded h-3">
+                                                        <div
+                                                            className="h-3 rounded bg-violet-500/70"
+                                                            style={{ width: `${pct}%` }}
+                                                        />
+                                                    </div>
+                                                    <span className="text-xs text-dark-300 w-6 text-right">{count}</span>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-dark-400">Veri yok</p>
+                                )}
+                            </div>
+
+                            {/* Mod Kırılımı */}
+                            <div className="p-4 bg-dark-800/50 rounded-lg">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Layers className="w-4 h-4 text-violet-400" />
+                                    <h4 className="text-sm font-medium text-dark-200">Mod Kırılımı</h4>
+                                </div>
+                                {xaiData.stats?.mode_breakdown && Object.keys(xaiData.stats.mode_breakdown).length > 0 ? (
+                                    <div className="space-y-2">
+                                        {Object.entries(xaiData.stats.mode_breakdown as Record<string, any>).map(([mode, data]: [string, any]) => (
+                                            <div key={mode} className="flex items-center justify-between p-2 bg-dark-700/50 rounded">
+                                                <span className="text-xs text-dark-300">{mode}</span>
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-xs text-dark-400">{data.count} sorgu</span>
+                                                    <span className={clsx('text-xs font-medium', {
+                                                        'text-green-400': data.avg_confidence >= 0.7,
+                                                        'text-yellow-400': data.avg_confidence >= 0.5,
+                                                        'text-red-400': data.avg_confidence < 0.5,
+                                                    })}>
+                                                        %{Math.round(data.avg_confidence * 100)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-dark-400">Mod verisi yok</p>
+                                )}
+                            </div>
+
+                            {/* Kalibrasyon Durumu */}
+                            <div className="p-4 bg-dark-800/50 rounded-lg">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <RefreshCw className="w-4 h-4 text-violet-400" />
+                                    <h4 className="text-sm font-medium text-dark-200">Kalibrasyon</h4>
+                                </div>
+                                {xaiData.calibration ? (
+                                    <div className="space-y-3">
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-dark-400">Geri Bildirim</span>
+                                            <span className="text-dark-200 font-medium">{xaiData.calibration.total_feedback}</span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-dark-400">Ort. Kullanıcı Puanı</span>
+                                            <span className="text-dark-200 font-medium">
+                                                {xaiData.calibration.avg_user_rating > 0 ? `${xaiData.calibration.avg_user_rating}/5` : '-'}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-dark-400">Uyum Oranı</span>
+                                            <span className={clsx('font-medium', {
+                                                'text-green-400': xaiData.calibration.alignment_pct >= 70,
+                                                'text-yellow-400': xaiData.calibration.alignment_pct >= 50,
+                                                'text-dark-200': !xaiData.calibration.alignment_pct,
+                                            })}>
+                                                {xaiData.calibration.alignment_pct > 0 ? `%${xaiData.calibration.alignment_pct}` : '-'}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-dark-400">Durum</span>
+                                            <span className={xaiData.calibration.calibration_active ? 'text-green-400 font-medium' : 'text-dark-300'}>
+                                                {xaiData.calibration.calibration_active ? 'Aktif' : 'Bekleniyor'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-dark-400">Kalibrasyon verisi yok</p>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* ── 5. Satır: Son Değerlendirmeler + Uyarılar ── */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            {/* Son Değerlendirmeler */}
+                            <div className="p-4 bg-dark-800/50 rounded-lg">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Clock className="w-4 h-4 text-violet-400" />
+                                    <h4 className="text-sm font-medium text-dark-200">Son Değerlendirmeler</h4>
+                                </div>
+                                {xaiHistory?.records && xaiHistory.records.length > 0 ? (
+                                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                        {xaiHistory.records.slice(0, 8).map((r: any, i: number) => (
+                                            <div key={i} className="flex items-center justify-between p-2 bg-dark-700/50 rounded text-xs">
+                                                <span className="text-dark-300 truncate max-w-[160px]" title={r.query_preview}>
+                                                    {r.query_preview || '—'}
+                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-dark-400">{r.mode}</span>
+                                                    <span className={clsx('font-medium', {
+                                                        'text-green-400': r.weighted_confidence >= 0.7,
+                                                        'text-yellow-400': r.weighted_confidence >= 0.5,
+                                                        'text-red-400': r.weighted_confidence < 0.5,
+                                                    })}>
+                                                        %{Math.round(r.weighted_confidence * 100)}
+                                                    </span>
+                                                    <span className={clsx('px-1.5 py-0.5 rounded text-[10px]', {
+                                                        'bg-green-500/20 text-green-400': r.risk_level === 'Düşük',
+                                                        'bg-yellow-500/20 text-yellow-400': r.risk_level === 'Orta',
+                                                        'bg-red-500/20 text-red-400': r.risk_level === 'Yüksek',
+                                                    })}>
+                                                        {r.risk_level}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-dark-400">Henüz değerlendirme yok</p>
+                                )}
+                            </div>
+
+                            {/* Son Uyarılar */}
+                            <div className="p-4 bg-dark-800/50 rounded-lg">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <AlertTriangle className="w-4 h-4 text-amber-400" />
+                                    <h4 className="text-sm font-medium text-dark-200">Düşük Güven Uyarıları</h4>
+                                </div>
+                                {xaiData.stats?.recent_warnings && xaiData.stats.recent_warnings.length > 0 ? (
+                                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                        {xaiData.stats.recent_warnings.map((w: any, i: number) => (
+                                            <div key={i} className="flex items-center justify-between p-2 bg-red-500/5 border border-red-500/10 rounded text-xs">
+                                                <span className="text-dark-300 truncate max-w-[160px]">{w.query}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-red-400 font-medium">%{Math.round(w.confidence * 100)}</span>
+                                                    <span className="text-dark-400">{w.mode}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2 p-3 bg-green-500/5 rounded-lg">
+                                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                        <span className="text-xs text-green-400">Düşük güven uyarısı yok</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* ── 6. Satır: Yetenekler ── */}
                         <div className="p-4 bg-dark-800/50 rounded-lg">
                             <div className="flex items-center gap-2 mb-3">
                                 <Eye className="w-4 h-4 text-violet-400" />
-                                <h4 className="text-sm font-medium text-dark-200">Yetenekler</h4>
+                                <h4 className="text-sm font-medium text-dark-200">XAI Yetenekleri ({xaiData.capabilities?.length || 0})</h4>
                             </div>
-                            <div className="space-y-2">
-                                {(xaiData.capabilities || []).slice(0, 6).map((cap: string, i: number) => (
-                                    <div key={i} className="flex items-center gap-2">
+                            <div className="flex flex-wrap gap-2">
+                                {(xaiData.capabilities || []).map((cap: string, i: number) => (
+                                    <span key={i} className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-violet-500/10 text-violet-300 rounded-full border border-violet-500/20">
                                         <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
-                                        <span className="text-xs text-dark-300">{cap}</span>
-                                    </div>
+                                        {cap}
+                                    </span>
                                 ))}
-                            </div>
-                        </div>
-                        <div className="p-4 bg-dark-800/50 rounded-lg">
-                            <div className="flex items-center gap-2 mb-3">
-                                <TrendingUp className="w-4 h-4 text-violet-400" />
-                                <h4 className="text-sm font-medium text-dark-200">Modül Bilgisi</h4>
-                            </div>
-                            <div className="space-y-3">
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-dark-400">Versiyon</span>
-                                    <span className="text-dark-200 font-medium">{xaiData.version || '1.0.0'}</span>
-                                </div>
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-dark-400">Faktör Sayısı</span>
-                                    <span className="text-dark-200 font-medium">{xaiData.factor_count || 0}</span>
-                                </div>
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-dark-400">Durum</span>
-                                    <span className="text-green-400 font-medium">Aktif</span>
-                                </div>
                             </div>
                         </div>
                     </div>
                 ) : (
                     <div className="flex flex-col items-center justify-center py-8 text-dark-400">
                         <Sparkles className="w-10 h-10 mb-3 opacity-30" />
-                        <p className="text-sm">XAI verisi yükleniyor...</p>
+                        <p className="text-sm">Henüz XAI verisi yok</p>
+                        <p className="text-xs text-dark-500 mt-1">Sorular soruldukça XAI analiz verileri burada görünecek</p>
                     </div>
                 )}
             </div>

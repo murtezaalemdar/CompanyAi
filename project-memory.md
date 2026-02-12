@@ -7,7 +7,7 @@ Tekstil sektörü odaklı, her bölümün kendi bilgi tabanı ve yetkilendirmesi
 ## Sunucu
 - **IP:** 192.168.0.12, Ubuntu 22.04, Intel Xeon 4316 16-core, **64GB RAM**, no GPU
 - **LLM:** Ollama qwen2.5:72b (48GB in RAM, 0 swap), ~2 tok/s CPU-only
-- **Versiyon:** v2.9.0
+- **Versiyon:** v3.5.1
 
 ## Önemli Kararlar
 - Tamamen lokal LLM (Ollama + qwen2.5:72b) — GPU yok, CPU-only (Xeon Silver 4316), 64GB RAM
@@ -239,4 +239,127 @@ c478097 feat: Gorsel arama sonuclari karti + rich_data liste destegi
 - HTTPS zorunlu (mikrofon erişimi için)
 - Ses tanıma dili: tr-TR
 
+---
+
+### 12 Şubat 2026 — v3.0.0 → v3.3.2: Çekirdek Modüller & UX
+
+**Ana özellikler (özetler):**
+- v3.0–v3.2: RAG pipeline, Multi-Agent Pipeline, Scenario Engine, Monte Carlo, Governance modülleri
+- v3.3.0: ARIMA/SARIMA Forecast Engine + Enhanced Management Dashboard (commit `231db47`)
+- v3.3.1: Yönetim paneli UI farklılaştırması — Sidebar amber tema, Crown icon, AdminRoute (commit `d54338f`)
+- v3.3.2: Chat UX iyileştirmeleri — Auto-focus, Durdur butonu (AbortController), Tekrar dene (RotateCcw), DesktopBanner fix (commit `7e872b4`)
+
+---
+
+### 12 Şubat 2026 — v3.4.0: 6 Yeni Modül + Dashboard v2
+
+**Backend — 6 yeni modül (commit `b09d5d9`):**
+- `app/core/model_registry.py` — ML model versiyonlama, A/B test, production tracking
+- `app/core/data_versioning.py` — Veri seti versiyonlama, lineage, diff
+- `app/core/hitl.py` — Human-in-the-Loop onay/ret akışı
+- `app/core/monitoring.py` — Sistem sağlığı, metrik toplama, alert
+- `app/core/textile_vision.py` — Kumaş görüntü analizi (defekt tespiti)
+- `app/core/explainability.py` — XAI, SHAP/LIME benzeri açıklamalar
+- `app/api/routes/admin.py` — 24 yeni endpoint eklendi
+- `app/core/engine.py` — Tüm yeni modüller entegre edildi
+
+**Frontend — Dashboard v2 (commit `e1f588a`):**
+- `frontend/src/services/api.ts` — 13 yeni API metodu
+- `Dashboard.tsx` — 5 yeni panel: Health Score, Alerts, Model Registry, HITL, XAI
+- `MODULE_LABELS` → 24 modül grid
+
+---
+
+### 12 Şubat 2026 — v3.5.0: Analiz Motoru İyileştirme (commit `d65dae6`)
+
+**Yapılan işler:**
+- Mevcut 7 analiz tipi iyileştirildi + 6 yeni analiz fonksiyonu eklendi (toplam 13):
+  1. summary (özet), trend, comparison, anomaly_detection, correlation_analysis,
+     distribution_analysis, forecast_analysis, pareto_analysis, data_quality_analysis,
+     pivot, top_bottom, change (değişim), segment
+- Frontend: 7→13 analiz tipi, yeni ikonlar, grid layout
+- Dosya: `app/core/document_analyzer.py` (~2033 satır)
+
+---
+
+### 12 Şubat 2026 — v3.5.1: Pro Seviye Analiz Motoru (commit `b849d6d`, 656 ekleme)
+
+**Motivasyon:** Mevcut analiz fonksiyonları yüzeyseldi — forecast basit linear regression kullanıyor (884 satırlık forecasting.py'ye bağlı değildi), korelasyon sadece Pearson, istatistiksel testler yoktu.
+
+**Yükseltilen 6 fonksiyon:**
+
+1. **forecast_analysis()** — TAM YENİDEN YAZILDI
+   - 5 model karşılaştırması: Linear Regression, Holt Linear Trend, SES, ARIMA, Holt-Winters
+   - MAPE bazlı en iyi model otomatik seçimi
+   - Güven aralıkları (confidence intervals)
+   - `app/core/forecasting.py` importları bağlandı (FORECASTING_AVAILABLE flag)
+
+2. **correlation_analysis()** — Pearson + Spearman ikili matris
+   - scipy p-value hesaplama
+   - Doğrusallık (linearity) tespiti
+
+3. **distribution_analysis()** — Normallik testleri
+   - Shapiro-Wilk (n≤5000) / Kolmogorov-Smirnov (n>5000)
+   - P99, yoğunlaşma metrikleri (concentration_iqr_pct)
+
+4. **comparison_analysis()** — İstatistiksel testler
+   - 2 grup: Welch t-test
+   - 3+ grup: One-way ANOVA
+   - Etki büyüklüğü: Cohen's d / Eta²
+   - Anlamlılık bayrağı (p < 0.05)
+
+5. **anomaly_detection()** — 4 yöntem
+   - IQR, Z-Score, Modified Z-Score (MAD), Rolling Window
+   - Grubbs testi
+   - Ciddiyet sınıflandırması: kritik / orta / hafif
+
+6. **data_quality_analysis()** — 4 boyut
+   - Tamlık (Completeness) + Benzersizlik (Uniqueness) + Tutarlılık (Consistency) + Geçerlilik (Validity)
+   - Tarih formatı doğrulama (regex + pd.to_datetime)
+   - Aralık kontrolleri (negatif değerler, aşırı outlier'lar)
+   - Çapraz kolon tutarlılığı (start < end)
+   - Kardinalite analizi, eksik veri ortak oluşum desenleri
+
+**Prompt şablonları:** `generate_analysis_prompt()` içindeki TÜM 6 bölüm güncellendi
+
+**Bağımlılık:** `requirements.txt` → `scipy>=1.10.0` eklendi
+
+---
+
+### 12 Şubat 2026 — Dashboard React Error #31 Fix (commit `f76c7e0`)
+
+**Sorun:** Dashboard beyaz ekran — React error #31
+**Kök neden:** Vite build cache bayattı — derlenmiş JS eski `production_model` objesini property erişimi olmadan render ediyordu
+**Çözüm:** `dist/` + `node_modules/.vite` temizlenip sıfırdan build → `index-Dug67X34.js`
+**Ders:** Kritik deploy'lardan önce Vite cache'i mutlaka temizlenmeli
+
+---
+
+## Commit Geçmişi (güncel)
+| Commit | Açıklama |
+|--------|----------|
+| `f76c7e0` | fix: Dashboard production_model obje render hatası |
+| `b849d6d` | v3.5.1: Pro analiz — 5-model tahmin, Pearson+Spearman, normallik, t-test/ANOVA, Grubbs |
+| `d65dae6` | v3.5.0: Analiz motoru iyileştirme + 6 yeni analiz tipi |
+| `e1f588a` | v3.4.0: Dashboard v2 — Model Registry, HITL, Monitoring, XAI panelleri |
+| `b09d5d9` | v3.4.0: 6 yeni modül, 24 endpoint, engine.py entegrasyonu |
+| `7e872b4` | v3.3.2: DesktopBanner fix + debug cleanup |
+| `a55ff7b` | v3.3.2: Chat UX iyileştirmeleri |
+| `d54338f` | v3.3.1: Yönetim paneli UI |
+| `231db47` | v3.3.0: ARIMA/SARIMA Forecast Engine |
+
+## Önemli Dosyalar (güncel)
+- `app/core/document_analyzer.py` (~2033 satır) — 13 analiz tipi, pro istatistiksel motor
+- `app/core/forecasting.py` (884 satır) — ARIMA, SARIMA, Holt-Winters, SES
+- `app/core/engine.py` — Ana koordinasyon motoru, 24 modül
+- `app/core/model_registry.py` — ML model versiyonlama
+- `app/core/monitoring.py` — Sistem sağlığı izleme
+- `app/core/explainability.py` — XAI açıklamalar
+- `frontend/src/pages/Dashboard.tsx` (871 satır) — 24-modül admin dashboard
+- `frontend/src/services/api.ts` — Backend API servisleri
+
+## Bağımlılıklar (önemli eklemeler)
+- `scipy>=1.10.0` — İstatistiksel testler (t-test, ANOVA, Shapiro-Wilk, Grubbs) — v3.5.1
+- `statsmodels>=0.14.0` — ARIMA, SARIMA, Holt-Winters, SES — v2.7.0+
+- `openpyxl` — Excel okuma/yazma
 

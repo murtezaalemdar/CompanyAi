@@ -522,7 +522,30 @@ async def process_question(
         except Exception as e:
             logger.debug("governance_skipped", error=str(e))
     
-    # ── 5g. DECISION IMPACT RANKING — Analiz modunda kararları sırala ──
+    # ── 5g. XAI — Açıklanabilir Yapay Zeka Analizi ──
+    xai_data = None
+    if XAI_AVAILABLE and decision_explainer and llm_answer and not llm_answer.startswith("[Hata]"):
+        try:
+            xai_result = decision_explainer.explain(
+                query=question,
+                response=llm_answer,
+                mode=context.get("mode", "Sohbet"),
+                confidence=dynamic_confidence,
+                sources=[doc.get("source", "") for doc in relevant_docs] if relevant_docs else [],
+                rag_docs=relevant_docs if relevant_docs else None,
+                web_searched=web_results is not None,
+                reflection_data=reflection_data,
+                module_source="engine",
+            )
+            if xai_result:
+                xai_data = xai_result
+                logger.info("xai_evaluated",
+                           weighted_confidence=xai_result.get("weighted_confidence", 0),
+                           risk_level=xai_result.get("risk", {}).get("level", "?"))
+        except Exception as e:
+            logger.debug("xai_skipped", error=str(e))
+    
+    # ── 5i. DECISION IMPACT RANKING — Analiz modunda kararları sırala ──
     ranking_data = None
     if DECISION_RANKING_AVAILABLE and llm_answer and context.get("mode") in ["Analiz", "Rapor", "Öneri"]:
         try:
@@ -539,7 +562,7 @@ async def process_question(
         except Exception as e:
             logger.debug("decision_ranking_skipped", error=str(e))
     
-    # ── 5h. GRAPH IMPACT MAPPING — KPI/Risk/Departman ilişki grafiği ──
+    # ── 5j. GRAPH IMPACT MAPPING — KPI/Risk/Departman ilişki grafiği ──
     graph_data = None
     if GRAPH_IMPACT_AVAILABLE and llm_answer and context.get("mode") in ["Analiz", "Rapor", "Öneri"]:
         try:
@@ -611,6 +634,7 @@ async def process_question(
         "governance": governance_data,
         "ranking": ranking_data,
         "graph_impact": graph_data,
+        "xai": xai_data,
     }
     
     # 7. Hafızaya kaydet (öğrenme)

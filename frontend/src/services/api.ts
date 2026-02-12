@@ -315,6 +315,18 @@ export const adminApi = {
         const response = await api.get('/admin/explainability')
         return response.data
     },
+    getXaiHistory: async (limit: number = 20) => {
+        const response = await api.get(`/admin/explainability/history?limit=${limit}`)
+        return response.data
+    },
+    getXaiCalibration: async () => {
+        const response = await api.get('/admin/explainability/calibration')
+        return response.data
+    },
+    submitXaiFeedback: async (data: { query_hash: string; user_rating: number; factor_overrides?: Record<string, number>; comment?: string }) => {
+        const response = await api.post('/admin/explainability/feedback', data)
+        return response.data
+    },
 }
 
 // RAG API

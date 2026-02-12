@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Monitor, X, Download, Smartphone, Laptop } from 'lucide-react'
 
 type PlatformInfo = {
@@ -72,8 +73,10 @@ function detectPlatform(): PlatformInfo | null {
  * - Android  → "Yakında" (Play Store linki eklenecek)
  * - iOS      → "Yakında" (App Store linki eklenecek)
  * - pywebview / Capacitor içinde → GİZLENİR
- * Kullanıcı kapattığında 7 gün boyunca tekrar gösterilmez.
+ * Kullanıcı kapattığında 1 gün boyunca tekrar gösterilmez.
  */
+const BANNER_VERSION = 'v2' // localStorage key versiyonu — eski dismiss'leri bypass eder
+
 export default function DesktopBanner() {
     const [visible, setVisible] = useState(false)
     const [info, setInfo] = useState<PlatformInfo | null>(null)
@@ -82,13 +85,13 @@ export default function DesktopBanner() {
         const detected = detectPlatform()
         if (!detected) return
 
-        // Kullanıcı daha önce kapatmış mı? (platform bazlı key)
-        const key = `app_banner_dismissed_${detected.platform}`
+        // Kullanıcı daha önce kapatmış mı? (platform + versiyon bazlı key)
+        const key = `${BANNER_VERSION}_app_banner_dismissed_${detected.platform}`
         const dismissed = localStorage.getItem(key)
         if (dismissed) {
             const ts = parseInt(dismissed, 10)
-            const sevenDays = 7 * 24 * 60 * 60 * 1000
-            if (Date.now() - ts < sevenDays) return
+            const oneDay = 24 * 60 * 60 * 1000
+            if (Date.now() - ts < oneDay) return
         }
 
         setInfo(detected)
@@ -98,7 +101,8 @@ export default function DesktopBanner() {
     const handleDismiss = () => {
         setVisible(false)
         if (info) {
-            localStorage.setItem(`app_banner_dismissed_${info.platform}`, Date.now().toString())
+            const key = `${BANNER_VERSION}_app_banner_dismissed_${info.platform}`
+            localStorage.setItem(key, Date.now().toString())
         }
     }
 
@@ -112,8 +116,14 @@ export default function DesktopBanner() {
 
     const IconComponent = info.icon
 
-    return (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md animate-slide-up">
+    // createPortal ile doğrudan body'ye render — ancestor CSS sorunlarını bypass eder
+    return createPortal(
+        <div
+            data-testid="desktop-banner"
+            className="fixed bottom-16 left-0 right-0 flex justify-center px-4 animate-slide-up"
+            style={{ zIndex: 99999 }}
+        >
+          <div className="w-full max-w-md">
             <div className="bg-dark-900/95 backdrop-blur-lg border border-primary-500/30 rounded-2xl shadow-2xl shadow-primary-500/10 px-4 py-3.5 flex items-center gap-3">
                 {/* Icon */}
                 <div className="shrink-0 w-10 h-10 bg-primary-500/15 rounded-xl flex items-center justify-center">
@@ -153,6 +163,8 @@ export default function DesktopBanner() {
                     <X className="w-4 h-4" />
                 </button>
             </div>
-        </div>
+          </div>
+        </div>,
+        document.body
     )
 }

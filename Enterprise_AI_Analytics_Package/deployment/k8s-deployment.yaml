@@ -1,0 +1,20 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supreme-ai-platform
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: supreme-ai
+  template:
+    metadata:
+      labels:
+        app: supreme-ai
+    spec:
+      containers:
+      - name: api-gateway
+        image: supreme-ai/api-gateway:latest
+        ports:
+        - containerPort: 8000

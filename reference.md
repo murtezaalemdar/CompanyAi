@@ -2,7 +2,7 @@
 
 > **Proje Adı:** Kurumsal Yapay Zeka Asistanı – LOCAL & ÖĞRENEN  
 > **Amaç:** Kurumsal kullanım için tasarlanmış, tamamen lokal çalışan ve öğrenen bir AI asistan sistemi.  
-> **Son Güncelleme:** 11 Şubat 2026 (v2.9.0 — Backup & Restore + Sesli Sohbet + ChatGPT Karşılama)
+> **Son Güncelleme:** 12 Şubat 2026 (v3.3.2 — ARIMA/SARIMA + Admin UI + Chat UX + DesktopBanner Fix)
 
 ---
 
@@ -73,7 +73,7 @@ CompanyAi/
 │   │   │   ├── Settings.tsx          # Ayarlar
 │   │   │   └── Users.tsx             # Kullanıcı yönetimi
 │   │   └── components/
-│   │       ├── DesktopBanner.tsx      # Desktop app indirme banner'ı
+│   │       ├── DesktopBanner.tsx      # Desktop app indirme banner'ı (React Portal + createPortal)
 │   │       ├── ExportCard.tsx         # Export indirme kartı
 │   │       ├── FileUploadModal.tsx    # Dosya + kamera yükleme modal'ı
 │   │       ├── Layout.tsx            # Sidebar navigasyon
@@ -1142,3 +1142,73 @@ cd frontend && npx cap sync
 | 4 | App Store / Play Store dağıtım | Apple Developer ($99/yıl) + Google Play ($25) |
 | 5 | Push notification | Capacitor push plugin + Firebase/APNs |
 | 6 | Offline modu (cache) | Service worker veya Capacitor storage |
+
+---
+
+## 📝 Değişiklik Geçmişi (v3.0.0 → v3.3.2)
+
+### v3.3.2 — 12 Şubat 2026 — Chat UX + DesktopBanner Fix
+
+**Chat UX İyileştirmeleri:**
+- Prompt gönderildikten sonra **auto-focus** — textarea'ya tıklamaya gerek kalmadan devam edebilme
+- **Durdur butonu** — Üretim sırasında kırmızı Stop butonu (AbortController ile iptal)
+- **Tekrar dene** — Son asistan mesajında "↺ Tekrar dene" butonu, sorguyu yeniden gönderir
+- `api.ts`: `askWithFiles()` fonksiyonuna `signal?: AbortSignal` parametresi eklendi
+
+**Dosyalar:** `Ask.tsx`, `api.ts`
+
+**DesktopBanner Login Fix:**
+- **Sorun:** Banner login sayfasında görünmüyordu
+- **Kök Nedenler:**
+  1. Login container'da `overflow-hidden` banner'ın `position: fixed`'ını kırpıyordu
+  2. `tailwind.config.js` içindeki `slideUp` keyframe'de `translateX(-50%)` Tailwind'ın transform sistemiyle çakışıyordu
+  3. Ancestor div'lerdeki `backdrop-filter`, `transform` gibi CSS özellikleri `fixed` positioning'i bozuyordu
+  4. localStorage dismiss key'i 7 gün süreyle kalıcıydı (cache temizlemekle silinmez)
+- **Çözüm:**
+  - `createPortal(jsx, document.body)` ile banner doğrudan body'ye render ediliyor — ancestor CSS sorunları bypass
+  - `z-index: 99999` inline style ile en üst katmana çıkarıldı
+  - localStorage key'ine `BANNER_VERSION = 'v2'` prefix eklendi — eski dismiss'ler bypass edilir
+  - Dismiss süresi 7 gün → 1 gün olarak kısaltıldı
+  - `tailwind.config.js`: `slideUp` keyframe'den `translateX(-50%)` kaldırıldı
+  - `Login.tsx`: Container'dan `overflow-hidden` kaldırıldı
+
+**Dosyalar:** `DesktopBanner.tsx`, `Login.tsx`, `tailwind.config.js`
+
+### v3.3.1 — 12 Şubat 2026 — Admin Panel UI Ayrımı
+
+- **Sidebar:** Navigasyon `userNavigation` ve `adminNavigation` olarak ikiye ayrıldı
+- **Admin Bölümü:** Amber temalı "Yönetim" separatörü (Shield ikon + gradient bölücüler)
+- **Rol Badge:** Kullanıcı adının yanında Admin(kırmızı)/Yönetici(amber)/Kullanıcı(gri) badge
+- **Crown İkon:** Admin/manager avatarında taç ikonu
+- **AdminRoute:** Dashboard, Users, Settings rotaları AdminRoute ile korunuyor (user → /ask'a yönlendirilir)
+- **Ask.tsx:** Admin için quick stats bar (4 KPI kart) + "Yönetim Araçları" hızlı link kartları
+
+**Dosyalar:** `Layout.tsx`, `Ask.tsx`, `App.tsx`
+
+### v3.3.0 — 12 Şubat 2026 — ARIMA/SARIMA + Dashboard
+
+- **ARIMA/SARIMA Tahmin Motoru:** `forecasting.py` (+312 satır) — Auto-order AIC grid search, güven aralığı, mevsimsel analiz
+- **Dashboard.tsx:** AI Modules Grid (18 modül durumu), Governance Panel, Departman Dağılımı
+- **3 Yeni Admin Endpoint:** `/api/admin/ai-modules`, `/api/admin/governance-metrics`, `/api/admin/dept-query-stats`
+- **4 Yeni API Metodu:** `getAiModules`, `getGovernanceMetrics`, `getDeptQueryStats`, `getAuditLogs`
+- **conf_int() Bug Fix:** statsmodels ndarray vs DataFrame uyumsuzluğu çözüldü
+
+**Dosyalar:** `forecasting.py`, `engine.py`, `admin.py`, `Dashboard.tsx`, `api.ts`
+
+### v3.2.0 — Graph Impact Mapping
+
+- 26 node, 35 edge ile tedarik zinciri etki haritalaması
+- `graph_impact.py` modülü eklendi
+
+### v3.1.0 — Monte Carlo + Decision Ranking + Governance
+
+- Monte Carlo simülasyonu, Karar Sıralama, Yönetişim metrikleri
+- Experiment Layer, Dynamic Routing
+- `monte_carlo.py`, `decision_ranking.py`, `governance.py`, `experiment_layer.py`
+
+### v3.0.0 — Reflection Layer + Multi-Agent Pipeline + Scenario Engine
+
+- Reflection Layer: LLM çıktısını değerlendirip yeniden üretme
+- Multi-Agent Pipeline: Birden fazla uzman ajanın sıralı çalışması
+- Scenario Engine: What-if senaryo analizi
+- `reflection.py`, `agent_pipeline.py`, `scenario_engine.py`

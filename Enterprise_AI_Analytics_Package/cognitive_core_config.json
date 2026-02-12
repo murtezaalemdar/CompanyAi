@@ -1,0 +1,16 @@
+{
+  "execution_pipeline": [
+    "DataIntegrity",
+    "StatisticalAnalysis",
+    "ForecastModeling",
+    "MonteCarloSimulation",
+    "RiskScoring",
+    "FinancialImpactProjection",
+    "GraphImpactMapping",
+    "ScenarioSimulation",
+    "DecisionRanking",
+    "ReflectionEvaluation"
+  ],
+  "routing": "dynamic_context_aware",
+  "confidence_retry_threshold": 75
+}

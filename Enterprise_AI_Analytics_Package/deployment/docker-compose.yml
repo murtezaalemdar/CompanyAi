@@ -1,0 +1,36 @@
+
+version: '3.9'
+services:
+  api-gateway:
+    build: ./services/api_gateway
+    ports:
+      - "8000:8000"
+
+  reasoning-engine:
+    build: ./services/reasoning_engine
+
+  risk-engine:
+    build: ./services/risk_engine
+
+  forecast-engine:
+    build: ./services/forecast_engine
+
+  financial-impact-engine:
+    build: ./services/financial_engine
+
+  reflection-engine:
+    build: ./services/reflection_engine
+
+  governance-service:
+    build: ./services/governance_service
+
+  neo4j:
+    image: neo4j:latest
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"

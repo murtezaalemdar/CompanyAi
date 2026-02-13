@@ -60,15 +60,18 @@ export default function Layout() {
         <div className="min-h-screen bg-dark-950 flex">
             {/* Sidebar - Desktop */}
             <aside className="hidden md:flex flex-col w-64 bg-dark-900 border-r border-dark-800">
-                <div className="p-6 flex items-center gap-3">
+                <button
+                    onClick={() => navigate(isAdmin ? '/' : '/ask')}
+                    className="p-6 flex items-center gap-3 hover:bg-dark-800/50 transition-colors rounded-lg mx-2 mt-2 cursor-pointer"
+                >
                     <div className="bg-primary-500/10 p-2 rounded-lg">
                         <BrainCircuit className="w-8 h-8 text-primary-500" />
                     </div>
-                    <div>
+                    <div className="text-left">
                         <h1 className="text-xl font-bold text-white tracking-tight">Company.AI</h1>
                         <p className="text-xs text-dark-400">Kurumsal Asistan</p>
                     </div>
-                </div>
+                </button>
 
                 <nav className="flex-1 px-4 py-6 space-y-1">
                     {userNavigation.map((item) => {
@@ -179,10 +182,13 @@ export default function Layout() {
 
             {/* Mobile Header */}
             <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-dark-900 border-b border-dark-800 px-4 py-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
+                <button
+                    onClick={() => navigate(isAdmin ? '/' : '/ask')}
+                    className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+                >
                     <BrainCircuit className="w-6 h-6 text-primary-500" />
                     <span className="font-bold text-white">Company.AI</span>
-                </div>
+                </button>
                 <button
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                     className="text-dark-400 hover:text-white"

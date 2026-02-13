@@ -14,7 +14,7 @@ from app.db.models import User, Query, SystemSettings
 from app.api.routes.auth import get_current_user
 from app.auth.rbac import Role, check_admin, check_admin_or_manager
 from app.auth.jwt_handler import hash_password
-from app.core.audit import log_action
+from app.core.audit import log_action, audit_compliance_engine, data_retention_policy
 
 # v3.4.0 modülleri
 try:
@@ -33,7 +33,7 @@ except ImportError:
     hitl_manager = None
 
 try:
-    from app.core.monitoring import metrics_collector, alert_manager, get_full_telemetry, calculate_health_score
+    from app.core.monitoring import metrics_collector, alert_manager, get_full_telemetry, calculate_health_score, sla_monitor
 except ImportError:
     metrics_collector = None
     alert_manager = None
@@ -694,6 +694,13 @@ async def get_governance_metrics(
             "low_confidence_alerts": dashboard.low_confidence_alerts,
             "recent_alerts": recent_alerts,
             "last_alert": dashboard.last_alert,
+            # v4.0 fields
+            "compliance_score": getattr(dashboard, 'compliance_score', None),
+            "policy_violations_count": getattr(dashboard, 'policy_violations_count', 0),
+            "prompt_version": getattr(dashboard, 'prompt_version', None),
+            "active_drift_types": getattr(dashboard, 'active_drift_types', []),
+            "decision_trace_count": getattr(dashboard, 'decision_trace_count', 0),
+            "risk_level": getattr(dashboard, 'risk_level', None),
         }
     except Exception as e:
         return {"available": False, "error": str(e)}
@@ -1108,3 +1115,235 @@ async def xai_calibration(current_user: User = Depends(get_current_user)):
     if not decision_explainer:
         return {"available": False}
     return {"available": True, **decision_explainer.get_calibration_status()}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# GOVERNANCE v4.0 — Decision Trace, Policy, Drift, Compliance
+# ══════════════════════════════════════════════════════════════════════
+
+@router.get("/governance/traces")
+async def get_governance_traces(
+    last_n: int = 50,
+    current_user: User = Depends(get_current_user),
+):
+    """Son karar izleri (decision traces) — tam karar takibi."""
+    check_admin_or_manager(current_user)
+    try:
+        from app.core.governance import governance_engine
+        if governance_engine is None:
+            return {"available": False}
+        traces = governance_engine.get_decision_traces(last_n)
+        return {"available": True, "traces": traces, "count": len(traces)}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/governance/trace/{trace_id}")
+async def get_governance_trace_detail(
+    trace_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Belirli bir karar izinin detayı."""
+    check_admin_or_manager(current_user)
+    try:
+        from app.core.governance import governance_engine
+        if governance_engine is None:
+            raise HTTPException(status_code=503, detail="Governance modülü yüklü değil")
+        trace = governance_engine.get_trace_by_id(trace_id)
+        if not trace:
+            raise HTTPException(status_code=404, detail="İz bulunamadı")
+        return {"available": True, **trace}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/governance/policy-rules")
+async def get_governance_policy_rules(
+    current_user: User = Depends(get_current_user),
+):
+    """Tüm tanımlı politika kuralları."""
+    check_admin_or_manager(current_user)
+    try:
+        from app.core.governance import governance_engine
+        if governance_engine is None:
+            return {"available": False}
+        rules = governance_engine.get_policy_rules()
+        return {"available": True, "rules": rules, "count": len(rules)}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/governance/violations")
+async def get_governance_violations(
+    last_n: int = 50,
+    current_user: User = Depends(get_current_user),
+):
+    """Son politika ihlalleri."""
+    check_admin_or_manager(current_user)
+    try:
+        from app.core.governance import governance_engine
+        if governance_engine is None:
+            return {"available": False}
+        violations = governance_engine.get_policy_violations(last_n)
+        return {"available": True, "violations": violations, "count": len(violations)}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/governance/drift")
+async def get_governance_drift_status(
+    current_user: User = Depends(get_current_user),
+):
+    """Drift (kayma) analizi — 4 boyutlu drift durumu."""
+    check_admin_or_manager(current_user)
+    try:
+        from app.core.governance import governance_engine
+        if governance_engine is None:
+            return {"available": False}
+        drift = governance_engine.get_drift_status()
+        return {"available": True, **drift}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/governance/compliance")
+async def get_governance_compliance_report(
+    current_user: User = Depends(get_current_user),
+):
+    """Kapsamlı uyumluluk raporu."""
+    check_admin(current_user)
+    try:
+        from app.core.governance import governance_engine
+        if governance_engine is None:
+            return {"available": False}
+        report = governance_engine.get_compliance_report()
+        return {"available": True, **report}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# MONITORING v2.0 — Anomaly, SLA, Performance Trend
+# ══════════════════════════════════════════════════════════════════════
+
+@router.get("/monitoring/anomalies")
+async def get_monitoring_anomalies(
+    current_user: User = Depends(get_current_user),
+):
+    """Anomali tespit logları ve istatistikleri."""
+    check_admin_or_manager(current_user)
+    if not metrics_collector:
+        return {"available": False, "error": "Monitoring modülü yüklü değil"}
+    try:
+        anomaly_log = metrics_collector.get_anomaly_log()
+        anomaly_stats = metrics_collector.get_anomaly_stats()
+        return {
+            "available": True,
+            "anomaly_log": anomaly_log[-50:],
+            "stats": anomaly_stats,
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/monitoring/sla")
+async def get_monitoring_sla(
+    current_user: User = Depends(get_current_user),
+):
+    """SLA uyumluluk durumu."""
+    check_admin_or_manager(current_user)
+    try:
+        if not sla_monitor:
+            return {"available": False, "error": "SLA Monitor yüklü değil"}
+        compliance = sla_monitor.check_sla_compliance(metrics_collector) if metrics_collector else {}
+        uptime = sla_monitor.get_uptime_percent(24)
+        return {
+            "available": True,
+            "uptime_24h": uptime,
+            "sla_compliance": compliance,
+            "targets": {
+                "uptime_percent": sla_monitor.targets.get("uptime_percent", 99.5),
+                "response_time_p95_ms": sla_monitor.targets.get("response_time_p95_ms", 10000),
+                "error_rate_percent": sla_monitor.targets.get("error_rate_percent", 2.0),
+            },
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/monitoring/trend")
+async def get_monitoring_performance_trend(
+    last_n: int = 100,
+    current_user: User = Depends(get_current_user),
+):
+    """Performance trend analizi — degradasyon tespiti."""
+    check_admin_or_manager(current_user)
+    if not metrics_collector:
+        return {"available": False, "error": "Monitoring modülü yüklü değil"}
+    try:
+        trend = metrics_collector.get_performance_trend(last_n)
+        return {"available": True, **trend}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# AUDIT v2.0 — Compliance Engine, Retention, Severity
+# ══════════════════════════════════════════════════════════════════════
+
+@router.get("/audit/compliance")
+async def get_audit_compliance(
+    current_user: User = Depends(get_current_user),
+):
+    """Audit uyumluluk skoru ve kategori analizi."""
+    check_admin(current_user)
+    try:
+        if not audit_compliance_engine:
+            return {"available": False, "error": "Compliance Engine yüklü değil"}
+        score_data = audit_compliance_engine.get_compliance_score()
+        violations = audit_compliance_engine.get_violations()
+        return {
+            "available": True,
+            **score_data,
+            "violations": violations[-20:],
+            "violation_count": len(violations),
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/audit/summary")
+async def get_audit_event_summary(
+    hours: int = 24,
+    current_user: User = Depends(get_current_user),
+):
+    """Audit olay özeti — son N saat."""
+    check_admin_or_manager(current_user)
+    try:
+        if not audit_compliance_engine:
+            return {"available": False}
+        summary = audit_compliance_engine.get_event_summary(hours)
+        return {"available": True, **summary}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.post("/audit/retention/cleanup")
+async def run_audit_retention_cleanup(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Veri saklama politikasına göre eski audit kayıtlarını temizle."""
+    check_admin(current_user)
+    try:
+        if not data_retention_policy:
+            raise HTTPException(status_code=503, detail="Data Retention Policy yüklü değil")
+        result = await data_retention_policy.cleanup(db)
+        await log_action(db, current_user.id, "audit_retention_cleanup", json.dumps(result))
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"success": False, "error": str(e)}

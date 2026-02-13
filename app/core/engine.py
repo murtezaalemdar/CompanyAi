@@ -7,6 +7,7 @@ RAG + Web Arama + Semantik Hafıza + Kişiselleştirme
 
 from typing import Optional
 import re
+import time
 import structlog
 
 from app.router.router import decide
@@ -234,6 +235,7 @@ async def process_question(
     6. Otomatik öğrenme (hafıza + web → RAG)
     """
     logger.info("processing_question", question=question[:100])
+    _t0 = time.time()  # Governance elapsed_ms için zamanlama
     
     # 1. Akıllı yönlendirme
     context = decide(question)
@@ -502,11 +504,40 @@ async def process_question(
     governance_data = None
     if GOVERNANCE_AVAILABLE and governance_engine and llm_answer and not llm_answer.startswith("[Hata]"):
         try:
+            _elapsed_ms = (time.time() - _t0) * 1000
+            
+            # Kullanılan modülleri topla
+            _modules_invoked = []
+            if relevant_docs:
+                _modules_invoked.append("rag")
+            if web_results:
+                _modules_invoked.append("web_search")
+            if tool_results:
+                _modules_invoked.append("tool_calling")
+            if structured_data:
+                _modules_invoked.append("structured_output")
+            if reflection_data:
+                _modules_invoked.append("reflection")
+            if pipeline_data:
+                _modules_invoked.append("agent_pipeline")
+            
+            # Reasoning adımlarını topla
+            _reasoning_steps = []
+            if reflection_data and isinstance(reflection_data, dict):
+                _reasoning_steps = reflection_data.get("issues", [])
+            
+            # Model adını al
+            _model_name = getattr(ollama_client, 'model', 'unknown')
+            
             gov_record = governance_engine.evaluate(
                 question=question,
                 answer=llm_answer,
                 mode=context.get("mode", "Sohbet"),
                 confidence=dynamic_confidence * 100 if dynamic_confidence <= 1 else dynamic_confidence,
+                elapsed_ms=_elapsed_ms,
+                model_name=_model_name,
+                modules_invoked=_modules_invoked,
+                reasoning_steps=_reasoning_steps,
             )
             if gov_record.alert_triggered:
                 alert_text = format_governance_alert(gov_record)
@@ -517,8 +548,17 @@ async def process_question(
                 "bias_score": gov_record.bias_score,
                 "drift_detected": gov_record.drift_detected,
                 "alert": gov_record.alert_reason if gov_record.alert_triggered else None,
+                "compliance_score": getattr(gov_record, 'compliance_score', None),
+                "trace_id": getattr(gov_record, 'trace_id', None),
+                "drift_types": getattr(gov_record, 'drift_types', []),
+                "policy_violations": getattr(gov_record, 'policy_violations', []),
+                "risk_level": getattr(gov_record, 'risk_level', None) if hasattr(gov_record, 'risk_level') else None,
             }
-            logger.info("governance_evaluated", bias=gov_record.bias_score, drift=gov_record.drift_detected)
+            logger.info("governance_evaluated", 
+                       bias=gov_record.bias_score, 
+                       drift=gov_record.drift_detected,
+                       compliance=getattr(gov_record, 'compliance_score', None),
+                       trace_id=getattr(gov_record, 'trace_id', None))
         except Exception as e:
             logger.debug("governance_skipped", error=str(e))
     

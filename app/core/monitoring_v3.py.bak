@@ -1,20 +1,14 @@
-"""Gelişmiş Monitoring & Telemetry — v2.0.0
+"""Gelişmiş Monitoring & Telemetry — Sistem İzleme ve Uyarı
 
-Enterprise-grade sistem izleme ve uyarı:
-
-- GPU kullanımı (Ollama / nvidia-smi)
-- API yanıt süresi istatistikleri (percentile)
+Mevcut CPU/RAM/Disk izlemeyi güçlendirir:
+- GPU kullanımı (Ollama üzerinden veya nvidia-smi)
 - Hata oranı takibi (error rate)
+- API yanıt süresi istatistikleri (percentile)
 - Uyarı sistemi (threshold-based alerts)
 - Sağlık puanı (health score)
-- ★ Statistical anomaly detection (z-score, spike detection)
-- ★ SLA monitoring (uptime, response time SLA)
-- ★ Performance degradation trending
-- ★ Anomaly event log
 """
 
 import json
-import math
 import time
 import subprocess
 import os
@@ -34,7 +28,6 @@ logger = structlog.get_logger()
 
 _ALERTS_FILE = Path("data/monitoring_alerts.json")
 _METRICS_FILE = Path("data/monitoring_metrics.json")
-_SLA_FILE = Path("data/monitoring_sla.json")
 
 
 def _utcnow_str() -> str:
@@ -98,255 +91,6 @@ def get_gpu_info() -> Dict:
     return gpu_info
 
 
-# ── Statistical Anomaly Detection ───────────────────────────────
-
-class AnomalyDetector:
-    """İstatistiksel anomali tespiti — z-score, rolling average, spike detection."""
-
-    ZSCORE_THRESHOLD = 3.0
-    SPIKE_MULTIPLIER = 3.0
-
-    def __init__(self, window: int = 100):
-        self._response_times: deque[float] = deque(maxlen=window)
-        self._error_rates: deque[float] = deque(maxlen=window)
-        self._anomaly_log: deque[Dict] = deque(maxlen=200)
-        self._window = window
-
-    def record_response_time(self, duration_ms: float):
-        """Yanıt süresini kaydet ve anomali kontrol et."""
-        self._response_times.append(duration_ms)
-        anomaly = self._check_zscore(list(self._response_times), duration_ms, "response_time")
-        if anomaly:
-            self._anomaly_log.append(anomaly)
-            logger.warning("anomaly_detected", type="response_time", value=duration_ms,
-                           z_score=anomaly.get("z_score"))
-
-    def record_error_rate(self, rate: float):
-        """Hata oranını kaydet ve anomali kontrol et."""
-        self._error_rates.append(rate)
-        anomaly = self._check_zscore(list(self._error_rates), rate, "error_rate")
-        if anomaly:
-            self._anomaly_log.append(anomaly)
-            logger.warning("anomaly_detected", type="error_rate", value=rate,
-                           z_score=anomaly.get("z_score"))
-
-    def _check_zscore(self, data: list, current: float, metric: str) -> Optional[Dict]:
-        """Z-score anomali tespiti."""
-        if len(data) < 10:
-            return None
-        mean = sum(data) / len(data)
-        variance = sum((x - mean) ** 2 for x in data) / len(data)
-        std = math.sqrt(variance) if variance > 0 else 0
-        if std == 0:
-            return None
-        z = abs(current - mean) / std
-        if z >= self.ZSCORE_THRESHOLD:
-            return {
-                "type": metric,
-                "value": round(current, 2),
-                "mean": round(mean, 2),
-                "std": round(std, 2),
-                "z_score": round(z, 2),
-                "severity": "critical" if z >= 4.0 else "warning",
-                "timestamp": _utcnow_str(),
-            }
-        return None
-
-    def detect_spike(self, data: list[float]) -> Optional[Dict]:
-        """Son değerin rolling average'a göre ani spike tespiti."""
-        if len(data) < 5:
-            return None
-        rolling_avg = sum(data[-5:-1]) / 4 if len(data) >= 5 else sum(data[:-1]) / max(len(data) - 1, 1)
-        current = data[-1]
-        if rolling_avg > 0 and current / rolling_avg >= self.SPIKE_MULTIPLIER:
-            return {
-                "type": "spike",
-                "current": round(current, 2),
-                "rolling_avg": round(rolling_avg, 2),
-                "multiplier": round(current / rolling_avg, 2),
-                "timestamp": _utcnow_str(),
-            }
-        return None
-
-    def get_anomaly_log(self, last_n: int = 50) -> List[Dict]:
-        return list(self._anomaly_log)[-last_n:]
-
-    def get_anomaly_stats(self) -> Dict:
-        log = list(self._anomaly_log)
-        if not log:
-            return {"total": 0, "last_hour": 0}
-        cutoff = time.time() - 3600
-        recent = [a for a in log if a.get("timestamp", "") > _utcnow_str()]
-        by_type = {}
-        for a in log:
-            t = a.get("type", "unknown")
-            by_type[t] = by_type.get(t, 0) + 1
-        return {
-            "total": len(log),
-            "last_hour": len(recent),
-            "by_type": by_type,
-            "latest": log[-1] if log else None,
-        }
-
-
-# ── SLA Monitoring ──────────────────────────────────────────────
-
-class SLAMonitor:
-    """SLA hedeflerini izle: uptime, yanıt süresi, hata oranı."""
-
-    DEFAULT_TARGETS = {
-        "uptime_percent": 99.5,
-        "response_time_p95_ms": 10000,
-        "response_time_p99_ms": 30000,
-        "error_rate_percent": 2.0,
-        "max_downtime_minutes_per_day": 7.2,  # %99.5 uptime = 7.2 dk/gün
-    }
-
-    def __init__(self):
-        self._targets = self.DEFAULT_TARGETS.copy()
-        self._uptime_checks: deque[Dict] = deque(maxlen=1440)  # 24 saat @ 1/dk
-        self._start_time = time.time()
-        self._downtime_windows: list[Dict] = []
-        self._load_sla()
-
-    def _load_sla(self):
-        if _SLA_FILE.exists():
-            try:
-                data = json.loads(_SLA_FILE.read_text(encoding="utf-8"))
-                self._targets.update(data.get("targets", {}))
-            except (json.JSONDecodeError, OSError):
-                pass
-
-    def _save_sla(self):
-        _SLA_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _SLA_FILE.write_text(json.dumps({
-            "targets": self._targets,
-            "last_updated": _utcnow_str(),
-        }, indent=2, ensure_ascii=False), encoding="utf-8")
-
-    def record_health_check(self, is_healthy: bool):
-        """Dakikalık sağlık kontrolü kaydet."""
-        self._uptime_checks.append({
-            "healthy": is_healthy,
-            "timestamp": time.time(),
-        })
-
-    def get_uptime_percent(self, last_hours: int = 24) -> float:
-        """Son N saatteki uptime yüzdesini hesapla."""
-        cutoff = time.time() - (last_hours * 3600)
-        checks = [c for c in self._uptime_checks if c["timestamp"] > cutoff]
-        if not checks:
-            return 100.0
-        healthy = sum(1 for c in checks if c["healthy"])
-        return round(healthy / len(checks) * 100, 2)
-
-    def check_sla_compliance(self, metrics_collector: Optional['MetricsCollector'] = None) -> Dict:
-        """Mevcut SLA uyumluluğunu kontrol et."""
-        result: Dict[str, Any] = {
-            "compliant": True,
-            "violations": [],
-            "targets": self._targets,
-            "timestamp": _utcnow_str(),
-        }
-
-        # Uptime
-        uptime = self.get_uptime_percent(24)
-        result["uptime_24h"] = uptime
-        if uptime < self._targets["uptime_percent"]:
-            result["compliant"] = False
-            result["violations"].append({
-                "metric": "uptime",
-                "target": self._targets["uptime_percent"],
-                "actual": uptime,
-                "message": f"Uptime %{uptime} < hedef %{self._targets['uptime_percent']}",
-            })
-
-        # Yanıt süresi & Hata oranı
-        if metrics_collector:
-            stats = metrics_collector.get_response_time_stats()
-            if "p95_ms" in stats:
-                p95 = stats["p95_ms"]
-                if p95 > self._targets["response_time_p95_ms"]:
-                    result["compliant"] = False
-                    result["violations"].append({
-                        "metric": "response_time_p95",
-                        "target": self._targets["response_time_p95_ms"],
-                        "actual": p95,
-                        "message": f"P95 {p95:.0f}ms > hedef {self._targets['response_time_p95_ms']}ms",
-                    })
-                result["response_time_p95"] = p95
-
-            error_data = metrics_collector.get_error_rate(last_minutes=60)
-            er = error_data["error_rate_percent"]
-            if er > self._targets["error_rate_percent"]:
-                result["compliant"] = False
-                result["violations"].append({
-                    "metric": "error_rate",
-                    "target": self._targets["error_rate_percent"],
-                    "actual": er,
-                    "message": f"Hata oranı %{er} > hedef %{self._targets['error_rate_percent']}",
-                })
-            result["error_rate"] = er
-
-        return result
-
-    def update_targets(self, new_targets: Dict) -> Dict:
-        """SLA hedeflerini güncelle."""
-        self._targets.update(new_targets)
-        self._save_sla()
-        return self._targets
-
-
-# ── Performance Degradation Tracker ─────────────────────────────
-
-class PerformanceTrend:
-    """Performans degradasyonu trendini izle."""
-
-    def __init__(self, window: int = 200):
-        self._samples: deque[Dict] = deque(maxlen=window)
-
-    def record(self, duration_ms: float, endpoint: str = ""):
-        self._samples.append({
-            "duration_ms": duration_ms,
-            "endpoint": endpoint,
-            "timestamp": time.time(),
-        })
-
-    def get_trend(self, last_n: int = 100) -> Dict:
-        """Son N örnek üzerinden performans trendi hesapla."""
-        samples = list(self._samples)[-last_n:]
-        if len(samples) < 10:
-            return {"status": "insufficient_data", "samples": len(samples)}
-
-        times = [s["duration_ms"] for s in samples]
-        mid = len(times) // 2
-        first_avg = sum(times[:mid]) / mid
-        second_avg = sum(times[mid:]) / (len(times) - mid)
-
-        if first_avg > 0:
-            change_pct = (second_avg - first_avg) / first_avg * 100
-        else:
-            change_pct = 0
-
-        if change_pct > 30:
-            status = "degrading"
-        elif change_pct > 10:
-            status = "slight_increase"
-        elif change_pct < -10:
-            status = "improving"
-        else:
-            status = "stable"
-
-        return {
-            "status": status,
-            "first_half_avg_ms": round(first_avg, 2),
-            "second_half_avg_ms": round(second_avg, 2),
-            "change_percent": round(change_pct, 1),
-            "samples": len(samples),
-            "overall_avg_ms": round(sum(times) / len(times), 2),
-        }
-
-
 # ── Metrik Toplama ──────────────────────────────────────────────
 
 class MetricsCollector:
@@ -357,10 +101,6 @@ class MetricsCollector:
         self._errors: deque = deque(maxlen=max_samples)
         self._requests: deque = deque(maxlen=max_samples)
         self._start_time = time.time()
-
-        # v2.0 alt sistemler
-        self._anomaly = AnomalyDetector()
-        self._perf_trend = PerformanceTrend()
 
     def record_request(self, endpoint: str, method: str, status_code: int, duration_ms: float):
         """API isteğini kaydet."""
@@ -378,14 +118,10 @@ class MetricsCollector:
         if status_code >= 400:
             self._errors.append(entry)
 
-        # v2.0: anomaly & trend tracking
-        self._anomaly.record_response_time(duration_ms)
-        self._perf_trend.record(duration_ms, endpoint)
-
     def get_response_time_stats(self, last_minutes: int = 60) -> Dict:
         """Yanıt süresi istatistikleri (percentile)."""
         cutoff = time.time() - (last_minutes * 60)
-        times = [r for r in self._response_times if True]
+        times = [r for r in self._response_times if True]  # all samples
 
         if not times:
             return {"count": 0}
@@ -413,6 +149,7 @@ class MetricsCollector:
         total = len(recent_requests)
         errors = len(recent_errors)
 
+        # Hata dağılımı
         error_codes = {}
         for e in recent_errors:
             code = str(e["status_code"])
@@ -431,6 +168,7 @@ class MetricsCollector:
         cutoff = time.time() - (last_minutes * 60)
         recent = [r for r in self._requests if r["timestamp"] > cutoff]
 
+        # Endpoint dağılımı
         endpoint_counts = {}
         for r in recent:
             ep = r["endpoint"]
@@ -442,16 +180,6 @@ class MetricsCollector:
             "top_endpoints": dict(sorted(endpoint_counts.items(), key=lambda x: -x[1])[:10]),
             "period_minutes": last_minutes,
         }
-
-    # v2.0 API'ler
-    def get_anomaly_log(self, last_n: int = 50) -> List[Dict]:
-        return self._anomaly.get_anomaly_log(last_n)
-
-    def get_anomaly_stats(self) -> Dict:
-        return self._anomaly.get_anomaly_stats()
-
-    def get_performance_trend(self, last_n: int = 100) -> Dict:
-        return self._perf_trend.get_trend(last_n)
 
 
 # ── Uyarı Sistemi ──────────────────────────────────────────────
@@ -470,10 +198,10 @@ class AlertManager:
         "memory_critical": 95,
         "disk_warning": 85,
         "disk_critical": 95,
-        "error_rate_warning": 5,
-        "error_rate_critical": 15,
-        "response_time_warning": 5000,
-        "response_time_critical": 30000,
+        "error_rate_warning": 5,     # %5
+        "error_rate_critical": 15,   # %15
+        "response_time_warning": 5000,   # 5 saniye
+        "response_time_critical": 30000, # 30 saniye
         "gpu_memory_warning": 85,
         "gpu_temp_warning": 80,
     }
@@ -522,38 +250,41 @@ class AlertManager:
         new_alerts = []
 
         if PSUTIL_AVAILABLE:
+            # CPU
             cpu = psutil.cpu_percent(interval=1)
             if cpu >= self._thresholds["cpu_critical"]:
-                self.fire_alert("cpu", f"CPU kritik: %{cpu}", self.SEVERITY_CRITICAL, cpu, self._thresholds["cpu_critical"])
+                self.fire_alert("cpu", f"CPU kullanımı kritik: %{cpu}", self.SEVERITY_CRITICAL, cpu, self._thresholds["cpu_critical"])
                 new_alerts.append("cpu_critical")
             elif cpu >= self._thresholds["cpu_warning"]:
-                self.fire_alert("cpu", f"CPU yüksek: %{cpu}", self.SEVERITY_WARNING, cpu, self._thresholds["cpu_warning"])
+                self.fire_alert("cpu", f"CPU kullanımı yüksek: %{cpu}", self.SEVERITY_WARNING, cpu, self._thresholds["cpu_warning"])
                 new_alerts.append("cpu_warning")
 
+            # Memory
             mem = psutil.virtual_memory().percent
             if mem >= self._thresholds["memory_critical"]:
-                self.fire_alert("memory", f"RAM kritik: %{mem}", self.SEVERITY_CRITICAL, mem, self._thresholds["memory_critical"])
+                self.fire_alert("memory", f"RAM kullanımı kritik: %{mem}", self.SEVERITY_CRITICAL, mem, self._thresholds["memory_critical"])
                 new_alerts.append("memory_critical")
             elif mem >= self._thresholds["memory_warning"]:
-                self.fire_alert("memory", f"RAM yüksek: %{mem}", self.SEVERITY_WARNING, mem, self._thresholds["memory_warning"])
+                self.fire_alert("memory", f"RAM kullanımı yüksek: %{mem}", self.SEVERITY_WARNING, mem, self._thresholds["memory_warning"])
                 new_alerts.append("memory_warning")
 
+            # Disk
             disk = psutil.disk_usage("/").percent
             if disk >= self._thresholds["disk_critical"]:
-                self.fire_alert("disk", f"Disk kritik: %{disk}", self.SEVERITY_CRITICAL, disk, self._thresholds["disk_critical"])
+                self.fire_alert("disk", f"Disk kullanımı kritik: %{disk}", self.SEVERITY_CRITICAL, disk, self._thresholds["disk_critical"])
                 new_alerts.append("disk_critical")
             elif disk >= self._thresholds["disk_warning"]:
-                self.fire_alert("disk", f"Disk yüksek: %{disk}", self.SEVERITY_WARNING, disk, self._thresholds["disk_warning"])
+                self.fire_alert("disk", f"Disk kullanımı yüksek: %{disk}", self.SEVERITY_WARNING, disk, self._thresholds["disk_warning"])
                 new_alerts.append("disk_warning")
 
         # GPU
         gpu_info = get_gpu_info()
         for gpu in gpu_info.get("gpus", []):
             if "temperature_c" in gpu and gpu["temperature_c"] >= self._thresholds["gpu_temp_warning"]:
-                self.fire_alert("gpu_temp", f"GPU sıcaklığı: {gpu['temperature_c']}°C", self.SEVERITY_WARNING)
+                self.fire_alert("gpu_temp", f"GPU sıcaklığı yüksek: {gpu['temperature_c']}°C", self.SEVERITY_WARNING)
                 new_alerts.append("gpu_temp")
             if "memory_utilization_percent" in gpu and gpu["memory_utilization_percent"] >= self._thresholds["gpu_memory_warning"]:
-                self.fire_alert("gpu_memory", f"GPU bellek: %{gpu['memory_utilization_percent']}", self.SEVERITY_WARNING)
+                self.fire_alert("gpu_memory", f"GPU bellek kullanımı yüksek: %{gpu['memory_utilization_percent']}", self.SEVERITY_WARNING)
                 new_alerts.append("gpu_memory")
 
         # Error rate
@@ -567,15 +298,10 @@ class AlertManager:
                 self.fire_alert("error_rate", f"Hata oranı yüksek: %{er}", self.SEVERITY_WARNING, er, self._thresholds["error_rate_warning"])
                 new_alerts.append("error_rate_warning")
 
-            # v2.0: Anomaly based alerts
-            anomaly_stats = metrics_collector.get_anomaly_stats()
-            if anomaly_stats.get("latest") and anomaly_stats["latest"].get("severity") == "critical":
-                self.fire_alert("anomaly", f"İstatistiksel anomali: {anomaly_stats['latest']['type']}", self.SEVERITY_CRITICAL)
-                new_alerts.append("anomaly_critical")
-
         return new_alerts
 
     def acknowledge_alert(self, alert_id: str):
+        """Uyarıyı onayla (acknowledged)."""
         for a in self._alerts:
             if a["id"] == alert_id:
                 a["acknowledged"] = True
@@ -584,12 +310,14 @@ class AlertManager:
         return False
 
     def get_active_alerts(self, severity: Optional[str] = None) -> List[Dict]:
+        """Onaylanmamış aktif uyarıları döndür."""
         active = [a for a in self._alerts if not a["acknowledged"]]
         if severity:
             active = [a for a in active if a["severity"] == severity]
         return active[-50:]
 
     def get_all_alerts(self, limit: int = 100) -> List[Dict]:
+        """Tüm uyarıları döndür."""
         return self._alerts[-limit:]
 
 
@@ -605,21 +333,32 @@ def calculate_health_score() -> Dict:
         mem = psutil.virtual_memory().percent
         disk = psutil.disk_usage("/").percent
 
-        if cpu > 90: score -= 25
-        elif cpu > 70: score -= 15
-        elif cpu > 50: score -= 5
+        # CPU (maks -25 puan)
+        if cpu > 90:
+            score -= 25
+        elif cpu > 70:
+            score -= 15
+        elif cpu > 50:
+            score -= 5
         details["cpu_percent"] = cpu
 
-        if mem > 90: score -= 25
-        elif mem > 70: score -= 15
-        elif mem > 50: score -= 5
+        # RAM (maks -25 puan)
+        if mem > 90:
+            score -= 25
+        elif mem > 70:
+            score -= 15
+        elif mem > 50:
+            score -= 5
         details["memory_percent"] = mem
 
-        if disk > 90: score -= 20
-        elif disk > 70: score -= 10
+        # Disk (maks -20 puan)
+        if disk > 90:
+            score -= 20
+        elif disk > 70:
+            score -= 10
         details["disk_percent"] = disk
 
-    # LLM durumu
+    # LLM durumu (maks -20 puan)
     try:
         import httpx
         resp = httpx.get("http://localhost:11434/api/tags", timeout=3)
@@ -632,7 +371,7 @@ def calculate_health_score() -> Dict:
         score -= 20
         details["llm_status"] = "unreachable"
 
-    # GPU
+    # GPU (bonus +10)
     gpu = get_gpu_info()
     if gpu["available"]:
         details["gpu_available"] = True
@@ -651,7 +390,7 @@ def calculate_health_score() -> Dict:
 
 
 def get_full_telemetry(metrics_collector: Optional['MetricsCollector'] = None) -> Dict:
-    """Tam telemetri raporu — v2.0 anomaly + SLA + trend dahil."""
+    """Tam telemetri raporu."""
     result = {
         "health": calculate_health_score(),
         "gpu": get_gpu_info(),
@@ -681,17 +420,10 @@ def get_full_telemetry(metrics_collector: Optional['MetricsCollector'] = None) -
             "error_rate": metrics_collector.get_error_rate(),
             "throughput": metrics_collector.get_throughput(),
         }
-        # v2.0 eklentileri
-        result["anomaly"] = metrics_collector.get_anomaly_stats()
-        result["performance_trend"] = metrics_collector.get_performance_trend()
-
-    # SLA
-    result["sla"] = sla_monitor.check_sla_compliance(metrics_collector)
 
     return result
 
 
-# ── Singleton Instances ─────────────────────────────────────────
+# Singleton instances
 metrics_collector = MetricsCollector()
 alert_manager = AlertManager()
-sla_monitor = SLAMonitor()

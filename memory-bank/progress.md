@@ -14,23 +14,26 @@
 - [x] v3.1.0 — Monte Carlo + Decision Ranking + Governance + Experiment Layer
 - [x] v3.2.0 — Graph Impact Mapping (26 düğüm, 35 kenar)
 - [x] v3.3.0 — ARIMA/SARIMA Forecast + Gelişmiş Dashboard
+- [x] v3.4.0 — 6 Yeni Modül + Dashboard v2
+- [x] v3.5.0 — Analiz Motoru İyileştirme (13 analiz tipi)
+- [x] v3.5.1 — Pro Seviye Analiz (5-model tahmin, istatistiksel testler)
+- [x] v3.8.0 — CEO-Tier Analiz (Executive Health + Bottleneck Engine)
+- [x] v3.9.0 — Insight Engine + Paralel Agent + Tekstil KB genişletme + CEO Dashboard
+- [x] v3.9.1 — Kod Bloğu Kopyalama Fix (MessageContent.tsx bileşeni)
+- [x] v3.9.2 — Seçip Sor özelliği (ChatGPT tarzı quote & ask)
 
-### v3.3.0 Detay (12 Şubat 2026)
-- [x] ARIMA tahmin motoru (AIC bazlı auto-order, ADF durağanlık testi)
-- [x] SARIMA mevsimsel tahmin (aylık/çeyreklik periyot)
-- [x] auto_forecast() ARIMA/SARIMA entegrasyonu
-- [x] conf_int() uyumluluk fix (ndarray vs DataFrame)
-- [x] Dashboard: AI Modül Grid (18 modül, aktif/pasif)
-- [x] Dashboard: AI Governance Paneli (bias, drift, güven, uyarılar)
-- [x] Dashboard: Departman Dağılımı (pie chart + tablo)
-- [x] Dashboard: Disk kullanımı progress bar
-- [x] 3 yeni backend endpoint (ai-modules, governance, dept-queries)
-- [x] statsmodels>=0.14.0 bağımlılık eklendi
-- [x] Deploy + doğrulama tamamlandı
+### v3.9.x Detay (13 Şubat 2026)
+- [x] insight_engine.py — 7 otomatik içgörü türü + TEXTILE_THRESHOLDS
+- [x] textile_knowledge.py genişletme: 200 → 500+ terim
+- [x] agent_pipeline.py paralel grup yürütme
+- [x] CEO Dashboard (RadarChart + İçgörü + Darboğaz panelleri)
+- [x] MessageContent.tsx — kod bloğu ayırma + Kopyala butonu
+- [x] Ask.tsx — Seçip Sor popup + alıntı chip + submit entegrasyonu
+- [x] Deploy + doğrulama tamamlandı (commit 0986e99)
 
 ## Doing
 
-- [ ] GitHub commit & push (v3.3.0)
+- [ ] GitHub commit & push (v3.9.2)
 
 ## Next
 
@@ -41,4 +44,4 @@
 
 > Her deploy öncesi `APP_VERSION` artırılmalı!
 > - `app/config.py` + `frontend/src/constants.ts`
-> - Güncel versiyon: **v3.3.0**
+> - Güncel versiyon: **v3.9.2**

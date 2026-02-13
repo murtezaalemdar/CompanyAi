@@ -7,7 +7,7 @@ Tekstil sektörü odaklı, her bölümün kendi bilgi tabanı ve yetkilendirmesi
 ## Sunucu
 - **IP:** 192.168.0.12, Ubuntu 22.04, Intel Xeon 4316 16-core, **64GB RAM**, no GPU
 - **LLM:** Ollama qwen2.5:72b (48GB in RAM, 0 swap), ~2 tok/s CPU-only
-- **Versiyon:** v3.5.1
+- **Versiyon:** v3.9.2
 
 ## Önemli Kararlar
 - Tamamen lokal LLM (Ollama + qwen2.5:72b) — GPU yok, CPU-only (Xeon Silver 4316), 64GB RAM
@@ -335,9 +335,36 @@ c478097 feat: Gorsel arama sonuclari karti + rich_data liste destegi
 
 ---
 
+### 13 Şubat 2026 — v3.9.0 Insight Engine + CEO Dashboard (commit `0986e99`)
+
+**Yeni Dosyalar:**
+- `app/core/insight_engine.py` (~280 satır) — 7 otomatik içgörü türü (korelasyon, anomali, pareto, yoğunlaşma, trend, eşik, karşılaştırma), TEXTILE_THRESHOLDS (15 sektör metriği)
+- `frontend/src/components/MessageContent.tsx` (~230 satır) — Kod bloğu ayrıştırma + Kopyala butonu + satır içi markdown
+
+**Güncellenen Dosyalar:**
+- `app/core/textile_knowledge.py` — 200 → 500+ terim (penye, örme, baskı, nakış, tedarik zinciri, sürdürülebilirlik)
+- `app/core/agent_pipeline.py` — `execute_parallel_pipeline()`, PARALLEL_GROUPS: DataValidator → [Statistical ∥ Risk] → Financial → Strategy
+- `app/api/routes/admin.py` — 3 yeni endpoint: `/insights/demo`, `/insights/analyze`, `/ceo/dashboard`
+- `frontend/src/pages/Dashboard.tsx` (~1350 satır) — RadarChart, İçgörü kartları, Darboğaz özeti
+- `frontend/src/pages/Ask.tsx` (~1575 satır) — MessageContent import, Seçip Sor popup (fixed z-[9999]), alıntı chip, submit entegrasyonu
+
+**v3.9.1 — Kod Kopyalama Fix:**
+- `MessageContent.tsx` bileşeni: `parseContent()` satır satır tarayıcı (regex yerine), kapatılmamış ``` bloklarını otomatik kapatır
+- `CodeBlock`: koyu arka plan, dil etiketi, "Kopyala" butonu (`navigator.clipboard.writeText` + `execCommand` fallback)
+- `renderInlineMarkdown()`: **kalın**, *italik*, `satır içi kod`, h1-h3
+
+**v3.9.2 — Seçip Sor (Quote & Ask):**
+- Metin seçim popup: `fixed` konumlandırma `z-[9999]`, Quote+ArrowRight ikonları
+- Alıntı chip: input üstünde italik alıntı + X kapat butonu
+- Submit: `"alıntı" — soru` formatında gönderim
+- Fix: `absolute` → `fixed` (overflow-y-auto container clipping sorunu)
+
+---
+
 ## Commit Geçmişi (güncel)
 | Commit | Açıklama |
 |--------|----------|
+| `0986e99` | v3.9.0: Insight Engine + Paralel Agent + CEO Dashboard |
 | `f76c7e0` | fix: Dashboard production_model obje render hatası |
 | `b849d6d` | v3.5.1: Pro analiz — 5-model tahmin, Pearson+Spearman, normallik, t-test/ANOVA, Grubbs |
 | `d65dae6` | v3.5.0: Analiz motoru iyileştirme + 6 yeni analiz tipi |
@@ -350,12 +377,17 @@ c478097 feat: Gorsel arama sonuclari karti + rich_data liste destegi
 
 ## Önemli Dosyalar (güncel)
 - `app/core/document_analyzer.py` (~2033 satır) — 13 analiz tipi, pro istatistiksel motor
+- `app/core/insight_engine.py` (~280 satır) — 7 otomatik içgörü türü + tekstil eşikleri
 - `app/core/forecasting.py` (884 satır) — ARIMA, SARIMA, Holt-Winters, SES
-- `app/core/engine.py` — Ana koordinasyon motoru, 24 modül
+- `app/core/engine.py` — Ana koordinasyon motoru, 24+ modül
+- `app/core/textile_knowledge.py` — 500+ tekstil sektör terimi
+- `app/core/agent_pipeline.py` — Paralel multi-agent pipeline
 - `app/core/model_registry.py` — ML model versiyonlama
 - `app/core/monitoring.py` — Sistem sağlığı izleme
 - `app/core/explainability.py` — XAI açıklamalar
-- `frontend/src/pages/Dashboard.tsx` (871 satır) — 24-modül admin dashboard
+- `frontend/src/components/MessageContent.tsx` (~230 satır) — Kod bloğu + markdown render
+- `frontend/src/pages/Ask.tsx` (~1575 satır) — AI chat + seçip sor + alıntı
+- `frontend/src/pages/Dashboard.tsx` (~1350 satır) — CEO dashboard + RadarChart
 - `frontend/src/services/api.ts` — Backend API servisleri
 
 ## Bağımlılıklar (önemli eklemeler)

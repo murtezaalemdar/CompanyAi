@@ -2,7 +2,7 @@
 
 > **Proje Adı:** Kurumsal Yapay Zeka Asistanı – LOCAL & ÖĞRENEN  
 > **Amaç:** Kurumsal kullanım için tasarlanmış, tamamen lokal çalışan ve öğrenen bir AI asistan sistemi.  
-> **Son Güncelleme:** 12 Şubat 2026 (v3.3.2 — ARIMA/SARIMA + Admin UI + Chat UX + DesktopBanner Fix)
+> **Son Güncelleme:** 13 Şubat 2026 (v3.9.2 — Kod Kopyalama + Seçip Sor + Insight Engine + CEO Dashboard)
 
 ---
 
@@ -78,6 +78,7 @@ CompanyAi/
 │   │       ├── FileUploadModal.tsx    # Dosya + kamera yükleme modal'ı
 │   │       ├── Layout.tsx            # Sidebar navigasyon
 │   │       ├── QuickExportButtons.tsx # Her mesajdan export butonları
+│   │       ├── MessageContent.tsx     # ★ Kod bloğu render + kopyalama butonu (v3.9.1)
 │   │       ├── VoiceChat.tsx          # ★ Tam ekran sesli sohbet overlay
 │   │       └── WeatherCard.tsx        # Hava durumu kartı
 │   │   │   ├── AndroidManifest.xml   # HTTP izni + networkSecurityConfig
@@ -1212,3 +1213,65 @@ cd frontend && npx cap sync
 - Multi-Agent Pipeline: Birden fazla uzman ajanın sıralı çalışması
 - Scenario Engine: What-if senaryo analizi
 - `reflection.py`, `agent_pipeline.py`, `scenario_engine.py`
+
+---
+
+### 12 Şubat 2026 — v3.8.0: CEO-Tier Analiz & Logo Fix
+
+**Yapılan işler:**
+- Executive Health Score (4 boyutlu radar: operasyonel, finansal, insan kaynakları, stratejik)
+- Bottleneck Engine (darboğaz tespiti: süre, verimlilik, maliyet analizi)
+- Dashboard'a CEO panelleri eklendi (sağlık skoru + darboğaz kartı)
+- Logo tıklama fix (commit `5eeb383`)
+- Deploy başarılı
+
+### 13 Şubat 2026 — v3.9.0: Insight Engine + Paralel Agent + Genişletilmiş Bilgi Tabanı (commit `0986e99`)
+
+**Backend — Yeni modüller:**
+- `app/core/insight_engine.py` (~280 satır) — 7 otomatik içgörü türü:
+  - Korelasyon, Anomali, Pareto (80/20), Konsantrasyon, Trend, Eşik Aşımı, Karşılaştırma
+  - `TEXTILE_THRESHOLDS` — 15 endüstri standardı metrik
+- `app/core/textile_knowledge.py` — 200 → 500+ terim genişletme:
+  - Penye/örme, baskı türleri (dijital, rotasyon, sublimation), nakış
+  - Tedarik zinciri (fason, OEM, ODM, MOQ, lead time, incoterms)
+  - Sürdürülebilirlik (GRS, BCI, Higg, karbon/su ayak izi, ZDHC)
+  - Makine/ekipman (rapier, air jet, jet boya, jigger, pad-batch)
+  - Kalite (SPC, ISO 9001, Oeko-Tex, GOTS)
+  - Apre (yakma, haşlama, ağartma, su itici, anti-statik, wrinkle free)
+- `app/core/agent_pipeline.py` — Paralel grup yürütme:
+  - `execute_parallel_pipeline()` + `PARALLEL_GROUPS`
+  - Sıralama: DataValidator → [Statistical ∥ Risk] → Financial → Strategy
+
+**Backend — Yeni endpoint'ler:**
+- `GET /api/admin/insights/demo` — Demo DataFrame ile insight
+- `POST /api/admin/insights/analyze` — Kullanıcı verisiyle insight
+- `GET /api/admin/ceo/dashboard` — Kombine CEO dashboard (health+bottleneck+insights+24h queries)
+
+**Frontend:**
+- `Dashboard.tsx` — CEO panelleri: RadarChart (4 boyut), İçgörü kartları (severity renkli), Darboğaz özeti
+- `api.ts` — `getInsightDemo`, `analyzeInsights`, `getCeoDashboard` metotları
+
+### 13 Şubat 2026 — v3.9.1: Kod Bloğu Kopyalama (Code Copy) Fix
+
+**Sorun:** Ask.tsx'te mesajlar `whitespace-pre-wrap` ile düz metin olarak render ediliyordu. Kod blokları ayrılmıyor, kopyalama butonu yoktu.
+
+**Çözüm:**
+- `frontend/src/components/MessageContent.tsx` (~230 satır) oluşturuldu:
+  - `parseContent()` — ` ```lang ... ``` ` kalıplarını ayırır (kapanmamış blokları da destekler)
+  - `CodeBlock` — Karanlık arka plan + dil etiketi + "Kopyala" butonu (`navigator.clipboard.writeText`)
+  - `renderInlineMarkdown()` — `**bold**`, `*italic*`, `` `inline code` ``, heading desteği
+  - Kopyalandı animasyonu (2 saniye geri bildirim)
+- `Ask.tsx` — `<div className="whitespace-pre-wrap">{msg.content}</div>` → `<MessageContent content={msg.content} role={msg.role} />`
+
+### 13 Şubat 2026 — v3.9.2: Seçip Sor (ChatGPT tarzı Quote & Ask)
+
+**Özellik:** AI yanıtındaki metni seçip "CompanyAi'ye sor" butonu ile alıntılayarak yeni soru sorma
+
+**Çözüm — Ask.tsx'e eklenen mekanizma:**
+- `quotedText` + `selectionPopup` state'leri
+- `handleTextSelection()` — mouseup'ta seçimi algılar, mesaj alanı içindeyse popup pozisyonu hesaplar
+- `handleQuoteSelection()` — seçili metni quotedText'e aktarır, input'a odaklanır
+- **Selection Popup** — `fixed z-[9999]` pozisyonla seçimin üstünde "CompanyAi'ye sor" butonu
+- **Alıntı Chip** — Input alanı üstünde italic tırnaklı metin + X kapatma butonu
+- **Submit entegrasyonu** — Alıntı varsa soru formatı: `"seçili metin" — soru`
+- Lucide ikonları: `Quote`, `ArrowRight` eklendi

@@ -2,35 +2,26 @@
 
 ## Current Goals
 
-- ## Güncel Durum — v3.3.0 (12 Şubat 2026)
-- ### Tamamlanan İşler
-- - v3.3.0 deploy edildi — ARIMA/SARIMA Forecast + Gelişmiş Dashboard
-- - ARIMA(3,1,0) otomatik model seçimi çalışıyor (AIC bazlı grid search)
-- - Dashboard'a AI Modül Grid, Governance Panel, Departman Dağılımı eklendi
-- - 3 yeni backend endpoint: ai-modules, governance, dept-queries
-- - statsmodels>=0.14.0 bağımlılık olarak eklendi
-- ### Aktif Versiyon
-- - Backend: v3.3.0 ✅ (192.168.0.12)
-- - Frontend: v3.3.0 ✅
-- - 18 AI modülü aktif
-- ### Sonraki Adımlar
-- - ChromaDB boyut uyumsuzluğu düzeltilmeli (384-dim → 768-dim)
-- - GPU eklendiğinde LLM timeout 900s → 120s'ye düşürülebilir
-- ## ⚠️ DEPLOY KURALI
-- > **HER DEPLOY ÖNCESI VERSİYON NUMARASI ARTIRILMALIDIR!**
-- > - `app/config.py` → `APP_VERSION`
-- > - `frontend/src/constants.ts` → `APP_VERSION`
-- > - Semantic Versioning: PATCH (bug fix), MINOR (yeni özellik), MAJOR (büyük değişiklik)
+## Güncel Durum — v3.9.2 (13 Şubat 2026)
 
-## Current Blockers
+### Tamamlanan İşler
+- v3.9.0 — Insight Engine (7 otomatik içgörü türü) + Paralel Agent Pipeline + Tekstil bilgi tabanı 500+ terim + CEO Dashboard (RadarChart + İçgörüler + Darboğaz)
+- v3.9.1 — Kod Kopyalama Fix: MessageContent.tsx bileşeni (kod bloğu ayrıştırma + kopyala butonu)
+- v3.9.2 — Seçip Sor: ChatGPT tarzı metin seçip "CompanyAi'ye sor" popup + alıntı chip + submit entegrasyonu
 
-- None
+### Aktif Versiyon
+- Backend: v3.9.2 ✅ (192.168.0.12)
+- Frontend: v3.9.2 ✅
+- 24+ AI modülü aktif
+
+### Sonraki Adımlar
+- ChromaDB boyut uyumsuzluğu düzeltilmeli (384-dim → 768-dim)
+- GPU eklendiğinde LLM timeout 900s → 120s'ye düşürülebilir
+- Seçip sor özelliği test ve UX iyileştirme
 
 ## ⚠️ DEPLOY KURALI
 
-> **HER DEPLOY ÖNCESI VERİYON NUMARASI ARTIRILMALIDIR!**
->
-> - `app/config.py` → `APP_VERSION = "X.Y.Z"`
-> - `frontend/src/constants.ts` → `APP_VERSION = 'X.Y.Z'`
-> - İki dosya aynı versiyon olmalı
+> **HER DEPLOY ÖNCESI VERSİYON NUMARASI ARTIRILMALIDIR!**
+> - `app/config.py` → `APP_VERSION`
+> - `frontend/src/constants.ts` → `APP_VERSION`
 > - Semantic Versioning: PATCH (bug fix), MINOR (yeni özellik), MAJOR (büyük değişiklik)

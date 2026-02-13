@@ -42,6 +42,8 @@ import {
     Zap,
     RotateCcw,
     Square,
+    Quote,
+    ArrowRight,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useNavigate } from 'react-router-dom'
@@ -50,6 +52,7 @@ import WeatherCard from '../components/WeatherCard'
 import ImageResultsCard from '../components/ImageResultsCard'
 import ExportCard from '../components/ExportCard'
 import QuickExportButtons from '../components/QuickExportButtons'
+import MessageContent from '../components/MessageContent'
 import VoiceChat from '../components/VoiceChat'
 import { useAuth } from '../contexts/AuthContext'
 import { DEPARTMENTS }  from '../constants'
@@ -93,6 +96,11 @@ export default function Ask() {
 
     // Company logo for welcome screen
     const [companyLogo, setCompanyLogo] = useState<string | null>(null)
+
+    // Quote / "Seçip sor" — seçilen metin alıntısı
+    const [quotedText, setQuotedText] = useState<string | null>(null)
+    const [selectionPopup, setSelectionPopup] = useState<{ x: number; y: number; text: string } | null>(null)
+    const messagesContainerRef = useRef<HTMLDivElement>(null)
 
     // Voice chat mode
     const [isVoiceChatOpen, setIsVoiceChatOpen] = useState(false)
@@ -500,26 +508,91 @@ export default function Ask() {
         }
     }
 
+    // === SEÇİP SOR — metin seçim handler'ı ===
+    const handleTextSelection = useCallback(() => {
+        const selection = window.getSelection()
+        if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+            setSelectionPopup(null)
+            return
+        }
+        const text = selection.toString().trim()
+        if (text.length < 3) { setSelectionPopup(null); return }
+
+        // Seçimin mesaj alanı içinde olduğunu kontrol et
+        const container = messagesContainerRef.current
+        if (!container) { setSelectionPopup(null); return }
+        const anchorNode = selection.anchorNode
+        if (!anchorNode || !container.contains(anchorNode)) { setSelectionPopup(null); return }
+
+        const range = selection.getRangeAt(0)
+        const rect = range.getBoundingClientRect()
+
+        // Fixed pozisyon — viewport'a göre (scroll sorununu ortadan kaldırır)
+        setSelectionPopup({
+            x: rect.left + rect.width / 2,
+            y: rect.top - 10,
+            text,
+        })
+    }, [])
+
+    const handleQuoteSelection = useCallback(() => {
+        if (!selectionPopup) return
+        const truncated = selectionPopup.text.length > 300
+            ? selectionPopup.text.slice(0, 300) + '...'
+            : selectionPopup.text
+        setQuotedText(truncated)
+        setSelectionPopup(null)
+        window.getSelection()?.removeAllRanges()
+        setTimeout(() => textareaRef.current?.focus(), 50)
+    }, [selectionPopup])
+
+    // Seçim değiştiğinde popup'ı güncelle
+    useEffect(() => {
+        const onMouseUp = () => setTimeout(handleTextSelection, 10)
+        document.addEventListener('mouseup', onMouseUp)
+        return () => document.removeEventListener('mouseup', onMouseUp)
+    }, [handleTextSelection])
+
+    // Başka yere tıklayınca popup'ı kapat
+    useEffect(() => {
+        const handleMouseDown = (e: MouseEvent) => {
+            const target = e.target as HTMLElement
+            if (target.closest('.selection-popup-btn')) return
+            setTimeout(() => {
+                const sel = window.getSelection()
+                if (!sel || sel.isCollapsed) setSelectionPopup(null)
+            }, 200)
+        }
+        document.addEventListener('mousedown', handleMouseDown)
+        return () => document.removeEventListener('mousedown', handleMouseDown)
+    }, [])
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
         if ((!input.trim() && attachedFiles.length === 0) || askMutation.isPending) return
 
+        // Alıntı varsa soruya prefix olarak ekle
+        const fullQuestion = quotedText
+            ? `"${quotedText}" — ${input}`
+            : input
+
         const userMessage: Message = {
             id: Date.now().toString(),
             role: 'user',
-            content: input || (attachedFiles.length > 0 ? `[${attachedFiles.length} dosya eklendi]` : ''),
+            content: fullQuestion || (attachedFiles.length > 0 ? `[${attachedFiles.length} dosya eklendi]` : ''),
             attachments: [...attachedFiles],
         }
         setMessages((prev) => [...prev, userMessage])
 
         const query = {
-            question: input,
+            question: fullQuestion,
             files: attachedFiles.map((f) => f.file),
             department: selectedDepartment !== 'Genel' ? selectedDepartment : undefined,
         }
         setLastQuery(query)
         askMutation.mutate(query)
         setInput('')
+        setQuotedText(null)
         setAttachedFiles([])
     }
 
@@ -713,7 +786,7 @@ export default function Ask() {
                 )}
 
                 {/* Messages Area */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-6 relative">
                     {messages.length === 0 && (
                         <div className="h-full flex flex-col items-center justify-center text-center px-4 py-8 md:py-16">
                             {/* Logo + Copilot Icon */}
@@ -932,7 +1005,7 @@ export default function Ask() {
                                     </div>
                                 )}
 
-                                <div className="whitespace-pre-wrap">{msg.content}</div>
+                                <MessageContent content={msg.content} role={msg.role} />
 
                                 {/* Rich Data — Hava Durumu, Görsel Arama Kartları vb. */}
                                 {msg.rich_data && Array.isArray(msg.rich_data) && msg.rich_data.map((card: any, cardIdx: number) => (
@@ -1161,6 +1234,24 @@ export default function Ask() {
                         </div>
                     )}
 
+                    {/* Alıntı (Quote) Chip — seçili metin göstergesi */}
+                    {quotedText && (
+                        <div className="mb-2 flex items-start gap-2 px-3 py-2.5 bg-primary-500/10 border border-primary-500/20 rounded-xl animate-in slide-in-from-bottom-2 duration-200">
+                            <ArrowRight className="w-4 h-4 text-primary-400 mt-0.5 shrink-0" />
+                            <p className="flex-1 text-sm text-dark-200 line-clamp-2 italic">
+                                "{quotedText}"
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => setQuotedText(null)}
+                                className="p-0.5 hover:bg-primary-500/20 rounded-md transition-colors shrink-0"
+                                title="Alıntıyı kaldır"
+                            >
+                                <X className="w-4 h-4 text-primary-300" />
+                            </button>
+                        </div>
+                    )}
+
                     <form onSubmit={handleSubmit} className="flex items-end gap-1.5 sm:gap-3">
                         {/* Attachment Buttons */}
                         <div className="flex gap-0.5 sm:gap-1 shrink-0">
@@ -1293,6 +1384,26 @@ export default function Ask() {
                     </div>
                 </div>
             </div>
+
+            {/* Selection Popup — "CompanyAi'ye sor" (fixed, scroll-safe) */}
+            {selectionPopup && (
+                <div
+                    className="selection-popup-btn fixed z-[9999]"
+                    style={{
+                        left: `${selectionPopup.x}px`,
+                        top: `${selectionPopup.y}px`,
+                        transform: 'translate(-50%, -100%)',
+                    }}
+                >
+                    <button
+                        onClick={handleQuoteSelection}
+                        className="flex items-center gap-2 px-3.5 py-2 bg-dark-700 hover:bg-dark-600 border border-dark-500/60 rounded-xl shadow-2xl shadow-black/60 text-sm text-white font-medium transition-all hover:scale-105 whitespace-nowrap"
+                    >
+                        <Quote className="w-4 h-4 text-primary-400" />
+                        <span>CompanyAi'ye sor</span>
+                    </button>
+                </div>
+            )}
 
             {/* Voice Chat Full Screen */}
             <VoiceChat

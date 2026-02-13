@@ -12,7 +12,7 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 - **Auth:** JWT (HS256) + pbkdf2_sha256 + RBAC (Admin/Manager/User)
 - **Frontend:** React + TypeScript + Vite + Tailwind CSS + TanStack Query
 - **Desktop:** pywebview + PyInstaller → CompanyAI.exe (12MB)
-- **Versiyon:** v2.9.0
+- **Versiyon:** v3.9.2
 - **Proje dizini (lokal):** `C:\Users\murteza.KARAKOC\Desktop\Python\CompanyAi`
 - **Proje dizini (sunucu):** `/opt/companyai`
 

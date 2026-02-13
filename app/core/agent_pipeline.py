@@ -19,6 +19,7 @@ import json
 import structlog
 from typing import Optional, Any
 from dataclasses import dataclass, field
+import asyncio
 
 logger = structlog.get_logger()
 
@@ -503,3 +504,115 @@ def format_pipeline_summary(pipeline: PipelineResult) -> str:
     summary += f"\n{agents_text}"
     
     return summary
+
+
+# ══════════════════════════════════════════════════════════════
+# 5. PARALEL AGENT PIPELINE (v3.9.0)
+# ══════════════════════════════════════════════════════════════
+
+# Bağımsız çalışabilecek ajan grupları tanımı
+PARALLEL_GROUPS = [
+    # Grup 1: Sadece DataValidator (temel, ilk çalışmalı)
+    ["DataValidatorAgent"],
+    # Grup 2: Statistical + Risk paralel (birbirinden bağımsız çalışabilir)
+    ["StatisticalAgent", "RiskScoringAgent"],
+    # Grup 3: Financial + Monte Carlo (önceki sonuçlara bağımlı)
+    ["FinancialImpactAgent"],
+    # Grup 4: Strateji (hepsinin sonucuna bağımlı)
+    ["StrategyAgent"],
+]
+
+
+async def _run_single_agent(
+    agent_name: str,
+    question: str,
+    context: str,
+    prev_outputs: dict,
+    llm_generate,
+) -> AgentResult:
+    """Tek bir ajanı çalıştır."""
+    agent_config = AGENT_PROMPTS.get(agent_name, {})
+    role = agent_config.get("role", "")
+    
+    try:
+        agent_prompt = build_agent_prompt(agent_name, question, context, prev_outputs)
+        agent_answer = await llm_generate(
+            prompt=agent_prompt,
+            system_prompt=f"Sen bir {role} uzmanısın. Kısa, yapısal ve somut yanıt ver. Türkçe konuş.",
+            temperature=0.2,
+            max_tokens=400,
+        )
+        return AgentResult(
+            agent_name=agent_name,
+            role=role,
+            output=agent_answer,
+            confidence=0.8,
+        )
+    except Exception as e:
+        logger.warning("agent_failed", agent=agent_name, error=str(e))
+        return AgentResult(
+            agent_name=agent_name,
+            role=role,
+            output="",
+            skip_reason=str(e),
+        )
+
+
+async def execute_parallel_pipeline(
+    question: str,
+    context: str,
+    llm_generate,
+    mode: str = "Analiz",
+) -> PipelineResult:
+    """Multi-agent pipeline'ı paralel gruplarla çalıştır (v3.9.0).
+    
+    Bağımsız ajanlar aynı anda çalışarak toplam süreyi kısaltır.
+    DataValidator → [Statistical ∥ Risk] → Financial → Strategy
+    """
+    pipeline = PipelineResult(question=question)
+    prev_outputs = {}
+    
+    logger.info("parallel_pipeline_started", question=question[:80])
+    
+    for group in PARALLEL_GROUPS:
+        # Filtreleme: sadece route'ta olanları çalıştır
+        route = determine_dynamic_route(question, context, mode, prev_outputs)
+        agents_in_group = [a for a in group if a in route]
+        
+        if not agents_in_group:
+            continue
+        
+        if len(agents_in_group) == 1:
+            # Tekli — sequential
+            result = await _run_single_agent(
+                agents_in_group[0], question, context, prev_outputs, llm_generate
+            )
+            pipeline.agent_results.append(result)
+            prev_outputs[result.agent_name] = result.output or f"[Atlandı: {result.skip_reason}]"
+        else:
+            # Paralel çalıştır
+            tasks = [
+                _run_single_agent(agent, question, context, prev_outputs, llm_generate)
+                for agent in agents_in_group
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for r in results:
+                if isinstance(r, Exception):
+                    logger.warning("parallel_agent_exception", error=str(r))
+                    continue
+                pipeline.agent_results.append(r)
+                prev_outputs[r.agent_name] = r.output or f"[Atlandı: {r.skip_reason}]"
+            
+            logger.info("parallel_group_completed", agents=agents_in_group)
+    
+    # Birleştir
+    pipeline.final_answer = _synthesize_pipeline(pipeline, prev_outputs)
+    successful = [a for a in pipeline.agent_results if not a.skip_reason]
+    pipeline.overall_confidence = (len(successful) / max(len(PIPELINE_ORDER), 1)) * 90
+    
+    logger.info("parallel_pipeline_completed",
+                agents_success=len(successful),
+                confidence=pipeline.overall_confidence)
+    
+    return pipeline

@@ -52,11 +52,73 @@ TEXTILE_GLOSSARY = {
     "sanfor": {"tr": "Sanfor", "en": "Sanforize", "desc": "Mekanik çekmezlik işlemi. Yıkamada max %1 çekme. Zorunlu kalite standardı."},
     "kalender": {"tr": "Kalender", "en": "Calendering", "desc": "Sıcak silindir ile düzleme/parlatma. Yüzey efektleri."},
     "ram": {"tr": "Ram Kurutma", "en": "Stenter Frame", "desc": "Germe-kurutma. En/boy ayarlama, apre fiksajı. Son işlem."},
+    "yakma": {"tr": "Yakma (Gazlama)", "en": "Singeing", "desc": "Kumaş yüzeyindeki tüylerin alev ile yakılması. Düzgün yüzey için ilk terbiye işlemi."},
+    "haslama": {"tr": "Haşlama", "en": "Desizing/Scouring", "desc": "Haşıl ve doğal yağların uzaklaştırılması. Boyama öncesi kritik adım."},
+    "agartma": {"tr": "Ağartma", "en": "Bleaching", "desc": "H2O2 veya NaClO ile beyazlatma. Renk açma, boya hazırlığı."},
+    "su_itici": {"tr": "Su İtici Apre", "en": "Water Repellent", "desc": "Fluorokarbon veya silikon bazlı kaplama. Outdoor kumaş için zorunlu."},
+    "anti_statik": {"tr": "Anti-Statik Apre", "en": "Antistatic Finish", "desc": "Statik elektrik önleyici. Sentetik kumaşlar için önemli."},
+    "anti_bakteriyel": {"tr": "Anti-Bakteriyel Apre", "en": "Antibacterial Finish", "desc": "Gümüş iyon veya chitosan bazlı. Spor/medikal tekstil."},
+    "wrinkle_free": {"tr": "Ütü Gerektirmez", "en": "Wrinkle Free / Non-Iron", "desc": "Reçine ile çapraz bağlama. Gömlek kumaşı için premium özellik."},
     
     # KALİTE
     "defolu": {"tr": "Defolu Kumaş", "en": "Defective Fabric", "desc": "Hatalı kumaş. Düğüm, delik, leke, çizgi gibi hatalar."},
     "parti": {"tr": "Lot/Parti", "en": "Batch/Lot", "desc": "Aynı koşullarda üretilen birim. Renk tutarlılığı için parti takibi kritik."},
     "four_point": {"tr": "4 Puan Sistemi", "en": "Four Point System", "desc": "Kumaş kalite derecelendirme. Hata büyüklüğüne göre 1-4 puan. <40 puan/100m² = kabul."},
+    "spc": {"tr": "İstatistiksel Proses Kontrol", "en": "SPC", "desc": "Üretim sürecini kontrol kartlarıyla izleme. X-bar, R kartı, Cp, Cpk."},
+    "iso_9001": {"tr": "ISO 9001", "en": "ISO 9001", "desc": "Kalite yönetim sistemi standardı. Tekstilde zorunlu sertifika."},
+    "oeko_tex": {"tr": "Oeko-Tex Standard 100", "en": "Oeko-Tex", "desc": "Zararlı madde testi. Bebek/cilde temas sınıflandırması (I-IV)."},
+    "gots": {"tr": "GOTS Sertifikası", "en": "Global Organic Textile Standard", "desc": "Organik tekstil standardı. Min %70 organik elyaf. Ekolojik ve sosyal kriterler."},
+    
+    # PENYE / ÖRME
+    "penye": {"tr": "Penye Kumaş", "en": "Jersey/Knit Fabric", "desc": "Tek plakalı yuvarlak örme kumaş. T-shirt, iç giyim, günlük giyim. Esneklik, yumuşaklık."},
+    "suprem": {"tr": "Süprem", "en": "Single Jersey", "desc": "Tek yüzlü düz örme. En basit penye yapısı. Gramaj: 120-200 g/m²."},
+    "ribana": {"tr": "Ribana", "en": "Rib Knit", "desc": "Çift yüzlü örme. Yaka, manşet, bel bandı. 1x1, 2x2, 2x1 ribana."},
+    "interlok": {"tr": "İnterlok", "en": "Interlock", "desc": "Çift plakalı düz örme. Kalın, boyutsal kararlı. İç giyim, bebek."},
+    "pike": {"tr": "Pike", "en": "Piqué", "desc": "Kabartmalı yüzeyli örme. Polo tişört kumaşı. Waffle benzeri doku."},
+    "orme_tezgah": {"tr": "Yuvarlak Örme Tezgahı", "en": "Circular Knitting Machine", "desc": "Tüp kumaş üretimi. İnç çapı (20-38), iğne sayısı (gauge 18-32). Hız: dev/dk."},
+    "triko": {"tr": "Triko Örme", "en": "Warp Knitting", "desc": "Çözgü ipliğiyle örme. Raschel, Tricot makineleri. Dantel, tül, teknik tekstil."},
+    "lycra": {"tr": "Likra/Elastan", "en": "Lycra/Elastane/Spandex", "desc": "Elastik elyaf. %2-20 oranında katılır. Fitness, denim, iç giyim. Stretch özelliği."},
+    "gauge": {"tr": "Galga (İğne Aralığı)", "en": "Gauge", "desc": "1 İnç'teki iğne sayısı. Yüksek gauge = ince kumaş. E18 kaba, E28 ince."},
+    
+    # BASKI (TEKSTİL)
+    "dijital_baski": {"tr": "Dijital Baskı", "en": "Digital Printing", "desc": "İnkjet baskı. Sınırsız renk, kısa metraj. Reaktif/dispers/pigment mürekkep."},
+    "rotasyon_baski": {"tr": "Rotasyon Baskı", "en": "Rotary Screen Printing", "desc": "Silindirik şablonla sürekli baskı. Yüksek hız, uzun metraj. Rapor tekrarı."},
+    "flat_baski": {"tr": "Düz Şablon Baskı", "en": "Flat Screen Printing", "desc": "Düz çerçeve şablon. Hassas desen, düşük hız. Premium kumaş."},
+    "sublimation": {"tr": "Süblimasyon Baskı", "en": "Sublimation Printing", "desc": "Transfer kağıdından kumaşa ısı ile baskı. Sadece polyester. Foto-gerçekçi."},
+    "pigment_baski": {"tr": "Pigment Baskı", "en": "Pigment Printing", "desc": "Binder ile pigment fiksajı. Tüm elyaflara uygun. Sert tuşe, düşük haslık."},
+    "flock_baski": {"tr": "Flok Baskı", "en": "Flock Printing", "desc": "Elektrostatik elyaf yapıştırma. Kadife efekti. Dekoratif kullanım."},
+    "serigraf": {"tr": "Serigrafi", "en": "Screen Printing", "desc": "T-shirt baskısı. Düz yüzeye şablon baskı. CMYK veya spot renk, katman katman."},
+    
+    # NAKIŞ
+    "nakis": {"tr": "Makine Nakışı", "en": "Machine Embroidery", "desc": "Otomatik nakış makinesi. Tajima, Barudan. Logo, isim, desen. Dikiş sayısı ile fiyatlanır."},
+    "pul_nakis": {"tr": "Pul Nakışı", "en": "Sequin Embroidery", "desc": "Pul/payet dizme ile nakış. Dekoratif. Abiye, sahne kıyafeti."},
+    "aplike": {"tr": "Aplike", "en": "Appliqué", "desc": "Kumaş parça üzerine dikme dekorasyon. Logo, arma. Spor giyimde yaygın."},
+    
+    # TEDARİK ZİNCİRİ
+    "fason": {"tr": "Fason Üretim", "en": "CMT / Subcontracting", "desc": "Başkasının markası için üretim. CMT (Cut-Make-Trim). Kapasite esnekliği."},
+    "oem": {"tr": "OEM Üretim", "en": "Original Equipment Manufacturer", "desc": "Müşteri tasarımıyla üretim. Private label. Büyük markalara tedarik."},
+    "odm": {"tr": "ODM Üretim", "en": "Original Design Manufacturing", "desc": "Kendi tasarımını müşteriye satma. Daha yüksek katma değer."},
+    "moq": {"tr": "Minimum Sipariş Miktarı", "en": "MOQ", "desc": "Kabul edilen en düşük sipariş adedi. İplik: ton, kumaş: metre, konfeksiyon: adet."},
+    "lead_time": {"tr": "Teslim Süresi", "en": "Lead Time", "desc": "Sipariş → teslimat süresi. İplik: 2-4 hafta, kumaş: 3-6 hafta, konfeksiyon: 4-8 hafta."},
+    "incoterms": {"tr": "Teslim Şekilleri", "en": "Incoterms", "desc": "FOB, CIF, EXW, DDP. Uluslararası ticaret teslim koşulları. Maliyet/risk paylaşımı."},
+    "lc": {"tr": "Akreditif", "en": "Letter of Credit", "desc": "Banka garantili ödeme. İhracatta güvenli tahsilat. Belge karşılığı ödeme."},
+    
+    # SÜRDÜRÜLEBİLİRLİK
+    "grs": {"tr": "GRS Sertifikası", "en": "Global Recycled Standard", "desc": "Geri dönüşüm standardı. Min %20 geri dönüşüm içerik. İzlenebilirlik zinciri."},
+    "bci": {"tr": "BCI Pamuk", "en": "Better Cotton Initiative", "desc": "Sürdürülebilir pamuk yetiştiriciliği. Su ve pestisit azaltma. Sosyal uyumluluk."},
+    "higg_index": {"tr": "Higg Index", "en": "Higg Index (SAC)", "desc": "Sürdürülebilirlik ölçüm aracı. Çevresel ve sosyal etki skorlaması. Tesis/ürün bazlı."},
+    "karbon_ayak_izi": {"tr": "Karbon Ayak İzi", "en": "Carbon Footprint", "desc": "CO2 eşdeğer emisyon. LCA (Yaşam Döngüsü Analizi) ile ölçülür. kgCO2e/kg kumaş."},
+    "su_ayak_izi": {"tr": "Su Ayak İzi", "en": "Water Footprint", "desc": "Ürün başına su tüketimi. Pamuk T-shirt: ~2700 litre. Tekstilde en büyük çevresel etki."},
+    "zdhc": {"tr": "ZDHC", "en": "Zero Discharge of Hazardous Chemicals", "desc": "Tehlikeli kimyasal sıfır deşarj. MRSL listesi. Büyük markaların tedarikçi şartı."},
+    
+    # MAKİNE / EKİPMAN
+    "rapier": {"tr": "Rapier Tezgah", "en": "Rapier Loom", "desc": "Kancalı atkı atma. En yaygın dokuma tezgahı. Geniş kumaş, çok renkli atkı."},
+    "air_jet": {"tr": "Air Jet Tezgah", "en": "Air Jet Loom", "desc": "Hava jetli atkı atma. Çok yüksek hız (800+ atım/dk). Hafif kumaşlar."},
+    "water_jet": {"tr": "Water Jet Tezgah", "en": "Water Jet Loom", "desc": "Su jetli atkı atma. Sentetik kumaşlar. Düşük maliyet, yüksek hız."},
+    "otoklav": {"tr": "Otoklav", "en": "Autoclave", "desc": "Basınçlı buhar sterilizasyon. Medikal tekstil, boyahane. 121-134°C."},
+    "jet_boya": {"tr": "Jet Boya Makinesi", "en": "Jet Dyeing Machine", "desc": "Yüksek basınçlı sıvı jetli boyama. 130°C polyester boyama. Overflow ve softflow tipleri."},
+    "jigger": {"tr": "Jigger Boya", "en": "Jigger Dyeing", "desc": "Açık en boyama. Hassas kumaşlar, kısa metraj. Düşük flotte oranı."},
+    "pad_batch": {"tr": "Pad-Batch", "en": "Pad-Batch Cold", "desc": "Soğuk emdirme boyama. Reaktif boya + NaOH. Düşük enerji, yüksek tekrarlanabilirlik."},
 }
 
 

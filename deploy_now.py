@@ -61,6 +61,7 @@ BACKEND_FILES = [
     "app/core/monitoring.py",
     "app/core/bottleneck_engine.py",
     "app/core/executive_health.py",
+    "app/core/insight_engine.py",
     "app/core/textile_vision.py",
     "app/core/explainability.py",
     "app/api/routes/analyze.py",

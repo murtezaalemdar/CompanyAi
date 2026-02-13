@@ -55,6 +55,13 @@ except ImportError as e:
     ANALYZER_AVAILABLE = False
     logger.warning("document_analyzer_not_available", error=str(e))
 
+# Insight Engine (v3.9.0)
+try:
+    from app.core.insight_engine import extract_insights, insights_to_dict
+    INSIGHT_AVAILABLE = True
+except ImportError:
+    INSIGHT_AVAILABLE = False
+
 # Dosya çıkarıcı (documents.py'den)
 try:
     from app.api.routes.documents import extract_text_from_file
@@ -589,6 +596,15 @@ async def get_statistics(
     df = cached["df"]
     stats = statistical_analysis(df)
     
+    # v3.9.0 — Otomatik insight ekleme
+    auto_insights = None
+    if INSIGHT_AVAILABLE:
+        try:
+            report = extract_insights(df, max_insights=10)
+            auto_insights = insights_to_dict(report)
+        except Exception as ie:
+            logger.warning("insight_extraction_failed", error=str(ie))
+    
     return {
         "success": True,
         "filename": cached["filename"],
@@ -597,6 +613,7 @@ async def get_statistics(
         "strong_correlations": stats.get("strong_correlations", []),
         "outliers": stats.get("outliers", {}),
         "distributions": stats.get("distributions", {}),
+        "auto_insights": auto_insights,
     }
 
 

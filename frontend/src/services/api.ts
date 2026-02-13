@@ -327,6 +327,22 @@ export const adminApi = {
         const response = await api.post('/admin/explainability/feedback', data)
         return response.data
     },
+
+    // Insight Engine (v3.9.0)
+    getInsightDemo: async () => {
+        const response = await api.get('/admin/insights/demo')
+        return response.data
+    },
+    analyzeInsights: async (data: any[], maxInsights: number = 20) => {
+        const response = await api.post('/admin/insights/analyze', { data, max_insights: maxInsights })
+        return response.data
+    },
+
+    // CEO Dashboard (v3.9.0)
+    getCeoDashboard: async () => {
+        const response = await api.get('/admin/ceo/dashboard')
+        return response.data
+    },
 }
 
 // RAG API

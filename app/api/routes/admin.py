@@ -1314,6 +1314,146 @@ async def get_audit_compliance(
         return {"available": False, "error": str(e)}
 
 
+# ══════════════════════════════════════════════════════════════════════
+# INSIGHT ENGINE v1.0 — Otomatik İçgörü (v3.9.0)
+# ══════════════════════════════════════════════════════════════════════
+
+@router.get("/insights/demo")
+async def get_insight_demo(
+    current_user: User = Depends(get_current_user),
+):
+    """Demo verilerle Insight Engine çalıştır."""
+    check_admin_or_manager(current_user)
+    try:
+        import pandas as pd
+        import numpy as np
+        from app.core.insight_engine import extract_insights, insights_to_dict
+
+        # Demo textile veri seti
+        np.random.seed(42)
+        n = 100
+        demo_df = pd.DataFrame({
+            "departman": np.random.choice(["İplik", "Dokuma", "Boyahane", "Konfeksiyon"], n),
+            "verimlilik": np.random.normal(82, 8, n).clip(50, 100),
+            "fire_orani": np.random.exponential(3.5, n).clip(0.5, 20),
+            "enerji_tuketim": np.random.normal(115, 15, n).clip(70, 180),
+            "hata_orani": np.random.exponential(2.2, n).clip(0.1, 15),
+            "kapasite_kullanimi": np.random.normal(78, 10, n).clip(40, 100),
+            "maliyet_tl": np.random.normal(50000, 15000, n).clip(10000, 120000),
+            "uretim_kg": np.random.normal(5000, 1500, n).clip(1000, 12000),
+        })
+        # Korelasyon oluştur
+        demo_df["gelir_tl"] = demo_df["uretim_kg"] * np.random.normal(12, 2, n)
+
+        report = extract_insights(demo_df, max_insights=15)
+        result = insights_to_dict(report)
+        return {"available": True, **result}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+class InsightRequest(BaseModel):
+    data: list = []
+    max_insights: int = 20
+
+
+@router.post("/insights/analyze")
+async def analyze_insights(
+    body: InsightRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Kullanıcı verisiyle insight analizi çalıştır."""
+    check_admin_or_manager(current_user)
+    try:
+        import pandas as pd
+        from app.core.insight_engine import extract_insights, insights_to_dict
+
+        if not body.data:
+            raise HTTPException(status_code=400, detail="Veri listesi boş")
+
+        df = pd.DataFrame(body.data)
+        report = extract_insights(df, max_insights=body.max_insights)
+        result = insights_to_dict(report)
+        return {"available": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# CEO DASHBOARD v1.0 — Birleşik CEO Paneli (v3.9.0)
+# ══════════════════════════════════════════════════════════════════════
+
+@router.get("/ceo/dashboard")
+async def get_ceo_dashboard(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """CEO paneli — sağlık skoru + darboğaz + insight birleşimi."""
+    check_admin_or_manager(current_user)
+    result = {"available": True}
+
+    # 1) Executive Health
+    try:
+        from app.core.executive_health import get_demo_health_index
+        health = get_demo_health_index()
+        result["health"] = {
+            "overall_score": health.overall_score,
+            "overall_grade": health.overall_grade,
+            "overall_status": health.overall_status,
+            "dimensions": [
+                {"name": d.name, "score": d.score, "grade": d.grade, "color": d.color, "trend": d.trend}
+                for d in health.dimensions
+            ],
+        }
+    except Exception:
+        result["health"] = None
+
+    # 2) Bottleneck
+    try:
+        from app.core.bottleneck_engine import get_template_analysis
+        bn = get_template_analysis("dokuma")
+        result["bottleneck"] = {
+            "process_name": bn.process_name,
+            "bottleneck_step": bn.bottleneck_step,
+            "severity": bn.severity,
+            "score": bn.score,
+            "recommendations": bn.recommendations[:3],
+        }
+    except Exception:
+        result["bottleneck"] = None
+
+    # 3) Insights (demo)
+    try:
+        import pandas as pd
+        import numpy as np
+        from app.core.insight_engine import extract_insights, insights_to_dict
+        np.random.seed(42)
+        n = 50
+        df = pd.DataFrame({
+            "departman": np.random.choice(["İplik", "Dokuma", "Boyahane", "Konfeksiyon"], n),
+            "verimlilik": np.random.normal(82, 8, n).clip(50, 100),
+            "fire_orani": np.random.exponential(3.5, n).clip(0.5, 20),
+        })
+        report = extract_insights(df, max_insights=5)
+        result["insights"] = insights_to_dict(report)
+    except Exception:
+        result["insights"] = None
+
+    # 4) Son 24 saat sorgu sayısı
+    try:
+        since = datetime.utcnow() - timedelta(hours=24)
+        count_result = await db.execute(
+            select(func.count()).select_from(Query).where(Query.created_at >= since)
+        )
+        result["queries_24h"] = count_result.scalar() or 0
+    except Exception:
+        result["queries_24h"] = 0
+
+    return result
+
+
 @router.get("/audit/summary")
 async def get_audit_event_summary(
     hours: int = 24,

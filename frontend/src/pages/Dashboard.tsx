@@ -40,6 +40,11 @@ import {
     Cell,
     PieChart,
     Pie,
+    RadarChart,
+    PolarGrid,
+    PolarAngleAxis,
+    PolarRadiusAxis,
+    Radar,
 } from 'recharts'
 import clsx from 'clsx'
 
@@ -156,6 +161,19 @@ export default function Dashboard() {
         queryKey: ['xai-history'],
         queryFn: () => adminApi.getXaiHistory(10),
         refetchInterval: 60000,
+    })
+
+    // v3.9.0 — CEO Dashboard
+    const { data: ceoDashboard } = useQuery({
+        queryKey: ['ceo-dashboard'],
+        queryFn: adminApi.getCeoDashboard,
+        refetchInterval: 60000,
+    })
+
+    const { data: insightDemo } = useQuery({
+        queryKey: ['insight-demo'],
+        queryFn: adminApi.getInsightDemo,
+        refetchInterval: 120000,
     })
 
     const queryClient = useQueryClient()
@@ -1178,6 +1196,153 @@ export default function Dashboard() {
                     </div>
                 )}
             </div>
+
+        {/* ══════════ CEO DASHBOARD — v3.9.0 ══════════ */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                {/* Executive Health Radar */}
+                <div className="card">
+                    <div className="flex items-center gap-2 mb-4">
+                        <HeartPulse className="w-5 h-5 text-rose-400" />
+                        <h3 className="text-lg font-semibold text-white">Şirket Sağlık Endeksi</h3>
+                        {ceoDashboard?.health && (
+                            <span className={clsx('ml-auto text-xl font-bold', {
+                                'text-green-400': ceoDashboard.health.overall_score >= 75,
+                                'text-yellow-400': ceoDashboard.health.overall_score >= 50,
+                                'text-red-400': ceoDashboard.health.overall_score < 50,
+                            })}>
+                                {ceoDashboard.health.overall_score}/100 ({ceoDashboard.health.overall_grade})
+                            </span>
+                        )}
+                    </div>
+                    {ceoDashboard?.health?.dimensions ? (
+                        <div>
+                            <div className="h-64">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <RadarChart data={ceoDashboard.health.dimensions.map((d: any) => ({
+                                        subject: d.name,
+                                        score: d.score,
+                                        fullMark: 100,
+                                    }))}>
+                                        <PolarGrid stroke="#374151" />
+                                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#d1d5db', fontSize: 11 }} />
+                                        <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fill: '#6b7280', fontSize: 9 }} />
+                                        <Radar name="Skor" dataKey="score" stroke="#f43f5e" fill="#f43f5e" fillOpacity={0.25} strokeWidth={2} />
+                                    </RadarChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 mt-3">
+                                {ceoDashboard.health.dimensions.map((d: any, i: number) => (
+                                    <div key={i} className="flex items-center justify-between p-2 bg-dark-700/50 rounded text-xs">
+                                        <span className="text-dark-300">{d.name}</span>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className={clsx('font-bold', {
+                                                'text-green-400': d.score >= 75,
+                                                'text-yellow-400': d.score >= 50 && d.score < 75,
+                                                'text-red-400': d.score < 50,
+                                            })}>{d.score}</span>
+                                            <span className="text-dark-500">{d.grade}</span>
+                                            <span className={clsx('text-[10px]', {
+                                                'text-green-400': d.trend === '↑',
+                                                'text-red-400': d.trend === '↓',
+                                                'text-dark-400': d.trend === '→',
+                                            })}>{d.trend}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-8 text-dark-400">
+                            <HeartPulse className="w-10 h-10 mb-3 opacity-30" />
+                            <p className="text-sm">Sağlık verisi yükleniyor...</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Otomatik İçgörüler */}
+                <div className="card">
+                    <div className="flex items-center gap-2 mb-4">
+                        <Sparkles className="w-5 h-5 text-amber-400" />
+                        <h3 className="text-lg font-semibold text-white">Otomatik İçgörüler</h3>
+                        {insightDemo?.total_insights != null && (
+                            <span className="ml-auto text-sm text-dark-400">
+                                {insightDemo.total_insights} bulgu
+                                {insightDemo.critical_count > 0 && (
+                                    <span className="ml-1 text-red-400">({insightDemo.critical_count} kritik)</span>
+                                )}
+                            </span>
+                        )}
+                    </div>
+                    {insightDemo?.insights && insightDemo.insights.length > 0 ? (
+                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                            {insightDemo.insights.map((ins: any, i: number) => (
+                                <div key={i} className={clsx('p-3 rounded-lg border', {
+                                    'bg-red-500/5 border-red-500/20': ins.severity === 'critical',
+                                    'bg-yellow-500/5 border-yellow-500/20': ins.severity === 'warning',
+                                    'bg-blue-500/5 border-blue-500/20': ins.severity === 'info',
+                                })}>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className={clsx('w-2 h-2 rounded-full', {
+                                            'bg-red-500': ins.severity === 'critical',
+                                            'bg-yellow-500': ins.severity === 'warning',
+                                            'bg-blue-500': ins.severity === 'info',
+                                        })} />
+                                        <span className="text-xs font-medium text-dark-200">{ins.title}</span>
+                                        <span className="ml-auto text-[10px] text-dark-500 uppercase">{ins.type}</span>
+                                    </div>
+                                    <p className="text-xs text-dark-400 ml-4">{ins.description}</p>
+                                    {ins.recommendation && (
+                                        <p className="text-xs text-primary-400 ml-4 mt-1">💡 {ins.recommendation}</p>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-8 text-dark-400">
+                            <Sparkles className="w-10 h-10 mb-3 opacity-30" />
+                            <p className="text-sm">İçgörü verisi yükleniyor...</p>
+                        </div>
+                    )}
+                </div>
+
+            </div>
+
+            {/* Darboğaz Özet Kartı */}
+            {ceoDashboard?.bottleneck && (
+                <div className="card">
+                    <div className="flex items-center gap-2 mb-4">
+                        <AlertTriangle className="w-5 h-5 text-orange-400" />
+                        <h3 className="text-lg font-semibold text-white">Darboğaz Tespiti</h3>
+                        <span className={clsx('ml-auto px-2 py-0.5 rounded text-xs font-medium', {
+                            'bg-red-500/20 text-red-400': ceoDashboard.bottleneck.severity === 'Kritik',
+                            'bg-orange-500/20 text-orange-400': ceoDashboard.bottleneck.severity === 'Yüksek',
+                            'bg-yellow-500/20 text-yellow-400': ceoDashboard.bottleneck.severity === 'Orta',
+                            'bg-green-500/20 text-green-400': ceoDashboard.bottleneck.severity === 'Düşük',
+                        })}>
+                            {ceoDashboard.bottleneck.severity} — Skor: {ceoDashboard.bottleneck.score}
+                        </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="p-3 bg-dark-700/50 rounded-lg">
+                            <p className="text-xs text-dark-400 mb-1">Süreç</p>
+                            <p className="text-sm font-medium text-white">{ceoDashboard.bottleneck.process_name}</p>
+                        </div>
+                        <div className="p-3 bg-dark-700/50 rounded-lg">
+                            <p className="text-xs text-dark-400 mb-1">Darboğaz Noktası</p>
+                            <p className="text-sm font-medium text-orange-400">{ceoDashboard.bottleneck.bottleneck_step}</p>
+                        </div>
+                        <div className="p-3 bg-dark-700/50 rounded-lg">
+                            <p className="text-xs text-dark-400 mb-1">Öneriler</p>
+                            <ul className="space-y-1">
+                                {(ceoDashboard.bottleneck.recommendations || []).map((r: string, i: number) => (
+                                    <li key={i} className="text-xs text-dark-300">• {r}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

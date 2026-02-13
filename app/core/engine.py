@@ -171,6 +171,13 @@ try:
 except ImportError:
     EXECUTIVE_HEALTH_AVAILABLE = False
 
+# Insight Engine — Otomatik İçgörü (v3.9.0)
+try:
+    from app.core.insight_engine import extract_insights, format_insight_report, insights_to_dict
+    INSIGHT_ENGINE_AVAILABLE = True
+except ImportError:
+    INSIGHT_ENGINE_AVAILABLE = False
+
 # SQL Generator
 try:
     from app.core.sql_generator import generate_sql, build_sql_prompt

@@ -83,6 +83,11 @@ def _get_analysis_system_prompt(analysis_type: str) -> str:
         "forecast": f"{base} Tahminleme uzmanısın. Modellerin güven aralığını, varsayımlarını belirt. İyimser/kötümser senaryoları sun.",
         "pareto": f"{base} Pareto ve ABC analizi uzmanısın. 80/20 kuralını iş stratejisiyle birleştir. Kaynak optimizasyonu öner.",
         "quality": f"{base} Veri kalitesi denetçisisin. Eksiklik, tutarsızlık, tekrar sorunlarını tespit et. Veri mühendisliği ekibine teslim edilecek bir temizlik planı sun.",
+        # ── CEO-TIER ANALİZ TİPLERİ (v3.8.0) ──
+        "profitability": f"{base} Karlılık analizi uzmanısın. CEO'ya hitap ediyorsun. Ürün bazlı, müşteri bazlı ve kanal bazlı NET KÂRLILIĞI analiz et. Contribution margin, gizli zarar eden segmentler, çapraz sübvansiyon ve fiyatlama fırsatlarını ortaya çıkar. Patron '​para nerede kayboluyor?' sorusuna net cevap ver. Her bulguyu TL/₺ etkisiyle ifade et.",
+        "bottleneck": f"{base} Operasyonel darboğaz analisti ve endüstri mühendisisin. CEO'ya hitap ediyorsun. Verideki en yavaş süreç, en pahalı adım, en düşük verimlilik noktasını tespit et. Kuyruk analizi, kaynak kullanım haritası ve kapasite darboğazlarını belirle. Patron '​operasyon nerede tıkanıyor?' sorusuna net cevap ver. Her darboğazın maliyet etkisini ve çözüm önerisini ROI ile sun.",
+        "executive": f"{base} Üst düzey yönetim danışmanısın. CEO/CFO'ya hitap ediyorsun. Veriden Şirket Sağlık Skoru (0-100) türet. 4 boyutta değerlendir: Finansal Sağlamlık, Operasyonel Verimlilik, Büyüme İvmesi, Risk Maruziyet. Her boyuta harf notu (A-F) ve renk kodu ver. Patron 'şirketin durumu nasıl?' sorusuna tek bakışta cevap verecek bir dashboard üret. Aksiyon önceliklerini stratejik önemle sırala.",
+        "benchmark": f"{base} Sektörel kıyaslama ve rekabet analizi uzmanısın. CEO'ya hitap ediyorsun. Verideki metrikleri tekstil sektörü ortalamalarıyla kıyasla. Her KPI'da şirketin sektöre göre konumunu belirle (üstün/ortalama/altında). Rakiplere göre güçlü/zayıf yönleri tespit et. Patron 'rakiplere göre neredeyiz?' sorusuna net cevap ver. Benchmark gaplerini kapatmak için somut hedefler belirle.",
     }
     
     return type_prompts.get(analysis_type, type_prompts["full"])

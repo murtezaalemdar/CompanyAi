@@ -157,6 +157,20 @@ try:
 except ImportError:
     ARIMA_AVAILABLE = False
 
+# Bottleneck Engine (v3.8.0)
+try:
+    from app.core.bottleneck_engine import analyze_from_data as bottleneck_analyze, format_bottleneck_report
+    BOTTLENECK_AVAILABLE = True
+except ImportError:
+    BOTTLENECK_AVAILABLE = False
+
+# Executive Health Index (v3.8.0)
+try:
+    from app.core.executive_health import calculate_health_index, format_health_dashboard
+    EXECUTIVE_HEALTH_AVAILABLE = True
+except ImportError:
+    EXECUTIVE_HEALTH_AVAILABLE = False
+
 # SQL Generator
 try:
     from app.core.sql_generator import generate_sql, build_sql_prompt
@@ -759,6 +773,8 @@ async def get_system_status() -> dict:
             "monitoring": MONITORING_AVAILABLE,
             "textile_vision": TEXTILE_VISION_AVAILABLE,
             "explainability": XAI_AVAILABLE,
+            "bottleneck_engine": BOTTLENECK_AVAILABLE,
+            "executive_health": EXECUTIVE_HEALTH_AVAILABLE,
         },
     }
 

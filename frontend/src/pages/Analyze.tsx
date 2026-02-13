@@ -74,6 +74,11 @@ const ANALYSIS_TYPES = [
     { value: 'forecast', label: 'Tahminleme', icon: Target, description: 'Gelecek dönem projeksiyonu', color: 'text-amber-400' },
     { value: 'pareto', label: 'Pareto / ABC', icon: Layers, description: '80/20 kuralı ve ABC sınıflandırması', color: 'text-pink-400' },
     { value: 'quality', label: 'Veri Kalitesi', icon: ShieldCheck, description: 'Eksik, tekrar ve tutarlılık denetimi', color: 'text-emerald-400' },
+    // ── CEO-Tier Analiz Tipleri (v3.8.0) ──
+    { value: 'profitability', label: 'Karlılık', icon: TrendingUp, description: 'Ürün/müşteri bazlı net kârlılık analizi', color: 'text-green-300', ceo: true },
+    { value: 'bottleneck', label: 'Darboğaz', icon: AlertTriangle, description: 'Operasyonel tıkanıklık ve verimlilik tespiti', color: 'text-orange-300', ceo: true },
+    { value: 'executive', label: 'Sağlık Skoru', icon: Activity, description: 'Şirket sağlık endeksi (0-100)', color: 'text-cyan-300', ceo: true },
+    { value: 'benchmark', label: 'Kıyaslama', icon: Target, description: 'Sektörel benchmark ve rekabet analizi', color: 'text-violet-300', ceo: true },
 ]
 
 export default function Analyze() {
@@ -424,7 +429,7 @@ export default function Analyze() {
 
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-3">
                         {ANALYSIS_TYPES.filter(t =>
-                            !dataInfo?.available_analyses || dataInfo.available_analyses.includes(t.value)
+                            !t.ceo && (!dataInfo?.available_analyses || dataInfo.available_analyses.includes(t.value))
                         ).map(type => (
                             <button
                                 key={type.value}
@@ -440,6 +445,30 @@ export default function Analyze() {
                                 <div className="text-xs text-dark-400 mt-0.5">{type.description}</div>
                             </button>
                         ))}
+                    </div>
+
+                    {/* CEO-Tier Analiz Tipleri */}
+                    <div className="mt-4 pt-4 border-t border-dark-700">
+                        <div className="text-xs font-semibold text-amber-400/80 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                            👑 C-Level Stratejik Analiz
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            {ANALYSIS_TYPES.filter(t => t.ceo).map(type => (
+                                <button
+                                    key={type.value}
+                                    onClick={() => setAnalysisType(type.value)}
+                                    className={`p-3 rounded-xl border transition text-left ${
+                                        analysisType === type.value
+                                            ? 'bg-amber-500/10 border-amber-500/40 ring-1 ring-amber-500/30'
+                                            : 'bg-dark-900/50 border-amber-900/30 hover:border-amber-700/40'
+                                    }`}
+                                >
+                                    <type.icon className={`w-5 h-5 ${type.color} mb-2`} />
+                                    <div className="text-sm font-medium text-white">{type.label}</div>
+                                    <div className="text-xs text-dark-400 mt-0.5">{type.description}</div>
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
                     {/* Ek Soru */}

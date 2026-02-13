@@ -1347,3 +1347,165 @@ async def run_audit_retention_cleanup(
         raise
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# BOTTLENECK ENGINE v1.0 — Darboğaz Tespiti (v3.8.0)
+# ══════════════════════════════════════════════════════════════════════
+
+@router.get("/bottleneck/templates")
+async def get_bottleneck_templates(
+    current_user: User = Depends(get_current_user),
+):
+    """Kullanılabilir süreç şablonlarını listele."""
+    check_admin_or_manager(current_user)
+    try:
+        from app.core.bottleneck_engine import list_templates
+        return {"available": True, "templates": list_templates()}
+    except ImportError:
+        return {"available": False, "error": "Bottleneck Engine yüklü değil"}
+
+
+@router.get("/bottleneck/analyze/{process_type}")
+async def analyze_bottleneck_template(
+    process_type: str = "dokuma",
+    current_user: User = Depends(get_current_user),
+):
+    """Hazır şablon ile darboğaz analizi çalıştır."""
+    check_admin_or_manager(current_user)
+    try:
+        from app.core.bottleneck_engine import get_template_analysis, format_bottleneck_report
+        result = get_template_analysis(process_type)
+        return {
+            "available": True,
+            "process_name": result.process_name,
+            "bottleneck_step": result.bottleneck_step,
+            "bottleneck_type": result.bottleneck_type,
+            "severity": result.severity,
+            "score": result.score,
+            "impact": result.impact_description,
+            "recommendations": result.recommendations,
+            "chain_effects": result.chain_effects,
+            "metrics": result.metrics,
+            "report": format_bottleneck_report(result),
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+class BottleneckRequest(BaseModel):
+    process_name: str = "Üretim Hattı"
+    process_type: str = "genel_uretim"
+    steps: list = []
+
+
+@router.post("/bottleneck/analyze")
+async def analyze_bottleneck_custom(
+    body: BottleneckRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Özel veriyle darboğaz analizi çalıştır."""
+    check_admin_or_manager(current_user)
+    try:
+        from app.core.bottleneck_engine import analyze_from_data, format_bottleneck_report
+        data = {"process_name": body.process_name, "steps": body.steps}
+        result = analyze_from_data(data, body.process_type)
+        return {
+            "available": True,
+            "process_name": result.process_name,
+            "bottleneck_step": result.bottleneck_step,
+            "bottleneck_type": result.bottleneck_type,
+            "severity": result.severity,
+            "score": result.score,
+            "impact": result.impact_description,
+            "recommendations": result.recommendations,
+            "chain_effects": result.chain_effects,
+            "metrics": result.metrics,
+            "report": format_bottleneck_report(result),
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# EXECUTIVE HEALTH INDEX v1.0 — Şirket Sağlık Skoru (v3.8.0)
+# ══════════════════════════════════════════════════════════════════════
+
+@router.get("/executive/health-demo")
+async def get_executive_health_demo(
+    current_user: User = Depends(get_current_user),
+):
+    """Demo verilerle Executive Health Index göster."""
+    check_admin_or_manager(current_user)
+    try:
+        from app.core.executive_health import get_demo_health_index, format_health_dashboard
+        index = get_demo_health_index()
+        return {
+            "available": True,
+            "overall_score": index.overall_score,
+            "overall_grade": index.overall_grade,
+            "overall_status": index.overall_status,
+            "dimensions": [
+                {
+                    "name": d.name,
+                    "score": d.score,
+                    "grade": d.grade,
+                    "color": d.color,
+                    "trend": d.trend,
+                    "indicators": d.indicators,
+                }
+                for d in index.dimensions
+            ],
+            "recommendations": index.recommendations,
+            "executive_summary": index.executive_summary,
+            "dashboard": format_health_dashboard(index),
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+class HealthIndexRequest(BaseModel):
+    financial: dict = {}
+    operational: dict = {}
+    growth: dict = {}
+    risk: dict = {}
+
+
+@router.post("/executive/health")
+async def calculate_executive_health(
+    body: HealthIndexRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Gerçek verilerle Executive Health Index hesapla."""
+    check_admin_or_manager(current_user)
+    try:
+        from app.core.executive_health import calculate_health_index, format_health_dashboard
+        data = {
+            "financial": body.financial,
+            "operational": body.operational,
+            "growth": body.growth,
+            "risk": body.risk,
+        }
+        index = calculate_health_index(data)
+        return {
+            "available": True,
+            "overall_score": index.overall_score,
+            "overall_grade": index.overall_grade,
+            "overall_status": index.overall_status,
+            "dimensions": [
+                {
+                    "name": d.name,
+                    "score": d.score,
+                    "grade": d.grade,
+                    "color": d.color,
+                    "trend": d.trend,
+                    "indicators": d.indicators,
+                }
+                for d in index.dimensions
+            ],
+            "recommendations": index.recommendations,
+            "executive_summary": index.executive_summary,
+            "dashboard": format_health_dashboard(index),
+        }
+    except Exception as e:
+        return {"available": False, "error": str(e)}

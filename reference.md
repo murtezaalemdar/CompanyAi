@@ -2,7 +2,7 @@
 
 > **Proje Adı:** Kurumsal Yapay Zeka Asistanı – LOCAL & ÖĞRENEN  
 > **Amaç:** Kurumsal kullanım için tasarlanmış, tamamen lokal çalışan ve öğrenen bir AI asistan sistemi.  
-> **Son Güncelleme:** 13 Şubat 2026 (v3.9.2 — Kod Kopyalama + Seçip Sor + Insight Engine + CEO Dashboard)
+> **Son Güncelleme:** 17 Şubat 2026 (v5.10.0 — Upload Progress UI + OCR Fix + Sync + Nginx Fix)
 
 ---
 
@@ -503,31 +503,45 @@ sudo systemctl start companyai-backend
 
 ## 🌍 Canlı Sunucu Bilgileri (Deployment)
 
+### Server 1 (CPU-only — Ana Sunucu)
 **Sunucu IP:** `192.168.0.12`  
 **URL:** `https://192.168.0.12` (HTTPS Aktif — Self-Signed Sertifika)  
 **Kullanıcı:** `root`  
-**Şifre:** `435102`  
+**SSH Port:** `22`  
 **SSH Key:** `keys/companyai_key` (Ed25519, comment: `companyai-deploy`)  
 **SSH Key Public:** `keys/companyai_key.pub`  
-**Key Fingerprint:** `SHA256:avkGBtNyqcbRQxfMZR+0IpS0W3Eb6gMgcbmVc9E9kD0`
+**Key Fingerprint:** `SHA256:avkGBtNyqcbRQxfMZR+0IpS0W3Eb6gMgcbmVc9E9kD0`  
+**Donanım:** Intel Xeon Silver 4316 (16-core), 64GB RAM, GPU yok  
+**LLM:** Ollama qwen2.5:72b (~48GB RAM, CPU inference ~2 tok/s)
+
+### Server 2 (GPU — Hızlı Inference)
+**Sunucu IP:** `88.246.13.23`  
+**SSH Port:** `2013`  
+**Kullanıcı:** `root`  
+**SSH Key:** `keys/server2_key` (comment: `companyai-server2`)  
+**SSH Key Public:** `keys/server2_key.pub`  
+**Donanım:** NVIDIA RTX 4080 16GB VRAM  
+**Not:** GPU offload ile hızlı LLM inference, venv: `/opt/companyai/venv/`
 
 ### SSH Bağlantısı
 ```bash
-# Key ile bağlan (önerilen)
+# Server 1 — Key ile bağlan (önerilen)
 ssh -i keys/companyai_key root@192.168.0.12
 
-# Şifre ile bağlan
-ssh root@192.168.0.12
-# Şifre: 435102
+# Server 2 — Key ile bağlan
+ssh -i keys/server2_key -p 2013 root@88.246.13.23
 ```
 
 ### Deploy Komutu
 ```bash
-# Otomatik deploy (backend + bağımlılık + servis restart)
+# Server 1'e deploy
 python deploy_now.py
 
-# Frontend deploy (build + nginx)
-cd frontend && npm run build && cd .. && python deploy_frontend.py
+# Server 2'ye deploy
+python deploy_now.py --server2
+
+# Her iki sunucuya deploy
+python deploy_now.py --all
 ```
 
 ---
@@ -1275,3 +1289,63 @@ cd frontend && npx cap sync
 - **Alıntı Chip** — Input alanı üstünde italic tırnaklı metin + X kapatma butonu
 - **Submit entegrasyonu** — Alıntı varsa soru formatı: `"seçili metin" — soru`
 - Lucide ikonları: `Quote`, `ArrowRight` eklendi
+
+---
+
+## 📦 v5.9.0 → v5.10.0 Değişiklik Özeti
+
+### v5.9.0 — Modül Koordinasyonu & Prompt Kalitesi (24 Şubat 2026)
+- SYSTEM_PROMPT ~%60 kısaltma, DEPARTMENT_PROMPTS ~%80 kısaltma
+- Multi-perspective LLM çağrısı kaldırıldı (10-30 sn tasarruf)
+- Post-processing: 15+ bölüm → sadece kritik uyarılar
+- Sıcaklık: Bilgi/Öneri 0.7 → 0.4; max_tokens: Analiz/Rapor 1024 → 2048
+
+### v5.9.1 — 500 Hatası & Uzun Yanıt Düzeltmeleri
+- engine.py timeout/retry iyileştirmesi
+- client.py connection pooling güçlendirmesi
+- Nginx S2: proxy_read_timeout 900s
+- Context window / TPS optimizasyonu
+
+### v5.9.2 — RAG/PDF OCR Fix + ChromaDB Sync Düzeltme
+- **OCR:** `documents.py`'ye easyocr desteği eklendi (image-based PDF → OCR → metin)
+- **Sync yönü tersine çevrildi:** S2→S1 yerine S1←S2 (S1 her 15 dk çeker)
+- Embedding boyut uyuşmazlığı (384 vs 768) re-embed ile çözüldü
+- ChromaDB'de boş PDF kayıtları temizlendi
+- 247 kayıt her iki sunucuda eşitlendi
+
+### v5.10.0 — Upload Progress UI + Nginx Fix + Hata Bildirimleri
+
+#### Upload Progress Sistemi
+- **api.ts:** `uploadDocument()` fonksiyonuna `onProgress?: (percent: number) => void` parametresi
+  - `onUploadProgress` callback ile axios real-time yüzde takibi
+  - `timeout: 600000` (10 dakika) büyük dosyalar için
+- **Documents.tsx:** 3 yeni state: `uploadPercent`, `uploadPhase`, `uploadMessage`
+  - **Yükleme fazı:** Mavi gradient `from-primary-500/20 via-primary-400/30` + shimmer animasyonu + `%XX`
+  - **İşleme fazı:** Amber gradient + Brain ikonu + "Öğreniyor..." pulsing text
+  - **Tamamlandı:** Yeşil arka plan + CheckCircle ikonu
+  - Ana upload butonu tam genişlikte ilerleme çubuğuna dönüşür
+  - Her dosya satırında ayrı ayrı animasyonlu ilerleme
+- **tailwind.config.js:** `uploadShimmer` keyframe (translateX -100% → 100%, 1.5s ease-in-out infinite)
+
+#### Hata Yönetimi (Frontend)
+- **413 Error:** "Dosya çok büyük (X MB). Maksimum 500 MB."
+- **Timeout/408:** "Zaman aşımı — dosya çok büyük veya bağlantı yavaş"
+- **500 Error:** "Sunucu hatası — dosya işlenirken bir sorun oluştu"
+- **Network Error:** "Bağlantı hatası — ağ bağlantınızı kontrol edin"
+- **Başarı:** "X dosya başarıyla yüklendi ve öğrenildi!" (yeşil bildirim)
+- Auto-dismiss: Başarı mesajı 3+8 sn, hata mesajı 6+8 sn
+
+#### Nginx Düzeltmesi (Server 2)
+- **Problem:** Server 2 Nginx `client_max_body_size 100M` → 233MB PDF reddediliyordu
+- **Çözüm:** `/etc/nginx/sites-enabled/default` → `client_max_body_size 500M`
+
+#### ChromaDB Senkronizasyonu
+- **Mimari:** Server 1 SSH ile Server 2'den export tetikler → JSON indirir → lokal import
+- **Koleksiyonlar:** `learned_knowledge` (5), `company_documents` (62), `company_memory` (180) = 247 kayıt
+- **Cron (S1):** `*/15 * * * *` `/opt/companyai/sync_chromadb.py`
+
+#### Sunucu Durum (v5.10.0)
+| Sunucu | IP | Donanım | Nginx Body Size | Proxy Timeout |
+|--------|-----|---------|-----------------|---------------|
+| Server 1 | 192.168.0.12:22 | CPU-only, Xeon 4316, 64GB | 500M | — |
+| Server 2 | 88.246.13.23:2013 | 2× RTX 3090, 48GB VRAM | 500M | 900s |

@@ -17,6 +17,7 @@ import {
     BarChart3,
     TrendingUp,
     Cpu,
+    Monitor,
     Package,
     HeartPulse,
     Eye,
@@ -74,6 +75,19 @@ const MODULE_LABELS: Record<string, string> = {
     monitoring: 'Monitoring',
     textile_vision: 'Tekstil Vision',
     explainability: 'Açıklanabilir AI',
+    bottleneck_engine: 'Darboğaz Motoru',
+    executive_health: 'Yönetici Sağlık Skoru',
+    ocr_engine: 'OCR Motoru',
+    numerical_validation: 'Sayısal Doğrulama',
+    meta_learning: 'Meta Öğrenme Motoru',
+    self_improvement: 'Otomatik İyileştirme',
+    multi_agent_debate: 'Çok Perspektifli Tartışma',
+    causal_inference: 'Nedensel Çıkarım Motoru',
+    strategic_planner: 'Stratejik Planlama',
+    executive_intelligence: 'Yönetici Zekası',
+    knowledge_graph: 'Bilgi Grafiği',
+    decision_gatekeeper: 'Karar Risk Kapısı',
+    uncertainty_quantification: 'Belirsizlik Ölçümleme',
 }
 
 const DEPT_COLORS = ['#3b82f6', '#8b5cf6', '#f59e0b', '#10b981', '#ef4444', '#06b6d4', '#ec4899', '#f97316']
@@ -105,6 +119,7 @@ export default function Dashboard() {
         queryKey: ['system-resources'],
         queryFn: adminApi.getSystemResources,
         refetchInterval: 15000,
+        placeholderData: (prev: any) => prev,   // GPU widget kaybolmasını önle
     })
 
     // v3.3.0 — Yeni veri kaynakları
@@ -243,6 +258,11 @@ export default function Dashboard() {
     const cpuPct = sysResources?.cpu_percent != null ? Math.round(sysResources.cpu_percent) : null
     const memPct = sysResources?.memory_percent != null ? Math.round(sysResources.memory_percent) : null
     const diskPct = sysResources?.disk_percent != null ? Math.round(sysResources.disk_percent) : null
+    const gpu = sysResources?.gpu || null
+    const gpus: any[] = sysResources?.gpus || (gpu ? [gpu] : [])
+    const gpuCount = sysResources?.gpu_count || gpus.length
+    const totalVramGb = sysResources?.total_vram_gb || 0
+    const ollamaGpu = sysResources?.ollama_gpu || null
 
     // AI Modüller
     const modules = aiModules?.modules || {}
@@ -271,7 +291,7 @@ export default function Dashboard() {
                         <div className="flex items-start justify-between">
                             <div>
                                 <p className="text-sm font-medium text-dark-400 truncate">{card.name}</p>
-                                <p className="mt-1 text-3xl font-semibold text-white">{card.value}</p>
+                                <p className="mt-1 text-2xl sm:text-3xl font-semibold text-white">{card.value}</p>
                             </div>
                             <div className={clsx('p-2 rounded-lg', card.bg)}>
                                 <card.icon className={clsx('w-6 h-6', card.color)} />
@@ -305,8 +325,8 @@ export default function Dashboard() {
             {/* ── Sorgu Trafiği + Sistem Durumu ── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 card">
-                    <h3 className="text-lg font-medium text-white mb-6">Sorgu Trafiği</h3>
-                    <div className="h-80">
+                    <h3 className="text-lg font-medium text-white mb-4 sm:mb-6">Sorgu Trafiği</h3>
+                    <div className="h-60 sm:h-80">
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={data}>
                                 <defs>
@@ -437,6 +457,72 @@ export default function Dashboard() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* GPU Bölümü — Multi-GPU Destekli */}
+                        {gpus.length > 0 && (
+                        <div className="border-t border-dark-700 pt-4">
+                            <h4 className="text-xs font-semibold text-dark-400 uppercase mb-4 flex items-center gap-2">
+                                <Monitor className="w-3.5 h-3.5" />
+                                {gpuCount > 1 ? `${gpuCount}× GPU — ${totalVramGb} GB VRAM` : `GPU — ${gpus[0].name}`}
+                            </h4>
+                            <div className="space-y-4">
+                                {gpus.map((g: any, idx: number) => (
+                                <div key={g.index ?? idx} className={gpus.length > 1 ? 'p-3 bg-dark-800/40 rounded-lg space-y-3' : 'space-y-4'}>
+                                    {gpus.length > 1 && (
+                                        <div className="text-xs font-medium text-dark-300 mb-1">
+                                            GPU {g.index ?? idx}: {g.name}
+                                        </div>
+                                    )}
+                                    <div>
+                                        <div className="flex justify-between text-xs mb-1">
+                                            <span className="text-dark-300">VRAM</span>
+                                            <span className="text-white">
+                                                {g.memory_used_mb} / {g.memory_total_mb} MB ({g.memory_percent}%)
+                                            </span>
+                                        </div>
+                                        <div className="w-full bg-dark-800 rounded-full h-1.5">
+                                            <div className="bg-green-500 h-1.5 rounded-full transition-all" style={{ width: `${g.memory_percent}%` }} />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-xs mb-1">
+                                            <span className="text-dark-300">GPU Kullanım</span>
+                                            <span className="text-white">{g.utilization_percent}%</span>
+                                        </div>
+                                        <div className="w-full bg-dark-800 rounded-full h-1.5">
+                                            <div className="bg-emerald-500 h-1.5 rounded-full transition-all" style={{ width: `${g.utilization_percent}%` }} />
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-dark-400">Sıcaklık</span>
+                                        <span className={clsx('font-medium', g.temperature_c > 80 ? 'text-red-400' : g.temperature_c > 60 ? 'text-yellow-400' : 'text-green-400')}>
+                                            {g.temperature_c}°C
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between text-xs">
+                                        <span className="text-dark-400">Güç</span>
+                                        <span className="text-dark-300">{g.power_draw_w}W / {g.power_limit_w}W</span>
+                                    </div>
+                                </div>
+                                ))}
+                            </div>
+                            {ollamaGpu && (
+                                <div className="mt-4 p-3 bg-dark-800/50 rounded-lg">
+                                    <div className="flex items-center justify-between text-xs mb-2">
+                                        <span className="text-dark-300">Model GPU Offload</span>
+                                        <span className="text-white font-medium">{ollamaGpu.gpu_offload_percent}%</span>
+                                    </div>
+                                    <div className="w-full bg-dark-800 rounded-full h-1.5 mb-2">
+                                        <div className="bg-violet-500 h-1.5 rounded-full transition-all" style={{ width: `${ollamaGpu.gpu_offload_percent}%` }} />
+                                    </div>
+                                    <div className="flex justify-between text-xs text-dark-400">
+                                        <span>VRAM: {ollamaGpu.vram_size_gb} GB</span>
+                                        <span>RAM: {ollamaGpu.ram_size_gb} GB</span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -486,22 +572,22 @@ export default function Dashboard() {
                     </div>
                     {govAvailable ? (
                         <div className="space-y-5">
-                            <div className="grid grid-cols-3 gap-4">
-                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
-                                    <p className="text-2xl font-bold text-white">{governance?.total_queries_monitored || 0}</p>
-                                    <p className="text-xs text-dark-400 mt-1">İzlenen Sorgu</p>
+                            <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                                <div className="text-center p-2 sm:p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-lg sm:text-2xl font-bold text-white">{governance?.total_queries_monitored || 0}</p>
+                                    <p className="text-[10px] sm:text-xs text-dark-400 mt-1">İzlenen Sorgu</p>
                                 </div>
-                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
-                                    <p className={clsx('text-2xl font-bold', avgConf >= 0.7 ? 'text-green-400' : avgConf >= 0.4 ? 'text-yellow-400' : 'text-red-400')}>
+                                <div className="text-center p-2 sm:p-3 bg-dark-800/50 rounded-lg">
+                                    <p className={clsx('text-lg sm:text-2xl font-bold', avgConf >= 0.7 ? 'text-green-400' : avgConf >= 0.4 ? 'text-yellow-400' : 'text-red-400')}>
                                         {(avgConf * 100).toFixed(0)}%
                                     </p>
-                                    <p className="text-xs text-dark-400 mt-1">Ort. Güven</p>
+                                    <p className="text-[10px] sm:text-xs text-dark-400 mt-1">Ort. Güven</p>
                                 </div>
-                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
-                                    <p className={clsx('text-2xl font-bold', biasAlerts === 0 ? 'text-green-400' : 'text-red-400')}>
+                                <div className="text-center p-2 sm:p-3 bg-dark-800/50 rounded-lg">
+                                    <p className={clsx('text-lg sm:text-2xl font-bold', biasAlerts === 0 ? 'text-green-400' : 'text-red-400')}>
                                         {biasAlerts}
                                     </p>
-                                    <p className="text-xs text-dark-400 mt-1">Bias Uyarısı</p>
+                                    <p className="text-[10px] sm:text-xs text-dark-400 mt-1">Bias Uyarısı</p>
                                 </div>
                             </div>
 
@@ -549,8 +635,8 @@ export default function Dashboard() {
                         <h3 className="text-lg font-medium text-white">Departman Dağılımı</h3>
                     </div>
                     {deptPieData.length > 0 ? (
-                        <div className="flex items-center gap-4">
-                            <div className="w-1/2 h-56">
+                        <div className="flex flex-col sm:flex-row items-center gap-4">
+                            <div className="w-full sm:w-1/2 h-48 sm:h-56">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie
@@ -578,7 +664,7 @@ export default function Dashboard() {
                                     </PieChart>
                                 </ResponsiveContainer>
                             </div>
-                            <div className="w-1/2 space-y-2 max-h-56 overflow-y-auto">
+                            <div className="w-full sm:w-1/2 space-y-2 max-h-56 overflow-y-auto">
                                 {(deptStats || []).map((d: any, i: number) => (
                                     <div key={i} className="flex items-center justify-between text-sm">
                                         <div className="flex items-center gap-2">
@@ -629,7 +715,7 @@ export default function Dashboard() {
                             )}>
                                 <div className="text-center">
                                     <span className={clsx(
-                                        'text-3xl font-bold',
+                                        'text-2xl sm:text-3xl font-bold',
                                         healthScore.grade === 'A' ? 'text-green-400' :
                                         healthScore.grade === 'B' ? 'text-blue-400' :
                                         healthScore.grade === 'C' ? 'text-yellow-400' :
@@ -720,18 +806,18 @@ export default function Dashboard() {
                     </div>
                     {modelRegistry?.available ? (
                         <div className="space-y-4">
-                            <div className="grid grid-cols-3 gap-3">
-                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
-                                    <p className="text-2xl font-bold text-white">{modelRegistry.total_models || 0}</p>
-                                    <p className="text-xs text-dark-400 mt-1">Toplam Model</p>
+                            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                                <div className="text-center p-2 sm:p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-lg sm:text-2xl font-bold text-white">{modelRegistry.total_models || 0}</p>
+                                    <p className="text-[10px] sm:text-xs text-dark-400 mt-1">Toplam Model</p>
                                 </div>
-                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
-                                    <p className="text-2xl font-bold text-green-400">{modelRegistry.production_count || 0}</p>
-                                    <p className="text-xs text-dark-400 mt-1">Production</p>
+                                <div className="text-center p-2 sm:p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-lg sm:text-2xl font-bold text-green-400">{modelRegistry.production_count || 0}</p>
+                                    <p className="text-[10px] sm:text-xs text-dark-400 mt-1">Production</p>
                                 </div>
-                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
-                                    <p className="text-2xl font-bold text-blue-400">{modelRegistry.staging_count || 0}</p>
-                                    <p className="text-xs text-dark-400 mt-1">Staging</p>
+                                <div className="text-center p-2 sm:p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-lg sm:text-2xl font-bold text-blue-400">{modelRegistry.staging_count || 0}</p>
+                                    <p className="text-[10px] sm:text-xs text-dark-400 mt-1">Staging</p>
                                 </div>
                             </div>
                             {modelRegistry.production_model && (
@@ -775,18 +861,18 @@ export default function Dashboard() {
                     </div>
                     {hitlData?.available ? (
                         <div className="space-y-4">
-                            <div className="grid grid-cols-3 gap-3">
-                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
-                                    <p className="text-2xl font-bold text-amber-400">{hitlData.pending_count || 0}</p>
-                                    <p className="text-xs text-dark-400 mt-1">Bekleyen</p>
+                            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                                <div className="text-center p-2 sm:p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-lg sm:text-2xl font-bold text-amber-400">{hitlData.pending_count || 0}</p>
+                                    <p className="text-[10px] sm:text-xs text-dark-400 mt-1">Bekleyen</p>
                                 </div>
-                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
-                                    <p className="text-2xl font-bold text-green-400">{hitlData.feedback_stats?.approved || 0}</p>
-                                    <p className="text-xs text-dark-400 mt-1">Onaylanan</p>
+                                <div className="text-center p-2 sm:p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-lg sm:text-2xl font-bold text-green-400">{hitlData.feedback_stats?.approved || 0}</p>
+                                    <p className="text-[10px] sm:text-xs text-dark-400 mt-1">Onaylanan</p>
                                 </div>
-                                <div className="text-center p-3 bg-dark-800/50 rounded-lg">
-                                    <p className="text-2xl font-bold text-red-400">{hitlData.feedback_stats?.rejected || 0}</p>
-                                    <p className="text-xs text-dark-400 mt-1">Reddedilen</p>
+                                <div className="text-center p-2 sm:p-3 bg-dark-800/50 rounded-lg">
+                                    <p className="text-lg sm:text-2xl font-bold text-red-400">{hitlData.feedback_stats?.rejected || 0}</p>
+                                    <p className="text-[10px] sm:text-xs text-dark-400 mt-1">Reddedilen</p>
                                 </div>
                             </div>
                             {hitlData.pending_tasks?.length > 0 ? (

@@ -4,15 +4,17 @@ import {
     HardDrive, Clock, RotateCcw, Download, Shield, Database,
     Calendar, PlayCircle, Loader2, ChevronDown, ChevronUp,
     FileArchive, AlertTriangle, Info, RefreshCw, X, UploadCloud,
-    Timer
+    Timer, Moon, Sun, Monitor, Check
 } from 'lucide-react'
-import { logoApi, backupApi } from '../services/api'
+import { logoApi, backupApi, authApi } from '../services/api'
+import { useTheme } from '../contexts/ThemeContext'
+import PerformanceTuning from '../components/PerformanceTuning'
 import clsx from 'clsx'
 
 export default function Settings() {
+    const { theme, setTheme } = useTheme()
     const [formData, setFormData] = useState({
         notifications: true,
-        theme: 'dark',
         language: 'tr',
         apiKey: 'sk-....................',
     })
@@ -358,6 +360,9 @@ export default function Settings() {
                 )}
             </div>
 
+            {/* ── Performans Ayarları (v5.6.0) ─────────────── */}
+            <PerformanceTuning />
+
             {/* ── Genel Ayarlar ─────────────────────────────── */}
             <div className="card">
                 <h3 className="text-lg font-medium text-white mb-6">Sistem Ayarları</h3>
@@ -382,18 +387,54 @@ export default function Settings() {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-dark-200 mb-2">
+                        <label className="block text-sm font-medium text-dark-200 mb-3">
                             Tema
                         </label>
-                        <select
-                            value={formData.theme}
-                            onChange={(e) => setFormData({ ...formData, theme: e.target.value })}
-                            className="input"
-                        >
-                            <option value="dark">Koyu Tema</option>
-                            <option value="light">Açık Tema</option>
-                            <option value="system">Sistem Teması</option>
-                        </select>
+                        <div className="grid grid-cols-3 gap-3">
+                            {[
+                                { value: 'dark' as const, label: 'Koyu', icon: Moon, desc: 'Koyu arka plan' },
+                                { value: 'light' as const, label: 'Açık', icon: Sun, desc: 'Açık arka plan' },
+                                { value: 'system' as const, label: 'Sistem', icon: Monitor, desc: 'Sistem ayarını takip et' },
+                            ].map((opt) => {
+                                const Icon = opt.icon
+                                const isActive = theme === opt.value
+                                return (
+                                    <button
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={() => {
+                                            setTheme(opt.value)
+                                            authApi.setTheme(opt.value).catch(() => {})
+                                        }}
+                                        className={clsx(
+                                            'relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all duration-200 cursor-pointer',
+                                            isActive
+                                                ? 'border-primary-500 bg-primary-500/10 shadow-lg shadow-primary-500/10'
+                                                : 'border-dark-600 hover:border-dark-500 bg-dark-900/30'
+                                        )}
+                                    >
+                                        {isActive && (
+                                            <div className="absolute top-2 right-2">
+                                                <Check className="w-4 h-4 text-primary-500" />
+                                            </div>
+                                        )}
+                                        <Icon className={clsx(
+                                            'w-6 h-6',
+                                            isActive ? 'text-primary-400' : 'text-dark-400'
+                                        )} />
+                                        <span className={clsx(
+                                            'text-sm font-medium',
+                                            isActive ? 'text-primary-400' : 'text-dark-300'
+                                        )}>
+                                            {opt.label}
+                                        </span>
+                                        <span className="text-xs text-dark-500">
+                                            {opt.desc}
+                                        </span>
+                                    </button>
+                                )
+                            })}
+                        </div>
                     </div>
 
                     <div>

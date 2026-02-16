@@ -38,6 +38,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
             const userData = await authApi.getMe()
             setUser(userData)
+            // Sunucudan tema tercihini yükle
+            try {
+                const themeData = await authApi.getTheme()
+                if (themeData.theme && ['dark', 'light', 'system'].includes(themeData.theme)) {
+                    localStorage.setItem('theme', themeData.theme)
+                    window.dispatchEvent(new Event('theme-loaded'))
+                }
+            } catch {}
         } catch (error) {
             localStorage.removeItem('token')
         } finally {
@@ -50,6 +58,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('token', access_token)
         const userData = await authApi.getMe()
         setUser(userData)
+        // Sunucudan tema tercihini yükle
+        try {
+            const themeData = await authApi.getTheme()
+            if (themeData.theme && ['dark', 'light', 'system'].includes(themeData.theme)) {
+                localStorage.setItem('theme', themeData.theme)
+                window.dispatchEvent(new Event('theme-loaded'))
+            }
+        } catch {}
     }
 
     const logout = async () => {

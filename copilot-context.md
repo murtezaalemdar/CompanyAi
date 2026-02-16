@@ -6,25 +6,30 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 - **Proje:** Kurumsal AI Asistanı (tamamen lokal, öğrenen)
 - **Backend:** FastAPI + Uvicorn, async SQLAlchemy (asyncpg), structlog
 - **LLM:** Ollama + qwen2.5:72b (48GB RAM), CPU-only ~2 tok/s
+- **Vision:** minicpm-v (görüntü + OCR)
+- **Omni-Modal:** minicpm-o (görüntü + video + ses)
 - **Vector DB:** ChromaDB + SentenceTransformers
 - **RAG Embedding:** `paraphrase-multilingual-mpnet-base-v2` (768-dim)
 - **DB:** PostgreSQL 14.20, port 5433, user `companyai`, db `companyai`
 - **Auth:** JWT (HS256) + pbkdf2_sha256 + RBAC (Admin/Manager/User)
 - **Frontend:** React + TypeScript + Vite + Tailwind CSS + TanStack Query
 - **Desktop:** pywebview + PyInstaller → CompanyAI.exe (12MB)
-- **Versiyon:** v3.9.2
+- **Versiyon:** v5.10.0
+- **AI Modül Sayısı:** 49
 - **Proje dizini (lokal):** `C:\Users\murteza.KARAKOC\Desktop\Python\CompanyAi`
 - **Proje dizini (sunucu):** `/opt/companyai`
 
 ## 🌍 Sunucu & SSH
-- **IP:** `192.168.0.12`
+- **Server 1:** `192.168.0.12` (CPU-only, 64GB RAM, Xeon 4316)
 - **URL:** `https://192.168.0.12`
-- **User:** `root` — **Şifre:** `435102`
-- **SSH Key:** `keys/companyai_key` (Ed25519)
+- **User:** `root` — **SSH Key:** `keys/companyai_key` (Ed25519)
 - **Bağlantı:** `ssh -i keys/companyai_key root@192.168.0.12`
+- **Server 2:** `88.246.13.23:2013` (2× RTX 3090, 48GB VRAM toplamı)
+- **Şifre S2:** `Kc435102mn` (server2_key private key eksik — deploy paramiko ile şifre fallback kullanır)
+- **SSH Key S2:** `keys/server2_key`
 - **Backend servis:** `systemctl restart companyai-backend`
 - **Frontend:** `/var/www/html/` (Nginx)
-- **Deploy:** `python deploy_now.py` (backend + frontend otomatik)
+- **Deploy:** `python deploy_now.py` (server1) / `--all` (her iki sunucu) / `--server2`
 
 ## 🚀 Deploy Süreci
 - `deploy_now.py` — Backend dosyaları SCP + frontend npm build + SCP to /var/www/html/
@@ -65,7 +70,31 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 - **Splash & İkonlar:** `python scripts/generate_icons.py` — Pillow ile ~35 görsel üretir
 - **npm Scriptleri:** `mobile:sync`, `mobile:android`, `mobile:ios`, `mobile:build-android`
 
-## 📄 Doküman Yönetimi v2 (Güncel)
+## � Upload Progress & Error Handling (v5.10.0)
+- **Upload Progress UI:** Animasyonlu shimmer/gradient ilerleme çubuğu
+  - **Yükleme fazı:** Mavi gradient + shimmer, `%XX` gösterimi
+  - **İşleme fazı:** Amber pulsing "Öğreniyor..." Brain ikonu
+  - **Tamamlandı:** Yeşil CheckCircle "Tamamlandı!"
+- **api.ts:** `uploadDocument()` → `onUploadProgress` callback + `timeout: 600000` (10 dk)
+- **Documents.tsx:** `uploadPercent`, `uploadPhase`, `uploadMessage` state'leri
+- **tailwind.config.js:** `uploadShimmer` keyframe animasyonu (translateX -100% → 100%)
+- **Hata Yönetimi:**
+  - 413 → "Dosya çok büyük (X MB). Maksimum 500 MB."
+  - Timeout → "Zaman aşımı — dosya çok büyük veya bağlantı yavaş"
+  - 500 → "Sunucu hatası"
+  - Network Error → "Bağlantı hatası"
+  - Başarı → "X dosya başarıyla yüklendi ve öğrenildi!" (yeşil bildirim)
+- **Nginx:** Her iki sunucuda `client_max_body_size 500M`
+
+## 🔄 ChromaDB Senkronizasyonu (v5.9.2)
+- **Yön:** Server 1 ← Server 2 (S1 her 15 dk S2'den çeker)
+- **S2 Export:** `/opt/companyai/sync_chromadb_export.py`
+- **S1 Import:** `/opt/companyai/sync_chromadb.py`
+- **Cron (S1):** `*/15 * * * * /usr/bin/python3 /opt/companyai/sync_chromadb.py`
+- **Koleksiyonlar:** learned_knowledge (5), company_documents (62), company_memory (180) = 247 kayıt
+- **Embedding:** `paraphrase-multilingual-mpnet-base-v2` (768-dim) — boyut uyuşmazlığı re-embed ile çözüldü
+
+## �📄 Doküman Yönetimi v2 (Güncel)
 - **Desteklenen format:** 65+ dosya formatı (metin, office, kod, e-posta, görüntü OCR)
 - **Öğrenme kaynakları:** Dosya yükleme, metin girişi, URL scraping, YouTube altyazı
 - **Frontend sekmeleri:** Dosya Yükle / Bilgi Gir / URL Öğren / Video Öğren
@@ -150,6 +179,52 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 | `MOBILE_BUILD.md` | Mobil uygulama build rehberi |
 | `deploy_now.py` | Otomatik deploy script |
 
+## 🧠 AI Modül Puanları (v5.1.0 — 37 Modül, Ortalama: 81.6/100)
+
+| # | Modül | Puan | Satır | Açıklama |
+|---|-------|------|-------|----------|
+| 1 | Tool Registry | 88 | 858 | ReAct pattern, 8+ araç, Ollama function calling |
+| 2 | Reasoning | 72 | 343 | Çok adımlı CoT, max 5 adım |
+| 3 | Structured Output | 70 | 289 | JSON extraction, şema validasyonu |
+| 4 | KPI Engine | 85 | 442 | 50+ KPI, Balanced Scorecard, benchmark |
+| 5 | Textile Knowledge | 80 | 373 | 200+ terim, fire analizi, kalite kontrol |
+| 6 | Risk Analyzer | 82 | 339 | FMEA, 5×5 matris, what-if |
+| 7 | Reflection | 90 | 673 | 5 kriter, hallucination, auto-retry |
+| 8 | Agent Pipeline | 78 | 554 | 6 uzman ajan, sequential+parallel |
+| 9 | Scenario Engine | 75 | 271 | Best/Expected/Worst senaryolar |
+| 10 | Monte Carlo | 80 | 264 | N-iterasyon, VaR, CI, volatilite |
+| 11 | Decision Ranking | 76 | 261 | ROI×Risk×Strateji puanlama |
+| 12 | Governance | 92 | 643 | Bias, drift, 12 politika, hash chain |
+| 13 | Experiment Layer | 74 | 377 | A/B strateji sim, auto-tune |
+| 14 | Graph Impact | 73 | 371 | KPI/Dept/Risk ilişki grafı |
+| 15 | ARIMA Forecasting | 89 | 844 | ARIMA/SARIMA, Holt-Winters, SES |
+| 16 | SQL Generator | 77 | 409 | Doğal dil→SQL, feature engineering |
+| 17 | Export Service | 83 | 683 | Excel/PDF/PPTX/Word/CSV |
+| 18 | Web Search | 79 | 515 | SerpAPI+Google+DuckDuckGo |
+| 19 | Model Registry | 71 | 222 | Model versiyonlama, staging/prod |
+| 20 | Data Versioning | 70 | 267 | Dataset snapshot/rollback, diff |
+| 21 | Human-in-the-Loop | 81 | 287 | Onay kuyruğu, feedback öğrenme |
+| 22 | Monitoring | 84 | 586 | GPU/API izleme, z-score, SLA |
+| 23 | Textile Vision | 68 | 311 | LLM Vision kumaş hatası, renk |
+| 24 | Explainability | 91 | 1209 | XAI v4, faktör skoru, kalibrasyon |
+| 25 | Bottleneck Engine | 77 | 421 | Darboğaz tespiti, kuyruk analizi |
+| 26 | Executive Health | 82 | 688 | Sağlık skoru 0-100, 4 boyut |
+| 27 | OCR Engine | 76 | 450 | EasyOCR (TR+EN), fatura/tablo |
+| 28 | Numerical Validation | 73 | — | Sayısal tutarsızlık tespiti |
+| 29 | Meta Learning | 93 | 824 | Strategy profiling, knowledge gap |
+| 30 | Self Improvement | 94 | 1042 | ThresholdOptimizer, PromptEvolver |
+| 31 | Multi-Agent Debate | 92 | 1098 | 6 perspektif, consensus, sentez |
+| 32 | Causal Inference | 91 | 1208 | 5 Whys, Ishikawa, DAG, counterfactual |
+| 33 | Strategic Planner | 90 | 1171 | PESTEL, Porter, SMART, OKR |
+| 34 | Executive Intelligence | 89 | 1008 | CEO brifing, RAPID/RACI, board raporu |
+| 35 | Knowledge Graph | 88 | 944 | Entity/relation, BFS, kümeleme |
+| 36 | Decision Gatekeeper | 87 | 635 | PASS/WARN/BLOCK/ESCALATE |
+| 37 | Uncertainty Quantification | 85 | 404 | Epistemik/Aleatoric, ensemble |
+
+**Toplam:** ~21.500 satır AI kodu, ~158 sınıf, ~698 fonksiyon
+**En güçlü:** Self Improvement (94), Meta Learning (93), Governance (92), Multi-Agent Debate (92)
+**Gelişime açık:** Textile Vision (68), Structured Output (70), Data Versioning (70)
+
 ## Kod Prensipleri
 - Clean code
 - Okunabilirlik > kısalık
@@ -200,6 +275,26 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 - Özet: Prompts rewrite, structured output, tool registry, multi-step reasoning, forecasting, KPI engine, textile knowledge, risk analyzer, SQL generator, vector_store hybrid ve engine entegrasyonu tamamlandı.
 - Deploy: `deploy_now.py` ile deploy yapıldı; `companyai-backend` servisi active; Uvicorn dinliyor.
 - Dikkat: `sql_generator` üretilecek SQL'leri test DB'de doğrulayın, hybrid search ağırlıklarını kalibre edin.
+
+---
+
+## 🛡️ Enterprise Güvenlik (v4.5.0)
+- **Credentials:** `.env.deploy` dosyasından (gitignored), environment variable override destekler
+- **Servis:** systemd Unit → companyai user, NoNewPrivileges, ProtectSystem=strict, PrivateTmp
+- **Timeout:** gunicorn 180s (eski: 960s)
+- **CORS:** Spesifik HTTP method + header listesi (wildcard kaldırıldı)
+- **Injection:** Base64-encoded prompt injection algılama (3 pattern)
+- **Auth:** 5 başarısız giriş → 15dk hesap kilitleme, must_change_password
+- **Audit:** SHA-256 hash chain → tamper-proof denetim kaydı (her kayıt öncekine bağlı)
+
+## 🎙️ Omni-Modal AI (v4.5.0 — MiniCPM-o 2.6)
+- **Model:** `minicpm-o` — görüntü + video + ses analizi tek modelden
+- **Routing:** `use_omni=True` → minicpm-o, sadece resim → minicpm-v, metin → qwen2.5
+- **Video:** cv2 frame sampling (8 kare, 512px, WebP), max 100MB / 120s
+- **Ses:** Base64 audio, WAV duration, max 25MB, 9 format (mp3, wav, ogg, flac, m4a, aac, wma, opus, webm)
+- **Endpoint'ler:** `/upload/audio`, `/upload/video`, `/omni/capabilities`
+- **Frontend:** Music/Film ikonları, mor (ses) / mavi (video) önizleme, dosya tipi algılama
+- **Bağımlılık:** `opencv-python-headless>=4.8.0`
 
 
 

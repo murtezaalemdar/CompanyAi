@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import axios from 'axios'
-import { aiApi, logoApi, adminApi } from '../services/api'
+import { aiApi, logoApi } from '../services/api'
 import {
     Send,
     Loader2,
@@ -44,6 +44,8 @@ import {
     Square,
     Quote,
     ArrowRight,
+    Music,
+    Film,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useNavigate } from 'react-router-dom'
@@ -61,7 +63,7 @@ interface AttachedFile {
     id: string
     file: File
     preview?: string
-    type: 'image' | 'document' | 'other'
+    type: 'image' | 'document' | 'audio' | 'video' | 'other'
 }
 
 interface Message {
@@ -141,21 +143,6 @@ export default function Ask() {
     const [selectedDepartment, setSelectedDepartment] = useState<string>(availableDepartments[0] || 'Genel')
     const [memoryCount, setMemoryCount] = useState<number>(0)
     const [showForgetConfirm, setShowForgetConfirm] = useState(false)
-
-    // Admin/Manager için hızlı istatistikler
-    const { data: adminStats } = useQuery({
-        queryKey: ['admin-quick-stats'],
-        queryFn: adminApi.getDashboardStats,
-        enabled: isAdmin,
-        refetchInterval: 60000,
-    })
-
-    const { data: adminModules } = useQuery({
-        queryKey: ['admin-modules-quick'],
-        queryFn: adminApi.getAiModules,
-        enabled: isAdmin,
-        refetchInterval: 120000,
-    })
 
     // Company logo yükle
     useEffect(() => {
@@ -427,8 +414,10 @@ export default function Ask() {
         }
     }, [])
 
-    const getFileType = (file: File): 'image' | 'document' | 'other' => {
+    const getFileType = (file: File): 'image' | 'document' | 'audio' | 'video' | 'other' => {
         if (file.type.startsWith('image/')) return 'image'
+        if (file.type.startsWith('audio/')) return 'audio'
+        if (file.type.startsWith('video/')) return 'video'
         if (
             file.type.includes('pdf') ||
             file.type.includes('word') ||
@@ -748,12 +737,16 @@ export default function Ask() {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
     }
 
-    const getFileIcon = (type: 'image' | 'document' | 'other') => {
+    const getFileIcon = (type: 'image' | 'document' | 'audio' | 'video' | 'other') => {
         switch (type) {
             case 'image':
                 return <ImageIcon className="w-4 h-4" />
             case 'document':
                 return <FileText className="w-4 h-4" />
+            case 'audio':
+                return <Music className="w-4 h-4" />
+            case 'video':
+                return <Film className="w-4 h-4" />
             default:
                 return <Paperclip className="w-4 h-4" />
         }
@@ -810,47 +803,6 @@ export default function Ask() {
                             <p className="text-dark-400 text-base md:text-lg mb-8 max-w-lg">
                                 Bugün size nasıl yardımcı olabilirim?
                             </p>
-
-                            {/* ── Admin/Manager Quick Stats Bar ── */}
-                            {isAdmin && adminStats && (
-                                <div className="w-full max-w-2xl mb-6">
-                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                        <div className="bg-dark-800/60 border border-dark-700/50 rounded-xl p-3 text-left">
-                                            <div className="flex items-center gap-2 mb-1.5">
-                                                <UsersIcon className="w-4 h-4 text-blue-400" />
-                                                <span className="text-[11px] text-dark-400 uppercase font-medium">Kullanıcılar</span>
-                                            </div>
-                                            <p className="text-xl font-bold text-white">{adminStats.total_users || 0}</p>
-                                        </div>
-                                        <div className="bg-dark-800/60 border border-dark-700/50 rounded-xl p-3 text-left">
-                                            <div className="flex items-center gap-2 mb-1.5">
-                                                <Activity className="w-4 h-4 text-green-400" />
-                                                <span className="text-[11px] text-dark-400 uppercase font-medium">Günlük Sorgu</span>
-                                            </div>
-                                            <p className="text-xl font-bold text-white">{adminStats.queries_today || 0}</p>
-                                        </div>
-                                        <div className="bg-dark-800/60 border border-dark-700/50 rounded-xl p-3 text-left">
-                                            <div className="flex items-center gap-2 mb-1.5">
-                                                <Zap className="w-4 h-4 text-yellow-400" />
-                                                <span className="text-[11px] text-dark-400 uppercase font-medium">Ort. Yanıt</span>
-                                            </div>
-                                            <p className="text-xl font-bold text-white">{Math.round(adminStats.avg_response_time_ms || 0)}ms</p>
-                                        </div>
-                                        <div className="bg-dark-800/60 border border-dark-700/50 rounded-xl p-3 text-left">
-                                            <div className="flex items-center gap-2 mb-1.5">
-                                                <Cpu className="w-4 h-4 text-purple-400" />
-                                                <span className="text-[11px] text-dark-400 uppercase font-medium">AI Modül</span>
-                                            </div>
-                                            <p className="text-xl font-bold text-white">
-                                                {adminModules?.modules ? Object.values(adminModules.modules).filter(Boolean).length : '—'}
-                                                <span className="text-sm font-normal text-dark-400">
-                                                    /{adminModules?.modules ? Object.keys(adminModules.modules).length : '—'}
-                                                </span>
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
 
                             {/* Suggestion Cards Grid */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
@@ -991,6 +943,20 @@ export default function Ask() {
                                                                 <Eye className="w-5 h-5 text-white" />
                                                             </div>
                                                         </div>
+                                                    ) : att.type === 'audio' ? (
+                                                        <div className="flex items-center gap-2 px-3 py-2 bg-purple-500/20 rounded-lg border border-purple-500/30">
+                                                            <Music className="w-4 h-4 text-purple-400" />
+                                                            <span className="text-xs truncate max-w-[100px] text-purple-200">
+                                                                {att.file.name}
+                                                            </span>
+                                                        </div>
+                                                    ) : att.type === 'video' ? (
+                                                        <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/20 rounded-lg border border-blue-500/30">
+                                                            <Film className="w-4 h-4 text-blue-400" />
+                                                            <span className="text-xs truncate max-w-[100px] text-blue-200">
+                                                                {att.file.name}
+                                                            </span>
+                                                        </div>
                                                     ) : (
                                                         <div className="flex items-center gap-2 px-3 py-2 bg-white/10 rounded-lg">
                                                             {getFileIcon(att.type)}
@@ -1125,7 +1091,12 @@ export default function Ask() {
                                             </button>
                                         </div>
                                     ) : (
-                                        <div className="relative flex items-center gap-2 px-3 py-2 bg-dark-800 rounded-lg border border-dark-700">
+                                        <div className={clsx(
+                                            "relative flex items-center gap-2 px-3 py-2 rounded-lg border",
+                                            file.type === 'audio' ? "bg-purple-500/10 border-purple-500/30" :
+                                            file.type === 'video' ? "bg-blue-500/10 border-blue-500/30" :
+                                            "bg-dark-800 border-dark-700"
+                                        )}>
                                             {getFileIcon(file.type)}
                                             <div className="max-w-[100px]">
                                                 <p className="text-xs text-white truncate">{file.file.name}</p>
@@ -1186,7 +1157,8 @@ export default function Ask() {
                                 title="Yeni sohbet başlat"
                             >
                                 <MessageSquarePlus className="w-3.5 h-3.5" />
-                                <span className="hidden sm:inline">Yeni</span> Sohbet
+                                <span className="hidden sm:inline">Yeni Sohbet</span>
+                                <span className="sm:hidden">Yeni</span>
                             </button>
 
                             {/* Memory indicator */}
@@ -1206,7 +1178,8 @@ export default function Ask() {
                                     title="Tüm hafızayı sil"
                                 >
                                     <ShieldX className="w-3.5 h-3.5" />
-                                    <span className="hidden sm:inline">Beni</span> Unut
+                                    <span className="hidden sm:inline">Beni Unut</span>
+                                    <span className="sm:hidden">Unut</span>
                                 </button>
                             )}
                         </div>
@@ -1269,7 +1242,7 @@ export default function Ask() {
                             <button
                                 type="button"
                                 onClick={() => {
-                                    fileInputRef.current?.setAttribute('accept', 'image/*')
+                                    fileInputRef.current?.setAttribute('accept', 'image/*,audio/*,video/*')
                                     fileInputRef.current?.click()
                                 }}
                                 className="hidden sm:block p-2 sm:p-3 hover:bg-dark-800 rounded-xl transition-colors text-dark-400 hover:text-green-400"

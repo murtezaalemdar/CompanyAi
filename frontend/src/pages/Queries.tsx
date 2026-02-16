@@ -23,27 +23,27 @@ export default function Queries() {
                 <table className="w-full text-left">
                     <thead className="bg-dark-800/50 text-dark-400 text-xs uppercase font-medium">
                         <tr>
-                            <th className="px-6 py-4 rounded-tl-lg">Soru</th>
-                            <th className="px-6 py-4">Departman</th>
-                            <th className="px-6 py-4">Risk</th>
-                            <th className="px-6 py-4">Güven</th>
-                            <th className="px-6 py-4 rounded-tr-lg">Tarih</th>
+                            <th className="px-3 py-3 sm:px-6 sm:py-4 rounded-tl-lg">Soru</th>
+                            <th className="px-3 py-3 sm:px-6 sm:py-4 hidden sm:table-cell">Departman</th>
+                            <th className="px-3 py-3 sm:px-6 sm:py-4">Risk</th>
+                            <th className="px-3 py-3 sm:px-6 sm:py-4 hidden md:table-cell">Güven</th>
+                            <th className="px-3 py-3 sm:px-6 sm:py-4 rounded-tr-lg">Tarih</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-dark-800">
                         {queries?.map((query: any) => (
                             <tr key={query.id} className="hover:bg-dark-800/30 transition-colors">
-                                <td className="px-6 py-4 max-w-md">
+                                <td className="px-3 py-3 sm:px-6 sm:py-4 max-w-[200px] sm:max-w-md">
                                     <p className="text-white text-sm font-medium truncate" title={query.question}>
                                         {query.question}
                                     </p>
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-3 py-3 sm:px-6 sm:py-4 hidden sm:table-cell">
                                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-500/10 text-primary-400 border border-primary-500/20">
                                         {query.department || 'Genel'}
                                     </span>
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-3 py-3 sm:px-6 sm:py-4">
                                     <div className="flex items-center gap-2">
                                         {query.risk_level === 'Yüksek' ? (
                                             <AlertTriangle className="w-4 h-4 text-red-500" />
@@ -66,8 +66,8 @@ export default function Queries() {
                                         </span>
                                     </div>
                                 </td>
-                                <td className="px-6 py-4">
-                                    <div className="w-full bg-dark-700 rounded-full h-1.5 w-24">
+                                <td className="px-3 py-3 sm:px-6 sm:py-4 hidden md:table-cell">
+                                    <div className="w-24 bg-dark-700 rounded-full h-1.5">
                                         <div
                                             className="bg-blue-500 h-1.5 rounded-full"
                                             style={{ width: `${query.confidence * 100}%` }}
@@ -77,7 +77,7 @@ export default function Queries() {
                                         %{Math.round(query.confidence * 100)}
                                     </span>
                                 </td>
-                                <td className="px-6 py-4 text-sm text-dark-400">
+                                <td className="px-3 py-3 sm:px-6 sm:py-4 text-sm text-dark-400 whitespace-nowrap">
                                     {new Date(query.created_at).toLocaleDateString('tr-TR', {
                                         hour: '2-digit',
                                         minute: '2-digit',

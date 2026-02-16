@@ -214,14 +214,15 @@ export default function UserManagement() {
 
             {/* Kullanıcı Listesi */}
             <div className="card overflow-hidden">
+                <div className="overflow-x-auto">
                 <table className="w-full">
                     <thead>
                         <tr className="border-b border-dark-700">
-                            <th className="text-left py-4 px-4 text-xs font-medium text-dark-400 uppercase">Kullanıcı</th>
-                            <th className="text-left py-4 px-4 text-xs font-medium text-dark-400 uppercase">Departmanlar</th>
-                            <th className="text-left py-4 px-4 text-xs font-medium text-dark-400 uppercase">Rol</th>
-                            <th className="text-left py-4 px-4 text-xs font-medium text-dark-400 uppercase">Durum</th>
-                            <th className="text-right py-4 px-4 text-xs font-medium text-dark-400 uppercase">İşlem</th>
+                            <th className="text-left py-3 px-3 sm:py-4 sm:px-4 text-xs font-medium text-dark-400 uppercase">Kullanıcı</th>
+                            <th className="text-left py-3 px-3 sm:py-4 sm:px-4 text-xs font-medium text-dark-400 uppercase hidden md:table-cell">Departmanlar</th>
+                            <th className="text-left py-3 px-3 sm:py-4 sm:px-4 text-xs font-medium text-dark-400 uppercase">Rol</th>
+                            <th className="text-left py-3 px-3 sm:py-4 sm:px-4 text-xs font-medium text-dark-400 uppercase hidden sm:table-cell">Durum</th>
+                            <th className="text-right py-3 px-3 sm:py-4 sm:px-4 text-xs font-medium text-dark-400 uppercase">İşlem</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-dark-800">
@@ -231,18 +232,18 @@ export default function UserManagement() {
                             const userDepts = parseDepartments(user.department)
                             return (
                                 <tr key={user.id} className="hover:bg-dark-800/50 transition-colors">
-                                    <td className="py-4 px-4">
+                                    <td className="py-3 px-3 sm:py-4 sm:px-4">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-10 h-10 rounded-full bg-primary-500/20 flex items-center justify-center text-primary-400 font-bold">
+                                            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-primary-500/20 flex items-center justify-center text-primary-400 font-bold text-sm">
                                                 {user.full_name?.charAt(0) || user.email.charAt(0).toUpperCase()}
                                             </div>
-                                            <div>
-                                                <p className="text-sm font-medium text-white">{user.full_name || 'İsimsiz'}</p>
-                                                <p className="text-xs text-dark-400">{user.email}</p>
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium text-white truncate">{user.full_name || 'İsimsiz'}</p>
+                                                <p className="text-xs text-dark-400 truncate">{user.email}</p>
                                             </div>
                                         </div>
                                     </td>
-                                    <td className="py-4 px-4">
+                                    <td className="py-3 px-3 sm:py-4 sm:px-4 hidden md:table-cell">
                                         <div className="flex flex-wrap gap-1 text-dark-300">
                                             {userDepts.length > 0 ? (
                                                 userDepts.map((d, i) => (
@@ -255,20 +256,20 @@ export default function UserManagement() {
                                             )}
                                         </div>
                                     </td>
-                                    <td className="py-4 px-4">
-                                        <span className={clsx('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium', role.color)}>
+                                    <td className="py-3 px-3 sm:py-4 sm:px-4">
+                                        <span className={clsx('inline-flex items-center gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full text-xs font-medium', role.color)}>
                                             <RoleIcon className="w-3 h-3" />
                                             {role.label}
                                         </span>
                                     </td>
-                                    <td className="py-4 px-4">
+                                    <td className="py-3 px-3 sm:py-4 sm:px-4 hidden sm:table-cell">
                                         {user.is_active ? (
                                             <span className="text-green-400 text-sm flex items-center gap-1"><CheckCircle className="w-4 h-4" /> Aktif</span>
                                         ) : (
                                             <span className="text-red-400 text-sm flex items-center gap-1"><XCircle className="w-4 h-4" /> Pasif</span>
                                         )}
                                     </td>
-                                    <td className="py-4 px-4 text-right">
+                                    <td className="py-3 px-3 sm:py-4 sm:px-4 text-right">
                                         <button
                                             onClick={() => openEditModal(user)}
                                             className="p-2 hover:bg-dark-700 rounded-lg text-dark-400 hover:text-white"
@@ -281,6 +282,7 @@ export default function UserManagement() {
                         })}
                     </tbody>
                 </table>
+                </div>
             </div>
 
             {/* Modal */}

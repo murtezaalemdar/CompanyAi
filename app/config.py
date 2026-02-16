@@ -1,7 +1,7 @@
 """Konfigürasyon Yönetimi"""
 
 # Versiyon — frontend/src/constants.ts ile eşleşmeli
-APP_VERSION = "3.9.2"
+APP_VERSION = "5.10.0"
 
 from pydantic_settings import BaseSettings
 from typing import List
@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # LLM (Ollama + Qwen2.5-72B)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     LLM_MODEL: str = "qwen2.5:72b"
+    VISION_MODEL: str = "minicpm-v"  # v4.4.0: Vision model (OCR + görüntü anlama)
+    OMNI_MODEL: str = "minicpm-o"    # v4.5.0: Omni-modal model (görüntü + video + ses)
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379"

@@ -1,23 +1,42 @@
 [Unit]
 Description=CompanyAI Backend Service
-After=network.target
+After=network.target postgresql.service redis.service
+Wants=postgresql.service
 
 [Service]
 Type=simple
-User=root
+User=companyai
+Group=companyai
 WorkingDirectory=/opt/companyai
 Restart=always
-RestartSec=3
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
 
-# Environment Variables
-Environment=DATABASE_URL=postgresql+asyncpg://companyai:companyai@localhost:5433/companyai
-Environment=SECRET_KEY=your-production-secret-key-companyai-2026-very-long-random-string
+# GÜVENLİK: Tüm hassas değerler ayrı env dosyasında (chmod 600)
+EnvironmentFile=/etc/companyai/env
+
+# Sabit (hassas olmayan) değerler
 Environment=OLLAMA_BASE_URL=http://127.0.0.1:11434
 Environment=LLM_MODEL=qwen2.5:72b
 Environment=DEBUG=false
 Environment=PYTHONUNBUFFERED=1
 
-ExecStart=/usr/local/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Güvenlik sertleştirme
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/companyai/data /opt/companyai/logs /tmp
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+# Kaynak limitleri
+LimitNOFILE=65535
+LimitNPROC=4096
+
+ExecStart=/usr/local/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 
 [Install]
 WantedBy=multi-user.target

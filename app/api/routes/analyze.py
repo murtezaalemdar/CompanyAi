@@ -15,7 +15,7 @@ import io
 import time
 import json as _json
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -71,32 +71,194 @@ except ImportError:
 
 router = APIRouter()
 
-# ── Tip-spesifik sistem prompt'ları ──
+# ── Tip-spesifik sistem prompt'ları (v3.9.7 — enhanced) ──
 def _get_analysis_system_prompt(analysis_type: str) -> str:
     """Analiz tipine göre optimize edilmiş sistem prompt'u döndür"""
-    base = "Sen deneyimli bir veri analisti ve iş zekası uzmanısın. Türkçe yanıt ver. Sayısal değerleri daima belirt."
-    
+    base = (
+        "Sen deneyimli bir veri analisti ve iş zekası uzmanısın. Türkçe yanıt ver. "
+        "Sayısal değerleri daima belirt. Markdown tabloları aktif kullan. "
+        "Her analiz bölümünü başlıklarla (##, ###) yapılandır. "
+        "Önemli sayıları **kalın** yaz. Bulgularını maddeler halinde sun. "
+        "Veriye dayalı somut çıkarımlar yap, genel/belirsiz ifadelerden kaçın."
+    )
+
     type_prompts = {
-        "full": f"{base} Kapsamlı analiz yap. Tablolar, karşılaştırmalar, trendler ve somut tavsiyeler sun. Her bölümü detaylı ele al.",
-        "pivot": f"{base} Pivot tablo uzmanısın. Çapraz tabloları, kategori kıyaslamalarını ve yüzdeleri detaylı analiz et.",
-        "trend": f"{base} Zaman serisi ve trend analizi uzmanısın. Hareketli ortalamaları, momentum sinyallerini ve döngüsel paternleri yorumla. Gelecek öngörülerini sun.",
-        "compare": f"{base} Karşılaştırmalı analiz uzmanısın. Gruplar arası performans farklarını, medyan/ortalama ayrışmasını ve tutarlılığı değerlendir.",
-        "summary": f"{base} Veriden çarpıcı bir yönetici özeti çıkar. Kısa, yoğun ve bilgi dolu yaz. En önemli 3-4 bulguya odaklan.",
-        "recommend": f"{base} Stratejik danışman gibi düşün. Her tavsiyeyi verilerle destekle, önceliklendirr ve risk-fayda analizi yap.",
-        "report": f"{base} Profesyonel rapor yaz. Yönetici özeti, KPI tablosu, detaylı bulgular ve aksiyon planı içersin. Resmi ve yapılandırılmış format kullan.",
-        "anomaly": f"{base} Anomali tespiti uzmanısın. IQR ve Z-Score bulgularını iş süreçleri perspektifinden yorumla. Kök neden analizi yap.",
-        "correlation": f"{base} İstatistiksel ilişki analizi uzmanısın. Korelasyonları neden-sonuç bağlamında yorumla. Çoklu bağımlılık paternlerini bul.",
-        "distribution": f"{base} İstatistiksel dağılım uzmanısın. Çarpıklık, basıklık, yüzdelik dilimleri anlaşılır iş diline çevir.",
-        "forecast": f"{base} Tahminleme uzmanısın. Modellerin güven aralığını, varsayımlarını belirt. İyimser/kötümser senaryoları sun.",
-        "pareto": f"{base} Pareto ve ABC analizi uzmanısın. 80/20 kuralını iş stratejisiyle birleştir. Kaynak optimizasyonu öner.",
-        "quality": f"{base} Veri kalitesi denetçisisin. Eksiklik, tutarsızlık, tekrar sorunlarını tespit et. Veri mühendisliği ekibine teslim edilecek bir temizlik planı sun.",
-        # ── CEO-TIER ANALİZ TİPLERİ (v3.8.0) ──
-        "profitability": f"{base} Karlılık analizi uzmanısın. CEO'ya hitap ediyorsun. Ürün bazlı, müşteri bazlı ve kanal bazlı NET KÂRLILIĞI analiz et. Contribution margin, gizli zarar eden segmentler, çapraz sübvansiyon ve fiyatlama fırsatlarını ortaya çıkar. Patron '​para nerede kayboluyor?' sorusuna net cevap ver. Her bulguyu TL/₺ etkisiyle ifade et.",
-        "bottleneck": f"{base} Operasyonel darboğaz analisti ve endüstri mühendisisin. CEO'ya hitap ediyorsun. Verideki en yavaş süreç, en pahalı adım, en düşük verimlilik noktasını tespit et. Kuyruk analizi, kaynak kullanım haritası ve kapasite darboğazlarını belirle. Patron '​operasyon nerede tıkanıyor?' sorusuna net cevap ver. Her darboğazın maliyet etkisini ve çözüm önerisini ROI ile sun.",
-        "executive": f"{base} Üst düzey yönetim danışmanısın. CEO/CFO'ya hitap ediyorsun. Veriden Şirket Sağlık Skoru (0-100) türet. 4 boyutta değerlendir: Finansal Sağlamlık, Operasyonel Verimlilik, Büyüme İvmesi, Risk Maruziyet. Her boyuta harf notu (A-F) ve renk kodu ver. Patron 'şirketin durumu nasıl?' sorusuna tek bakışta cevap verecek bir dashboard üret. Aksiyon önceliklerini stratejik önemle sırala.",
-        "benchmark": f"{base} Sektörel kıyaslama ve rekabet analizi uzmanısın. CEO'ya hitap ediyorsun. Verideki metrikleri tekstil sektörü ortalamalarıyla kıyasla. Her KPI'da şirketin sektöre göre konumunu belirle (üstün/ortalama/altında). Rakiplere göre güçlü/zayıf yönleri tespit et. Patron 'rakiplere göre neredeyiz?' sorusuna net cevap ver. Benchmark gaplerini kapatmak için somut hedefler belirle.",
+        "full": f"""{base}
+Kapsamlı bir tam analiz raporu üret. Mutlaka şu bölümleri dahil et:
+## 📋 Yönetici Özeti (en kritik 3-4 bulgu, tek paragraf)
+## 📊 Temel Metrikler (markdown tablo: Metrik | Değer | Yorum)
+## 📈 Detaylı Bulgular (her önemli sütun/metrik için derinlemesine)
+## 🔍 Karşılaştırma ve Trendler
+## ⚠️ Dikkat Edilmesi Gerekenler (anomali, risk, eksik)
+## ✅ Aksiyon Önerileri (öncelik sırasıyla, somut adımlar)
+Her bölümde markdown tabloları kullan. Hiçbir bölümü atlama.""",
+
+        "pivot": f"""{base}
+Pivot tablo ve çapraz analiz uzmanısın. Yanıtını şu yapıda sun:
+## 📊 Pivot Tablo Özeti
+- Hangi kategoriler hangi değerlere göre çaprazlanmış
+## 📋 Detaylı Pivot Tablo (markdown tablo formatında)
+## 🔍 Öne Çıkan Bulgular
+- En yüksek/düşük hücreler, oranlar, paylar
+## 💡 Stratejik Çıkarımlar
+Tüm sayıları yüzde ve oran olarak da ifade et.""",
+
+        "trend": f"""{base}
+Zaman serisi ve trend analizi uzmanısın. Yanıtını şu yapıda sun:
+## 📈 Trend Özeti (genel yön, büyüme hızı)
+## 📊 Dönemsel Performans Tablosu (markdown tablo: Dönem | Değer | Değişim% | Yorum)
+## 🔄 Hareketli Ortalamalar ve Momentum
+## 📉 Volatilite ve Risk Profili
+## 🔮 Gelecek Dönem Beklentileri
+## ✅ Stratejik Öneriler
+Tüm trendi sayılarla destekle, grafik verisi oluştur.""",
+
+        "compare": f"""{base}
+Karşılaştırmalı analiz uzmanısın. Yanıtını şu yapıda sun:
+## 📊 Karşılaştırma Özet Tablosu (Grup | Metrik1 | Metrik2 | ... | Genel Sıralama)
+## 🏆 En İyi Performans Gösterenler (neden iyi, hangi metriklerde)
+## ⚠️ En Düşük Performans Gösterenler (neden kötü, nerede gerileme)
+## 📈 İstatistiksel Anlamlılık (p-value, etki büyüklüğü yorumu)
+## 🔍 Grup İçi Tutarlılık (std sapma, CV analizi)
+## ✅ Grup Bazlı Aksiyon Önerileri
+Her grubu ayrı değerlendir, sıralama tablosu oluştur.""",
+
+        "summary": f"""{base}
+Veriden etkili bir yönetici özeti çıkar:
+## 📋 Veri Kapsamı (ne, ne zaman, ne kadar — tek paragraf)
+## 🎯 Kritik Bulgular (en önemli 3-5 sayısal bulgu, madde halinde)
+## ⚡ Dikkat Çekici Noktalar (anomali, trend kırılması, fırsat)
+## 📌 Sonuç ve Öneri (tek paragraf, net ve aksiyona yönelik)
+Kısa, öz ama bilgi dolu olsun. Maksimum 15 cümle.""",
+
+        "recommend": f"""{base}
+Stratejik danışman gibi düşün. Yapılandırılmış tavsiye raporu sun:
+## 🚨 Acil Aksiyonlar (0-1 ay) — En az 2 madde
+## 📋 Kısa Vadeli İyileştirmeler (1-3 ay) — En az 3 madde
+## 🎯 Uzun Vadeli Stratejiler (3-12 ay) — En az 2 madde
+## 📊 Öncelik Matrisi (markdown tablo: Aksiyon | Öncelik | Beklenen Etki | Maliyet/Zorluk)
+Her tavsiyeyi verilerle destekle. ROI/etki tahmini yap.""",
+
+        "report": f"""{base}
+Profesyonel yönetici raporu yaz. Resmi ve yapılandırılmış format:
+## 📋 Yönetici Özeti
+## 📊 KPI Tablosu (markdown tablo: KPI | Mevcut Değer | Hedef | Durum)
+## 📈 Detaylı Analiz Bulguları
+### Bölüm 1: [Konuya göre]
+### Bölüm 2: [Konuya göre]
+## 🔍 Karşılaştırmalı Değerlendirme
+## ⚠️ Risk ve Uyarılar
+## ✅ Aksiyon Planı (markdown tablo: Adım | Sorumlu | Süre | Öncelik)
+## 📌 Sonuç
+Resmi dil kullan. Tüm bölümlerde sayısal veri olsun.""",
+
+        "anomaly": f"""{base}
+Anomali tespiti uzmanısın. Detaylı anomali raporu sun:
+## 🔴 Anomali Özeti (toplam, ciddiyet dağılımı)
+## 📊 Anomali Tablosu (Sütun | Anomali Sayısı | Ciddiyet | En Uç Değer | Normal Aralık)
+## 🔍 Yöntem Bazlı Sonuçlar (IQR, Z-Score, Modified Z-Score karşılaştırması)
+## ⚠️ Kritik Anomaliler (her biri ayrı açıklamayla)
+## 🤔 Olası Nedenler (veri hatası mı, gerçek sapma mı?)
+## ✅ Temizleme Stratejisi (sil/düzelt/araştır önerileri)
+Her anomaliyi iş süreçleri perspektifinden yorumla.""",
+
+        "correlation": f"""{base}
+Korelasyon analizi uzmanısın. İlişkileri raporla:
+## 📊 Korelasyon Matrisi (markdown tablo formatında)
+## 🔴 Güçlü İlişkiler (|r| > 0.7, tablo: Değişken1 | Değişken2 | Pearson | Spearman | Yön)
+## 🟡 Orta İlişkiler (0.4 < |r| < 0.7)
+## 🔍 İstatistiksel Anlamlılık (p-value yorumu)
+## 💡 Nedensellik Tartışması (korelasyon ≠ nedensellik uyarısı ile)
+## ✅ Stratejik Çıkarımlar (hangi değişkeni değiştirirsek ne olur?)
+Pearson ve Spearman farklarını yorumla.""",
+
+        "distribution": f"""{base}
+Dağılım analizi uzmanısın. İstatistiksel dağılımları raporla:
+## 📊 Dağılım Özet Tablosu (Sütun | Ort | Medyan | Std | CV% | Dağılım Tipi)
+## 📈 Normal Dağılım Testi Sonuçları (Sütun | Test | p-value | Normal mi?)
+## 🔍 Çarpıklık ve Basıklık Yorumu (her sütun için)
+## 📊 Yüzdelik Dilimler (P25, P50, P75, P95, P99 tablosu)
+## ⚠️ Dikkat Çekici Dağılımlar (çarpık, bimodal, uç değerli)
+## ✅ Analiz Stratejisi Önerileri (parametrik mi non-parametrik test mi?)
+İstatistiksel terimleri iş diline çevir.""",
+
+        "forecast": f"""{base}
+Tahminleme uzmanısın. Çok modelli projeksiyon raporu sun:
+## 📈 Tahmin Özeti (en iyi model, beklenen değişim)
+## 📊 Model Karşılaştırma Tablosu (Model | MAPE% | Tahmini Değer | Trend | Güven)
+## 🔮 En İyi Model Detayları (parametre, güven aralığı)
+## 📊 Senaryo Analizi (İyimser | Baz | Kötümser senaryolar tablosu)
+## ⚠️ Model Kısıtlamaları ve Varsayımlar
+## ✅ Tahminlere Dayalı Aksiyon Önerileri
+Güven aralıklarını ve belirsizlikleri mutlaka belirt.""",
+
+        "pareto": f"""{base}
+Pareto ve ABC analizi uzmanısın. Raporunu şu yapıda sun:
+## 📊 Pareto Kuralı Sonucu (80/20 geçerli mi? tablo ile göster)
+## 📋 ABC Sınıflandırma Tablosu (Sınıf | Öğe Sayısı | Toplam Değer | Pay% | Öğeler)
+## 🏆 A Sınıfı Detay Analizi (her öğe ayrı, neden değerli?)
+## 🔍 B Sınıfı Fırsat Analizi (A'ya çıkma potansiyeli)
+## ⚠️ C Sınıfı Değerlendirme (optimize et veya kes)
+## ✅ Kaynak Dağılımı Önerileri (bütçe, zaman, personel yüzdeleri)
+Her öneriyi katkı yüzdeleriyle destekle.""",
+
+        "quality": f"""{base}
+Veri kalitesi denetçisisin. Profesyonel denetim raporu sun:
+## 📊 Kalite Skor Kartı (Boyut | Skor | Not | Açıklama tablosu)
+## 🔍 Bütünlük Analizi (eksik veri haritası, sütun bazlı tablo)
+## 🔄 Teksillik Kontrolü (tekrar satır analizi)
+## ⚡ Tutarlılık Denetimi (tip uyumsuzlukları, format sorunları)
+## ✅ Geçerlilik Testi (aralık ihlalleri, mantıksal kontroller)
+## 📋 Temizlik Planı (Adım | Sütun | İşlem | Öncelik tablosu)
+## 📌 Sonuç (veri güvenilirlik değerlendirmesi)
+Her sorunu somut örneklerle göster.""",
+
+        # ── CEO-TIER ANALİZ TİPLERİ (v3.8.0 → v3.9.7 enhanced) ──
+        "profitability": f"""{base}
+CEO'ya hitap eden karlılık raporu sun:
+## 💰 Karlılık Özeti (toplam gelir, maliyet, net kâr marjı)
+## 📊 Segment Bazlı Karlılık Tablosu (Segment | Gelir | Maliyet | Net Kâr | Marj% | Sıralama)
+## 🔴 Zarar Eden Segmentler (gizli maliyet analizi)
+## 🟢 En Kârlı Segmentler (büyütme fırsatları)
+## 💡 Fiyatlama Analizi ve Fırsatlar
+## 📊 Contribution Margin Tablosu
+## ✅ Patron'un Aksiyon Listesi (direkt TL/₺ etkisiyle)
+Her bulguyu para birimi cinsinden ifade et.""",
+
+        "bottleneck": f"""{base}
+CEO'ya hitap eden darboğaz raporu sun:
+## 🔴 Ana Darboğaz Tespiti (nerede, neden, ne kadar etkili?)
+## 📊 Süreç Performans Tablosu (Adım | Süre | Kapasite% | Hata% | Maliyet | Skor)
+## ⛓️ Zincirleme Etki Analizi (darboğazın domino etkisi)
+## 📈 Kapasite ve Verimlilik Haritası
+## 💡 İyileştirme Önerileri (ROI ile: Aksiyon | Maliyet | Tasarruf | Süre)
+## ✅ Öncelikli Aksiyon Planı
+Her darboğazın finansal etkisini hesapla.""",
+
+        "executive": f"""{base}
+CEO/CFO'ya hitap eden Şirket Sağlık Dashboard'u oluştur:
+## 🏥 Genel Sağlık Skoru (0-100 puan, harf notu, durum)
+## 📊 4 Boyut Tablosu (Boyut | Skor | Not | Trend | Renk)
+- 💰 Finansal Sağlamlık
+- ⚙️ Operasyonel Verimlilik
+- 📈 Büyüme İvmesi
+- 🛡️ Risk Maruziyet
+## 🏆 En Güçlü 3 Gösterge
+## ⚠️ En Zayıf 3 Gösterge (acil müdahale gereken)
+## ✅ Stratejik Öncelikler (harf notuyla sıralı)
+Tek bakışta anlaşılır dashboard formatı kullan.""",
+
+        "benchmark": f"""{base}
+CEO'ya hitap eden sektörel kıyaslama raporu sun:
+## 📊 Kıyaslama Tablosu (KPI | Şirket | Sektör Ort. | En İyi | Konum | Gap)
+## 🏆 Üstün Olduğumuz Alanlar (neden iyi, nasıl sürdürülür?)
+## ⚠️ Geride Kaldığımız Alanlar (gap analizi, kapatma süresi)
+## 📈 Rekabet Pozisyonu Değerlendirmesi
+## 🎯 Hedef Belirleme (KPI | Mevcut | 3 Ay Hedef | 12 Ay Hedef)
+## ✅ Gap Kapatma Aksiyon Planı
+Her KPI'ı sektör benchmark'ı ile karşılaştır.""",
     }
-    
+
     return type_prompts.get(analysis_type, type_prompts["full"])
 
 # ── Aktif analiz dosyaları cache (kullanıcı bazlı) ──
@@ -688,3 +850,103 @@ async def list_cached_files(
         files.append(info)
     
     return {"files": files, "count": len(files)}
+
+
+# ══════════════════════════════════════════════════════════════
+# ANALİZ SONUÇLARINI DIŞA AKTAR (v3.9.7)
+# ══════════════════════════════════════════════════════════════
+
+EXPORT_AVAILABLE = False
+try:
+    from app.core.export_service import generate_export, get_export_info
+    EXPORT_AVAILABLE = True
+except Exception:
+    pass
+
+
+class AnalysisExportRequest(BaseModel):
+    """Analiz sonucu export talebi"""
+    content: str = Field(..., description="Analiz sonuç metni (markdown)")
+    format: str = Field("excel", description="excel, pdf, csv, word, pptx")
+    title: Optional[str] = Field(None, description="Rapor başlığı")
+    analysis_type: Optional[str] = Field(None, description="Analiz tipi")
+    filename: Optional[str] = Field(None, description="Orijinal dosya adı")
+
+
+@router.post("/export")
+async def export_analysis(
+    req: AnalysisExportRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Analiz sonucunu Excel/PDF/CSV/Word/PPTX olarak dışa aktar"""
+    if not EXPORT_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Export modülü kullanılamıyor")
+
+    fmt = req.format.lower().strip()
+    if fmt not in ("excel", "pdf", "csv", "word", "pptx"):
+        raise HTTPException(status_code=400, detail=f"Desteklenmeyen format: {fmt}")
+
+    # Başlık oluştur
+    type_labels = {
+        "full": "Tam Analiz", "pivot": "Pivot Tablo", "trend": "Trend Analizi",
+        "compare": "Karşılaştırma", "summary": "Özet Rapor", "recommend": "Tavsiyeler",
+        "report": "Profesyonel Rapor", "anomaly": "Anomali Tespiti", "correlation": "Korelasyon",
+        "distribution": "Dağılım Analizi", "forecast": "Tahminleme", "pareto": "Pareto ABC",
+        "quality": "Veri Kalitesi", "profitability": "Karlılık Analizi",
+        "bottleneck": "Darboğaz Analizi", "executive": "Sağlık Skoru",
+        "benchmark": "Kıyaslama Raporu",
+    }
+    title = req.title or type_labels.get(req.analysis_type, "Analiz Raporu")
+    if req.filename:
+        title = f"{title} — {req.filename}"
+
+    try:
+        result = generate_export(req.content, fmt, title)
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "Export hatası"))
+
+        return {
+            "success": True,
+            "file_id": result["file_id"],
+            "filename": result["filename"],
+            "format": fmt,
+            "download_url": f"/export/download/{result['file_id']}",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("analysis_export_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Export sırasında hata: {str(e)}")
+
+
+@router.get("/export/download/{file_id}")
+async def download_analysis_export(
+    file_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Export dosyasını indir"""
+    if not EXPORT_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Export modülü kullanılamıyor")
+
+    info = get_export_info(file_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="Dosya bulunamadı veya süresi dolmuş")
+
+    import os
+    if not os.path.exists(info["path"]):
+        raise HTTPException(status_code=404, detail="Dosya disk üzerinde bulunamadı")
+
+    media_types = {
+        "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pdf": "application/pdf",
+        "csv": "text/csv",
+        "word": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+
+    return FileResponse(
+        path=info["path"],
+        filename=info["filename"],
+        media_type=media_types.get(info["format"], "application/octet-stream"),
+        headers={"Content-Disposition": f'attachment; filename="{info["filename"]}"'},
+    )

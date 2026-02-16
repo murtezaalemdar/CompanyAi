@@ -68,7 +68,7 @@ EVALUATION_CRITERIA = {
 
 # Otomatik yeniden analiz eşiği
 AUTO_REANALYZE_THRESHOLD = 60
-MAX_RETRY_COUNT = 1  # En fazla 1 kez retry (toplam 2 deneme)
+MAX_RETRY_COUNT = 2  # En fazla 2 kez retry (toplam 3 deneme — self-correction loop)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -333,6 +333,159 @@ def _check_hallucination(answer: str, question: str) -> list[str]:
 
 
 # ══════════════════════════════════════════════════════════════
+# 2.5 SAYISAL DOĞRULAMA MOTORU (v4.4.0) — RAG Kaynak Kontrolü
+# ══════════════════════════════════════════════════════════════
+
+def _extract_numbers(text: str) -> list[dict]:
+    """Metinden sayısal değerleri ve bağlamlarını çıkar.
+    
+    Returns:
+        [{"value": float, "unit": str, "context": str}, ...]
+    """
+    patterns = [
+        # Para: ₺1.234.567 veya 1.234 TL veya $500
+        (r'[₺$€]\s*([\d.,]+)\s*(?:milyon|milyar)?', 'para'),
+        (r'([\d.,]+)\s*(?:TL|USD|EUR|₺|\$|€)', 'para'),
+        (r'([\d.,]+)\s*(?:milyon|milyar)\s*(?:TL|USD|₺)?', 'para'),
+        # Yüzde: %15.3 veya 15.3%
+        (r'%\s*([\d.,]+)', 'yüzde'),
+        (r'([\d.,]+)\s*%', 'yüzde'),
+        # Ağırlık/miktar: 500 kg, 3.2 ton
+        (r'([\d.,]+)\s*(?:kg|ton|gr|gram|lt|litre|m²|m³|metre|adet|kişi)', 'miktar'),
+        # Zaman: 15 gün, 3 ay
+        (r'([\d.,]+)\s*(?:gün|hafta|ay|yıl|saat|dakika)', 'zaman'),
+        # Genel sayı (bağlam ile)
+        (r'(?:toplam|ortalama|minimum|maksimum|yaklaşık|tahmini)\s*:?\s*([\d.,]+)', 'hesaplama'),
+    ]
+    
+    results = []
+    for pattern, unit_type in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            try:
+                raw = match.group(1).replace('.', '').replace(',', '.')
+                value = float(raw)
+                # Bağlam: eşleşmeden 40 karakter öncesi ve sonrası
+                start = max(0, match.start() - 40)
+                end = min(len(text), match.end() + 40)
+                context = text[start:end].strip()
+                results.append({
+                    "value": value,
+                    "unit": unit_type,
+                    "context": context,
+                    "raw": match.group(0),
+                })
+            except (ValueError, IndexError):
+                continue
+    
+    return results
+
+
+def validate_numbers_against_source(answer: str, rag_context: str) -> dict:
+    """LLM yanıtındaki sayıları RAG kaynak verileriyle karşılaştır.
+    
+    Args:
+        answer: LLM'in ürettiği yanıt
+        rag_context: RAG'dan gelen kaynak dokümanlar (birleştirilmiş metin)
+    
+    Returns:
+        {
+            "validated": bool,       # Sayısal tutarlılık var mı
+            "match_count": int,      # Eşleşen sayı adedi
+            "mismatch_count": int,   # Uyuşmayan sayı adedi
+            "fabricated_count": int,  # Kaynakta hiç olmayan sayılar
+            "issues": [str],         # Sorun açıklamaları
+            "details": [dict],       # Detay
+            "score": float,          # 0-100 doğruluk skoru
+        }
+    """
+    if not rag_context or not answer:
+        return {"validated": True, "match_count": 0, "mismatch_count": 0,
+                "fabricated_count": 0, "issues": [], "details": [], "score": 100}
+    
+    answer_numbers = _extract_numbers(answer)
+    source_numbers = _extract_numbers(rag_context)
+    
+    if not answer_numbers:
+        return {"validated": True, "match_count": 0, "mismatch_count": 0,
+                "fabricated_count": 0, "issues": [], "details": [], "score": 100}
+    
+    # Kaynak sayıları set'e çevir (hızlı arama için)
+    source_values = {n["value"] for n in source_numbers}
+    # Toleranslı eşleme için kaynak listesi
+    source_list = [n["value"] for n in source_numbers]
+    
+    matched = 0
+    mismatched = 0
+    fabricated = 0
+    issues = []
+    details = []
+    
+    for ans_num in answer_numbers:
+        val = ans_num["value"]
+        
+        # Tam eşleşme kontrolü
+        if val in source_values:
+            matched += 1
+            details.append({"value": val, "status": "eşleşti", "raw": ans_num["raw"]})
+            continue
+        
+        # Toleranslı eşleşme (%5 sapma)
+        found_close = False
+        for src_val in source_list:
+            if src_val == 0:
+                continue
+            diff_pct = abs(val - src_val) / abs(src_val) * 100
+            if diff_pct <= 5:
+                matched += 1
+                found_close = True
+                details.append({"value": val, "status": "yakın_eşleşme",
+                              "source_value": src_val, "diff_pct": round(diff_pct, 1),
+                              "raw": ans_num["raw"]})
+                break
+            elif diff_pct <= 20:
+                mismatched += 1
+                found_close = True
+                issues.append(
+                    f"Sayısal sapma: yanıtta {ans_num['raw']}, kaynakta {src_val} "
+                    f"(fark: %{diff_pct:.0f})"
+                )
+                details.append({"value": val, "status": "sapma",
+                              "source_value": src_val, "diff_pct": round(diff_pct, 1),
+                              "raw": ans_num["raw"]})
+                break
+        
+        if not found_close:
+            # Hesaplama sonucu olabilir (toplam, ortalama vb.) — tolerans ver
+            if ans_num["unit"] == "hesaplama":
+                details.append({"value": val, "status": "hesaplama", "raw": ans_num["raw"]})
+            else:
+                fabricated += 1
+                details.append({"value": val, "status": "kaynakta_yok", "raw": ans_num["raw"]})
+    
+    # Çok fazla uydurma varsa uyar
+    total = matched + mismatched + fabricated
+    if total == 0:
+        score = 100
+    else:
+        score = max(0, (matched / total) * 100 - fabricated * 5 - mismatched * 10)
+    
+    if fabricated > 2:
+        issues.append(f"⚠️ {fabricated} sayısal değer kaynakta bulunamadı — uydurma riski")
+    if mismatched > 1:
+        issues.append(f"⚠️ {mismatched} sayısal değerde önemli sapma tespit edildi")
+    
+    return {
+        "validated": len(issues) == 0,
+        "match_count": matched,
+        "mismatch_count": mismatched,
+        "fabricated_count": fabricated,
+        "issues": issues,
+        "details": details,
+        "score": round(score, 1),
+    }
+
+
+# ══════════════════════════════════════════════════════════════
 # 3. LLM İLE DERİN DEĞERLENDİRME (opsiyonel, ağır analiz)
 # ══════════════════════════════════════════════════════════════
 
@@ -397,6 +550,149 @@ def build_retry_prompt(question: str, evaluation: dict) -> str:
         suggestions=suggestions_text or "- Daha detaylı ve yapılandırılmış yanıt ver",
         question=question,
     )
+
+
+SELF_CORRECTION_PROMPT = """Aşağıdaki yanıtını gözden geçir ve iyileştir.
+
+## Orijinal Soru:
+{question}
+
+## Mevcut Yanıtın:
+{current_answer}
+
+## Kalite Değerlendirmesi (Güven: %{confidence}):
+{evaluation_summary}
+
+## Görev:
+1. Yanıtındaki eksikleri ve hataları tespit et
+2. Somut veriler, sayılar ve örneklerle zenginleştir
+3. Mantıksal tutarlılığı kontrol et
+4. Yapısal netliği artır (başlıklar, listeler, tablolar)
+
+Düzeltilmiş ve iyileştirilmiş yanıtı yaz:"""
+
+
+def build_self_correction_prompt(question: str, current_answer: str, evaluation: dict) -> str:
+    """Self-correction döngüsü için prompt oluştur.
+    
+    Normal retry'dan farkı: Mevcut yanıtı da gösterir ve üzerine düzeltme ister.
+    """
+    eval_summary = []
+    for criterion, score in evaluation.get("criteria_scores", {}).items():
+        eval_summary.append(f"- {criterion}: {score}/100")
+    if evaluation.get("issues"):
+        eval_summary.extend(f"- ⚠️ {i}" for i in evaluation["issues"])
+    if evaluation.get("suggestions"):
+        eval_summary.extend(f"- 💡 {s}" for s in evaluation["suggestions"])
+    
+    return SELF_CORRECTION_PROMPT.format(
+        question=question,
+        current_answer=current_answer[:2000],  # Token limiti için kısalt
+        confidence=evaluation.get("confidence", 0),
+        evaluation_summary="\n".join(eval_summary),
+    )
+
+
+async def self_correction_loop(
+    question: str,
+    initial_answer: str,
+    mode: str,
+    llm_generate,
+    system_prompt: str = "",
+    chat_history: list = None,
+    max_rounds: int = None,
+) -> dict:
+    """İteratif self-correction döngüsü.
+    
+    LLM çıktısını değerlendirir, düşükse düzeltme ister, en iyi versiyonu döndürür.
+    
+    Args:
+        question: Kullanıcı sorusu
+        initial_answer: İlk LLM yanıtı
+        mode: Yanıt modu (Sohbet, Analiz, Rapor)
+        llm_generate: LLM generate fonksiyonu (async)
+        system_prompt: Sistem prompt'u
+        chat_history: Chat geçmişi
+        max_rounds: Maksimum düzeltme turu
+    
+    Returns:
+        {
+            "answer": str,           # En iyi yanıt
+            "confidence": float,     # 0-100
+            "rounds": int,           # Kaç tur çalıştı
+            "improved": bool,        # İyileştirme oldu mu
+            "evaluation": dict,      # Son değerlendirme
+        }
+    """
+    if max_rounds is None:
+        max_rounds = MAX_RETRY_COUNT
+    
+    best_answer = initial_answer
+    best_confidence = 0
+    best_evaluation = {}
+    rounds = 0
+    
+    current_answer = initial_answer
+    
+    for i in range(max_rounds + 1):  # +1 çünkü ilk değerlendirme de dahil
+        # Değerlendir
+        evaluation = quick_evaluate(current_answer, question, mode)
+        confidence = evaluation.get("confidence", 0)
+        rounds = i
+        
+        # En iyi sonucu takip et
+        if confidence > best_confidence:
+            best_confidence = confidence
+            best_answer = current_answer
+            best_evaluation = evaluation
+        
+        # Yeterli kalite → döngüyü kır
+        if confidence >= AUTO_REANALYZE_THRESHOLD or not evaluation.get("should_retry"):
+            break
+        
+        # Son tur → retry yapma
+        if i >= max_rounds:
+            break
+        
+        # Self-correction prompt oluştur
+        try:
+            if i == 0:
+                # İlk retry — standart retry prompt
+                correction_prompt = build_retry_prompt(question, evaluation)
+            else:
+                # Sonraki turlar — self-correction (mevcut yanıtı göstererek)
+                correction_prompt = build_self_correction_prompt(
+                    question, current_answer, evaluation
+                )
+            
+            corrected = await llm_generate(
+                prompt=correction_prompt,
+                system_prompt=system_prompt,
+                temperature=max(0.1, 0.3 - i * 0.1),  # Her turda daha deterministik
+                max_tokens=800,
+                history=chat_history,
+            )
+            
+            if corrected and len(corrected) > len(current_answer) * 0.3:
+                current_answer = corrected
+                logger.info("self_correction_round", round=i+1, 
+                           prev_confidence=confidence)
+        except Exception as e:
+            logger.warning("self_correction_error", round=i+1, error=str(e))
+            break
+    
+    improved = best_confidence > quick_evaluate(initial_answer, question, mode).get("confidence", 0)
+    
+    logger.info("self_correction_done", rounds=rounds, 
+                final_confidence=best_confidence, improved=improved)
+    
+    return {
+        "answer": best_answer,
+        "confidence": best_confidence,
+        "rounds": rounds,
+        "improved": improved,
+        "evaluation": best_evaluation,
+    }
 
 
 def format_confidence_badge(confidence: float) -> str:

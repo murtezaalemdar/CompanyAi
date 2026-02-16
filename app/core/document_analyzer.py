@@ -50,6 +50,13 @@ except ImportError:
     FORECASTING_AVAILABLE = False
     STATSMODELS_AVAILABLE = False
 
+# Opsiyonel: pdfplumber ile PDF tablo çıkarma (v4.4.0)
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    PDFPLUMBER_AVAILABLE = False
+
 
 # ══════════════════════════════════════════════════════════════
 # 1. VERİ PARSE & KEŞİF
@@ -64,25 +71,51 @@ def parse_file_to_dataframe(filename: str, file_content: bytes) -> Optional[pd.D
     
     try:
         if filename_lower.endswith(('.xlsx', '.xls')):
-            # Excel — tüm sayfaları oku, en büyük olanı kullan
+            # Excel — tüm sayfaları oku ve birleştir (v4.4.0)
             xls = pd.ExcelFile(io.BytesIO(file_content))
             sheets = {}
             for sheet_name in xls.sheet_names:
                 df = pd.read_excel(xls, sheet_name=sheet_name)
-                sheets[sheet_name] = df
+                if not df.empty:
+                    sheets[sheet_name] = df
             
             if not sheets:
                 return None
             
-            # En çok satırı olan sayfayı döndür
-            main_sheet = max(sheets.values(), key=lambda x: len(x))
+            # Tek sayfa varsa doğrudan döndür
+            if len(sheets) == 1:
+                only_df = list(sheets.values())[0]
+                only_df.attrs['_sheet_info'] = {
+                    name: {"rows": len(df), "cols": len(df.columns)}
+                    for name, df in sheets.items()
+                }
+                return only_df
             
-            # Tüm sayfaları metadata olarak sakla (sadece istatistik, DataFrame referansı KOYMUYORUZ)
-            main_sheet.attrs['_all_sheets'] = {
-                name: {"rows": len(df), "cols": len(df.columns)} 
+            # Çoklu sayfa: sütunlar uyumluysa birleştir, değilse en büyüğünü kullan
+            all_cols = [set(df.columns.tolist()) for df in sheets.values()]
+            common_cols = all_cols[0].intersection(*all_cols[1:]) if len(all_cols) > 1 else all_cols[0]
+            
+            if len(common_cols) >= 2:
+                # Ortak sütunlar varsa — tüm sayfaları birleştir
+                merged_frames = []
+                for sheet_name, df in sheets.items():
+                    df_copy = df.copy()
+                    df_copy['_sayfa'] = sheet_name
+                    merged_frames.append(df_copy)
+                main_sheet = pd.concat(merged_frames, ignore_index=True)
+                logger.info("excel_multi_sheet_merged",
+                           sheets=len(sheets),
+                           total_rows=len(main_sheet),
+                           common_cols=len(common_cols))
+            else:
+                # Farklı yapıda — en büyüğünü döndür, diğerlerini metadata olarak tut
+                main_sheet = max(sheets.values(), key=lambda x: len(x))
+            
+            # Tüm sayfaları metadata olarak sakla
+            main_sheet.attrs['_sheet_info'] = {
+                name: {"rows": len(df), "cols": len(df.columns)}
                 for name, df in sheets.items()
             }
-            # NOT: _sheets_data attrs'a konmaz — pandas deepcopy recursion bug'ına yol açar
             
             return main_sheet
         
@@ -119,6 +152,107 @@ def parse_file_to_dataframe(filename: str, file_content: bytes) -> Optional[pd.D
         logger.warning("parse_to_df_failed", file=filename, error=str(e))
     
     return None
+
+
+def parse_pdf_tables(file_content: bytes, filename: str = "document.pdf") -> Optional[pd.DataFrame]:
+    """PDF dosyasından tablo verilerini çıkar (v4.4.0).
+    
+    pdfplumber kullanarak PDF'teki tabloları tespit eder ve DataFrame'e çevirir.
+    Birden fazla tablo varsa birleştirir veya en büyüğünü döndürür.
+    
+    Args:
+        file_content: PDF dosya içeriği (bytes)
+        filename: Dosya adı
+    
+    Returns:
+        Çıkarılan tablo verilerini içeren DataFrame veya None
+    """
+    if not PDFPLUMBER_AVAILABLE:
+        logger.debug("pdfplumber_not_available", action="skipping_pdf_table_extraction")
+        return None
+    
+    try:
+        all_tables = []
+        
+        with pdfplumber.open(io.BytesIO(file_content)) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                tables = page.extract_tables()
+                if not tables:
+                    continue
+                
+                for table_idx, table in enumerate(tables):
+                    if not table or len(table) < 2:
+                        continue
+                    
+                    # İlk satırı başlık olarak kullan
+                    headers = [str(h).strip() if h else f"Sütun_{i+1}" 
+                              for i, h in enumerate(table[0])]
+                    
+                    # Boş/tekrar başlıkları düzelt
+                    seen = {}
+                    clean_headers = []
+                    for h in headers:
+                        if h in seen:
+                            seen[h] += 1
+                            clean_headers.append(f"{h}_{seen[h]}")
+                        else:
+                            seen[h] = 0
+                            clean_headers.append(h)
+                    
+                    rows = []
+                    for row in table[1:]:
+                        if row and any(cell for cell in row):
+                            cleaned_row = [str(cell).strip() if cell else "" for cell in row]
+                            rows.append(cleaned_row)
+                    
+                    if rows:
+                        df = pd.DataFrame(rows, columns=clean_headers[:len(rows[0])])
+                        df['_sayfa'] = page_num
+                        df['_tablo'] = table_idx + 1
+                        
+                        # Sayısal sütunları otomatik dönüştür
+                        for col in df.columns:
+                            if col.startswith('_'):
+                                continue
+                            try:
+                                # Türkçe sayı formatı: 1.234,56 → 1234.56
+                                converted = df[col].str.replace('.', '', regex=False)
+                                converted = converted.str.replace(',', '.', regex=False)
+                                df[col] = pd.to_numeric(converted, errors='ignore')
+                            except (AttributeError, ValueError):
+                                pass
+                        
+                        all_tables.append(df)
+        
+        if not all_tables:
+            return None
+        
+        if len(all_tables) == 1:
+            result = all_tables[0]
+        else:
+            # Aynı yapıdaki tabloları birleştir
+            col_sets = [set(df.columns.tolist()) for df in all_tables]
+            groups = {}
+            for i, cols in enumerate(col_sets):
+                key = frozenset(cols)
+                if key not in groups:
+                    groups[key] = []
+                groups[key].append(all_tables[i])
+            
+            # En büyük grubu birleştir
+            biggest_group = max(groups.values(), key=lambda g: sum(len(df) for df in g))
+            result = pd.concat(biggest_group, ignore_index=True)
+        
+        logger.info("pdf_tables_extracted",
+                    filename=filename,
+                    tables_found=len(all_tables),
+                    total_rows=len(result))
+        
+        return result
+        
+    except Exception as e:
+        logger.warning("pdf_table_extraction_failed", filename=filename, error=str(e))
+        return None
 
 
 def discover_data(df: pd.DataFrame) -> dict:
@@ -1876,19 +2010,37 @@ Her öneriyi katkı yüzdeleriyle destekle."""
 6. Kardinalite — olası ID sütunları ve düşük kardinalite uyarıları
 7. Öncelikli iyileştirme planı (en kritikten en az kritiğe)
 8. Veri kalitesi iyileştikten sonra beklenen analiz doğruluğu artışı
-Bu raporu veri mühendisliği ekibine sunulacakmış gibi yaz."""
+Bu raporu veri mühendisliği ekibine sunulacakmış gibi yaz.
+Her bulguyu | Tablo | Formatında sun."""
 
     else:  # full
         prompt += """
-**GÖREV**: Bu veri setini kapsamlı analiz et ve aşağıdaki başlıklarda yanıt ver:
+**GÖREV**: Bu veri setini kapsamlı analiz et. Aşağıdaki başlıkları MUTLAKA dahil et:
 
-1. **📋 Veri Özeti**: Veri setinin genel yapısını ve kalitesini değerlendir
-2. **📊 Temel Bulgular**: En önemli sayısal bulgular (en yüksek, en düşük, ortalamalar)
-3. **📈 Trend & Değişim**: Zaman bazlı veya kategorik değişimler
-4. **🔍 Dikkat Çekici Noktalar**: Aykırı değerler, beklenmeyen paternler, eksik veriler
-5. **💡 Yorumlar**: Verilerin ne anlama geldiği hakkında profesyonel yorumlar
-6. **✅ Tavsiyeler**: Somut, uygulanabilir öneriler (en az 3-5 madde)
-7. **⚠️ Riskler**: Dikkat edilmesi gereken riskler ve uyarılar
+## 📋 Yönetici Özeti
+En kritik 3-4 bulgu, tek paragraf. Verinin ne söylediğini net ifade et.
+
+## 📊 Temel Metrikler
+Markdown tablo olarak sun:
+| Metrik | Değer | Yorum |
+|--------|-------|-------|
+Her önemli sayısal bulguyu tabloya dahil et.
+
+## 📈 Detaylı Bulgular
+Her önemli sütun/metrik için derinlemesine analiz. Sayısal karşılaştırmalar.
+
+## 🔍 Karşılaştırma ve Trendler
+Zaman bazlı veya kategorik değişimler, gruplar arası farklar.
+
+## ⚠️ Dikkat Edilmesi Gerekenler
+Aykırı değerler, beklenmeyen paternler, riskler, eksik veriler.
+
+## ✅ Aksiyon Önerileri
+| Öncelik | Aksiyon | Beklenen Etki | Süre |
+|---------|---------|---------------|------|
+En az 5 somut, uygulanabilir öneri sun.
+
+Her bölümde markdown tabloları aktif kullan. Hiçbir bölümü atlama.
 """
     
     # Kullanıcı sorusu varsa ekle

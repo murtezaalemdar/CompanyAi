@@ -15,7 +15,7 @@ from app.core.engine import process_question
 from app.core.audit import log_action
 from app.router.router import decide
 from app.llm.client import ollama_client
-from app.llm.prompts import build_prompt
+from app.llm.prompts import build_prompt, build_rag_prompt
 from app.memory.persistent_memory import (
     is_forget_command, forget_everything,
     save_conversation, get_conversation_history,
@@ -33,6 +33,29 @@ except ImportError:
     CHAT_EXAMPLES_AVAILABLE = False
     get_pattern_response = lambda q: None
     get_few_shot_examples = lambda q, c=2: ""
+
+# RAG modülü
+try:
+    from app.rag.vector_store import search_documents as rag_search_documents
+    RAG_AVAILABLE = True
+except ImportError:
+    RAG_AVAILABLE = False
+    rag_search_documents = lambda q, n=3: []
+
+# Otomatik öğrenme motoru
+try:
+    from app.core.knowledge_extractor import learn_from_conversation
+    KNOWLEDGE_EXTRACTOR_AVAILABLE = True
+except ImportError:
+    KNOWLEDGE_EXTRACTOR_AVAILABLE = False
+
+# Web arama modülü
+try:
+    from app.llm.web_search import search_and_summarize
+    WEB_SEARCH_AVAILABLE = True
+except ImportError:
+    WEB_SEARCH_AVAILABLE = False
+    search_and_summarize = None
 
 router = APIRouter()
 
@@ -309,12 +332,68 @@ async def ask_ai_stream(
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
             )
 
-    # Prompt oluştur
-    system_prompt, user_prompt = build_prompt(
-        question=request.question,
-        context={"dept": dept, "mode": mode},
-    )
+    # ── RAG ARAMA — Stream endpoint'i de bilgi tabanını kullansın ──
+    stream_rag_docs = []
+    if RAG_AVAILABLE:
+        try:
+            raw_docs = rag_search_documents(request.question, n_results=5)
+            if raw_docs:
+                for doc in raw_docs:
+                    hybrid = doc.get('relevance', 0)
+                    dist = doc.get('distance', 999)
+                    if hybrid > 0.03 or dist < 1.8:
+                        stream_rag_docs.append(doc)
+        except Exception:
+            pass
+
+    # ── WEB ARAMA — Güncel bilgi gerektiren sorularda internetten ara ──
+    needs_web = routing.get("needs_web", False)
+    web_results_text = ""
+    web_rich_data = []
+
+    if WEB_SEARCH_AVAILABLE and search_and_summarize:
+        should_search = (
+            needs_web
+            or intent == "bilgi"
+            or any(kw in request.question.lower() for kw in [
+                "hava", "dolar", "euro", "kur", "borsa", "maç", "skor",
+                "güncel", "son dakika", "bugün", "şu an",
+                "araştır", "internet", "web", "google",
+            ])
+        )
+        # İş sorusu ama RAG'da cevap bulunamadıysa da web'e düş
+        if not should_search and intent == "iş" and not stream_rag_docs:
+            should_search = True
+
+        if should_search:
+            try:
+                import asyncio
+                web_text, rich_data = await search_and_summarize(request.question)
+                if web_text:
+                    web_results_text = web_text
+                if rich_data:
+                    web_rich_data = rich_data if isinstance(rich_data, list) else [rich_data]
+            except Exception:
+                pass  # Web arama hatası stream'i kırmamalı
+
+    # Prompt oluştur — RAG dokümanları varsa build_rag_prompt kullan
+    stream_context = {"dept": dept, "mode": mode, "intent": intent}
+    if stream_rag_docs:
+        system_prompt, user_prompt = build_rag_prompt(
+            question=request.question,
+            context=stream_context,
+            documents=stream_rag_docs,
+        )
+    else:
+        system_prompt, user_prompt = build_prompt(
+            question=request.question,
+            context=stream_context,
+        )
     
+    # Web sonuçlarını system prompt'a ekle
+    if web_results_text:
+        system_prompt += f"\n\nAşağıda internetten bulunan güncel bilgiler var. Bu bilgileri kullanarak kullanıcının sorusunu yanıtla:\n{web_results_text[:2000]}"
+
     # Kişiselleştirme
     user_name = current_user.full_name or current_user.email.split("@")[0]
     if user_name:
@@ -350,6 +429,18 @@ async def ask_ai_stream(
         # Kalıcı hafızaya kaydet (kendi DB session'u ile — SSE lifecycle-safe)
         await _save_stream_conversation(current_user.id, request.question, full_answer, dept)
 
+        # ── OTOMATİK ÖĞRENME — Arka planda öğren, stream'i yavaşlatma ──
+        if KNOWLEDGE_EXTRACTOR_AVAILABLE:
+            import asyncio
+            try:
+                _user_name = current_user.full_name or current_user.email.split("@")[0]
+                asyncio.get_event_loop().run_in_executor(
+                    None, learn_from_conversation,
+                    request.question, full_answer, _user_name, dept, bool(stream_rag_docs),
+                )
+            except Exception:
+                pass  # Öğrenme hatası stream'i kırmamalı
+
         # DB kaydet
         try:
             query = Query(
@@ -373,7 +464,7 @@ async def ask_ai_stream(
         except Exception:
             pass  # Kayıt hatası streaming'i kırmamalı
 
-        yield f"data: {_json.dumps({'done': True, 'department': dept, 'mode': mode, 'risk_level': risk, 'confidence': confidence, 'processing_time_ms': processing_ms})}\n\n"
+        yield f"data: {_json.dumps({'done': True, 'department': dept, 'mode': mode, 'risk_level': risk, 'confidence': confidence, 'processing_time_ms': processing_ms, 'web_searched': bool(web_results_text), 'rich_data': web_rich_data, 'sources': ['İnternet Araması'] if web_results_text else []})}\n\n"
 
     return StreamingResponse(
         _event_generator(),

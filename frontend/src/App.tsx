@@ -9,6 +9,8 @@ import Settings from './pages/Settings'
 import Documents from './pages/Documents'
 import Analyze from './pages/Analyze'
 import Users from './pages/Users'
+import Profile from './pages/Profile'
+import { ThemeProvider } from './contexts/ThemeContext'
 
 // Protected Route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -44,6 +46,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 function App() {
     return (
         <BrowserRouter>
+            <ThemeProvider>
             <AuthProvider>
                 <Routes>
                     <Route path="/login" element={<Login />} />
@@ -61,10 +64,12 @@ function App() {
                         <Route path="documents" element={<Documents />} />
                         <Route path="analyze" element={<Analyze />} />
                         <Route path="users" element={<AdminRoute><Users /></AdminRoute>} />
+                        <Route path="profile" element={<Profile />} />
                         <Route path="settings" element={<AdminRoute><Settings /></AdminRoute>} />
                     </Route>
                 </Routes>
             </AuthProvider>
+            </ThemeProvider>
         </BrowserRouter>
     )
 }

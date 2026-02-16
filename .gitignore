@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.production
+.env.deploy
 
 # Python
 __pycache__/
@@ -72,6 +73,41 @@ keys/
 # Backups
 backups/
 server_backup/
+*.zip
+
+# Large media files
+*.mp4
+*.avi
+*.mkv
+
+# Diagnostic & temp scripts (root level)
+diagnose_*.py
+fix_*.py
+check_*.py
+debug_*.py
+analyze_*.py
+setup_*.py
+deploy_*.py
+!deploy_now.py
+cleanup_*.py
+cleanup_*.sh
+migrate_*.py
+optimize_*.py
+install_*.py
+monitor_*.py
+pull_model_*.py
+register_*.py
+run_*.py
+!run_debug.bat
+quick_*.py
+locate_*.py
+read_logs.py
+repro_*.py
+client_*.py
+build_*.py
+create_backup_zip.py
+add_session_id.sql
+INTER_MODULE_ANALYSIS_REPORT.md
 
 # Memory bank
 memory-bank/

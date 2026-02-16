@@ -5,7 +5,7 @@ const API_BASE_URL = '/api'
 // Axios instance
 const api = axios.create({
     baseURL: API_BASE_URL,
-    timeout: 300000, // 5 minutes
+    timeout: 900000, // 15 minutes (CPU inference for large models)
     headers: {
         'Content-Type': 'application/json',
     },
@@ -53,12 +53,32 @@ export const authApi = {
         const response = await api.get('/auth/me')
         return response.data
     },
+
+    changePassword: async (currentPassword: string, newPassword: string) => {
+        const response = await api.post('/auth/change-password', {
+            current_password: currentPassword,
+            new_password: newPassword,
+        })
+        return response.data
+    },
+
+    getTheme: async () => {
+        const response = await api.get('/auth/preferences/theme')
+        return response.data
+    },
+
+    setTheme: async (theme: string) => {
+        const response = await api.put('/auth/preferences/theme', { theme })
+        return response.data
+    },
 }
 
 // AI API
 export const aiApi = {
     ask: async (question: string, department?: string) => {
-        const response = await api.post('/ask', { question, department })
+        const response = await api.post('/ask', { question, department }, {
+            timeout: 900000, // 15 minutes - CPU inference can be slow
+        })
         return response.data
     },
 
@@ -69,7 +89,7 @@ export const aiApi = {
             formData.append('department', department)
         }
 
-        // Append all files
+        // Append all files (image, document, audio, video)
         files.forEach((file, index) => {
             formData.append('files', file)
         })
@@ -79,6 +99,37 @@ export const aiApi = {
                 'Content-Type': 'multipart/form-data',
             },
             signal,
+            timeout: 900000, // 15 minutes - CPU inference can be slow
+        })
+        return response.data
+    },
+
+    // v4.5.0: Omni-modal yetenekleri
+    getOmniCapabilities: async () => {
+        const response = await api.get('/ask/omni/capabilities')
+        return response.data
+    },
+
+    // v4.5.0: Ses analizi
+    analyzeAudio: async (file: File, question?: string) => {
+        const formData = new FormData()
+        formData.append('file', file)
+        if (question) formData.append('question', question)
+        const response = await api.post('/ask/upload/audio', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 600000,
+        })
+        return response.data
+    },
+
+    // v4.5.0: Video analizi
+    analyzeVideo: async (file: File, question?: string) => {
+        const formData = new FormData()
+        formData.append('file', file)
+        if (question) formData.append('question', question)
+        const response = await api.post('/ask/upload/video', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 900000,
         })
         return response.data
     },
@@ -343,6 +394,110 @@ export const adminApi = {
         const response = await api.get('/admin/ceo/dashboard')
         return response.data
     },
+
+    // Performance Profile (v5.6.0)
+    getPerformanceProfile: async () => {
+        const response = await api.get('/admin/performance-profile')
+        return response.data
+    },
+    updatePerformanceProfile: async (data: { mode: string; gpu_percent: number; cpu_percent: number; ram_percent: number }) => {
+        const response = await api.put('/admin/performance-profile', data)
+        return response.data
+    },
+
+    // Ollama Model Yönetimi (v5.8.0)
+    getOllamaModels: async () => {
+        const response = await api.get('/admin/ollama/models')
+        return response.data
+    },
+
+    pullOllamaModel: (
+        modelName: string,
+        onProgress: (data: { status: string; completed?: number; total?: number; error?: string }) => void,
+        onDone: () => void,
+        onError: (err: string) => void,
+    ): (() => void) => {
+        const controller = new AbortController()
+        const token = localStorage.getItem('token')
+
+        fetch(`/api/admin/ollama/pull`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ name: modelName }),
+            signal: controller.signal,
+        })
+            .then(async (response) => {
+                if (!response.ok) {
+                    const txt = await response.text()
+                    onError(txt || 'Model indirme başlatılamadı')
+                    return
+                }
+                const reader = response.body?.getReader()
+                if (!reader) {
+                    onError('Stream okunamıyor')
+                    return
+                }
+                const decoder = new TextDecoder()
+                let buffer = ''
+
+                while (true) {
+                    const { done, value } = await reader.read()
+                    if (done) break
+                    buffer += decoder.decode(value, { stream: true })
+
+                    const lines = buffer.split('\n')
+                    buffer = lines.pop() || ''
+
+                    for (const line of lines) {
+                        const trimmed = line.trim()
+                        if (!trimmed || !trimmed.startsWith('data: ')) continue
+                        try {
+                            const jsonStr = trimmed.slice(6)
+                            const data = JSON.parse(jsonStr)
+                            if (data.status === 'error') {
+                                onError(data.error || 'Bilinmeyen hata')
+                                return
+                            }
+                            if (data.status === 'completed') {
+                                onDone()
+                                return
+                            }
+                            onProgress(data)
+                        } catch {
+                            // parse hatasını yoksay
+                        }
+                    }
+                }
+                onDone()
+            })
+            .catch((err) => {
+                if (err.name !== 'AbortError') {
+                    onError(err.message || 'Bağlantı hatası')
+                }
+            })
+
+        // İptal fonksiyonu döndür
+        return () => controller.abort()
+    },
+
+    switchOllamaModel: async (modelName: string) => {
+        const response = await api.post('/admin/ollama/switch', { name: modelName })
+        return response.data
+    },
+
+    deleteOllamaModel: async (modelName: string) => {
+        const response = await api.delete('/admin/ollama/models', { data: { name: modelName } })
+        return response.data
+    },
+
+    // TPS Benchmark (v5.8.0)
+    getOllamaTps: async () => {
+        const response = await api.get('/admin/ollama/tps', { timeout: 120000 })
+        return response.data
+    },
 }
 
 // RAG API
@@ -369,12 +524,19 @@ export const ragApi = {
         return response.data
     },
 
-    uploadDocument: async (file: File, department: string = 'Genel') => {
+    uploadDocument: async (file: File, department: string = 'Genel', onProgress?: (percent: number) => void) => {
         const formData = new FormData()
         formData.append('file', file)
         formData.append('department', department)
         const response = await api.post('/rag/documents/upload', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
+            onUploadProgress: (progressEvent) => {
+                if (onProgress && progressEvent.total) {
+                    const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+                    onProgress(percent)
+                }
+            },
+            timeout: 600000,
         })
         return response.data
     },
@@ -541,6 +703,38 @@ export const analyzeApi = {
             },
             body: formData,
         })
+    },
+
+    /** Analiz sonucunu dışa aktar (Excel, PDF, CSV, Word, PPTX) */
+    exportAnalysis: async (content: string, format: string, title?: string, analysisType?: string, filename?: string) => {
+        const response = await api.post('/analyze/export', {
+            content,
+            format,
+            title,
+            analysis_type: analysisType,
+            filename,
+        })
+        return response.data
+    },
+
+    /** Export dosyasını indir */
+    downloadExport: async (fileId: string, filename: string) => {
+        const token = localStorage.getItem('token')
+        const response = await fetch(`${API_BASE_URL}/analyze/export/download/${fileId}`, {
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+        })
+        if (!response.ok) throw new Error('İndirme başarısız')
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
     },
 }
 

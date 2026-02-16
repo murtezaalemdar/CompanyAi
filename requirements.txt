@@ -54,3 +54,19 @@ statsmodels>=0.14.0
 
 # Statistical Tests (t-test, ANOVA, Shapiro-Wilk, Grubbs) — v3.5.1
 scipy>=1.10.0
+
+# OCR Engine — v4.4.0
+easyocr>=1.7.0
+
+# Chart / Visualization — v4.4.0
+matplotlib>=3.8.0
+
+# Video Frame Extraction — v4.5.0 (MiniCPM-o omni-modal)
+opencv-python-headless>=4.8.0
+
+# Speech-to-Text (opsiyonel) — v4.4.0
+# faster-whisper>=0.10.0  # GPU hızlandırmalı (önerilen)
+# openai-whisper>=20230314  # alternatif
+
+# Production Server
+gunicorn>=21.2.0

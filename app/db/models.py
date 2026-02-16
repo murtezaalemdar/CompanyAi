@@ -1,7 +1,7 @@
 ﻿"""SQLAlchemy VeritabanÄ± Modelleri"""
 
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float, Boolean, JSON
 from sqlalchemy.orm import relationship
 from app.db.database import Base
 
@@ -22,6 +22,10 @@ class User(Base):
     department = Column(String(100))  # Ãœretim, SatÄ±ÅŸ, Ä°K, vb.
     role = Column(String(50), default="user")  # admin, manager, user
     is_active = Column(Boolean, default=True)
+    must_change_password = Column(Boolean, default=False)  # İlk giriş şifre değişimi
+    password_changed_at = Column(DateTime, nullable=True)  # Son şifre değişim zamanı
+    failed_login_attempts = Column(Integer, default=0)  # Ardışık başarısız giriş
+    locked_until = Column(DateTime, nullable=True)  # Hesap kilitleme zamanı
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
     
@@ -50,16 +54,17 @@ class Query(Base):
 
 
 class AuditLog(Base):
-    """Denetim kaydÄ± modeli"""
+    """Denetim kaydı modeli — hash chain ile tamper-proof"""
     __tablename__ = "audit_logs"
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     action = Column(String(100), nullable=False)  # login, logout, query, admin_action
     resource = Column(String(100))  # Etkilenen kaynak
-    details = Column(Text)  # JSON formatÄ±nda detaylar
+    details = Column(Text)  # JSON formatında detaylar
     ip_address = Column(String(50))
     user_agent = Column(String(255))
+    hash_chain = Column(String(64), nullable=True)  # SHA-256 hash chain (tamper detection)
     created_at = Column(DateTime, default=_utcnow, index=True)
     
     # Ä°liÅŸkiler
@@ -138,3 +143,27 @@ class CompanyCulture(Base):
     source_text = Column(String(300))                             # Hangi konuÅŸmadan
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class XaiRecord(Base):
+    """XAI analiz kaydı — her AI yanıtının açıklanabilirlik verileri"""
+    __tablename__ = "xai_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    query_hash = Column(String(20), nullable=False, index=True)
+    query_preview = Column(String(200))
+    mode = Column(String(50))
+    module_source = Column(String(50))
+    weighted_confidence = Column(Float, nullable=False)
+    risk_level = Column(String(20))
+    risk_score = Column(Float)
+    reasoning_steps = Column(Integer)
+    sources_used = Column(Integer)
+    rag_hit = Column(Boolean, default=False)
+    web_searched = Column(Boolean, default=False)
+    had_reflection = Column(Boolean, default=False)
+    word_count = Column(Integer)
+    factors = Column(JSON)          # Faktör skorları [{name, key, score, weight}, ...]
+    counterfactual = Column(Text)
+    user_rating = Column(Float, nullable=True)   # 1-5 arası geri bildirim
+    created_at = Column(DateTime, default=_utcnow, index=True)

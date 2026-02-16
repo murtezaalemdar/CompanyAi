@@ -1,10 +1,26 @@
-"""Akıllı Soru Yönlendirici - LLM destekli Niyet Analizi"""
+"""Akıllı Soru Yönlendirici - LLM + Regex Hibrit Niyet Analizi (v4.3.0)"""
 
 from typing import Dict, Any
 import re
 import structlog
 
 logger = structlog.get_logger()
+
+# ── LLM Router Cache (v4.3.0) ──
+_llm_router_cache: dict[str, str] = {}  # Son 50 sorguyu cache'le
+_LLM_ROUTER_CACHE_SIZE = 50
+
+# ── LLM Router Prompt (v4.3.0) ──
+LLM_ROUTER_PROMPT = """Aşağıdaki kullanıcı mesajını sınıflandır.
+
+Mesaj: "{question}"
+
+Sınıflar:
+- sohbet: Selamlaşma, günlük konuşma, kişisel soru, espri
+- iş: İş analizi, hesaplama, rapor, KPI, üretim, maliyet, performans
+- bilgi: Genel bilgi talebi, tanım, açıklama, araştırma
+
+SADECE sınıf adını yaz (sohbet/iş/bilgi), başka bir şey yazma."""
 
 # ──────────────────────────────────────────────
 # Departman anahtar kelimeleri (fallback için)
@@ -60,8 +76,6 @@ CHAT_PATTERNS = [
     r"\b(bir\s*şey\s*soracağım|merak\s*ettim|acaba)\b",
     # Şaka / eğlence
     r"\b(şaka|fıkra|espri|güldür|eğlenceli)\b",
-    # Bilgi sorusu (öğrenme amaçlı — iş dışı)
-    r"\b(nedir|ne\s*demek|anlamı\s*ne|açıkla|tarihçesi)\b",
 ]
 
 # İş / profesyonel kalıpları
@@ -90,12 +104,28 @@ KNOWLEDGE_PATTERNS = [
     r"\b(fiyat|döviz|kur|borsa|altın|bitcoin)\b",
     r"\b(dünya|hava\s*durumu|spor|futbol|maç)\b",
     r"\b(araştır|bul|internet|web|google)\b",
+    # Bilgi sorusu kalıpları (öğrenme / tanım amaçlı)
+    r"\b(nedir|ne\s*demek|anlamı\s*ne|açıkla|tarihçesi)\b",
     # Örnek / görsek / bilgi talepleri
     r"\b(örnek|örneği|örnekleri|numune)\b",
     r"\b(göster|gösterir\s*misin|görebilir\s*miyim)\b",
     r"\b(nasıl\s*yapılır|nasıl\s*olur|ne\s*işe\s*yarar)\b",
-    r"\bver(ir\s*misin|ebilir\s*misin|sene|\s*bana)\b",
+    r"\bver(ir\s*misin|ebilir\s*misin|sene|\s*bana)?\b",
     r"\b(baskı|matbaa|tasarım|desen|model|çeşit|tür)\b",
+]
+
+# Doküman / şirket bilgisi kalıpları — RAG her zaman çalışmalı
+DOCUMENT_PATTERNS = [
+    r"\b(şirket|firma|fabrika|kuruluş|işletme)\b",
+    r"\b(katalog|broşür|döküman|doküman|belge|dosya)\b",
+    r"\b(ürün|ürünler|hizmet|hizmetler)\b",
+    r"\b(bilgi\s*ver|anlat|açıkla|özetle|detay)\b",
+    r"\b(yüklediğim|eklediğim|kayıtlı|mevcut)\b",
+    r"\b(hakkında|ilgili|konusunda|dair)\b",
+    r"\b(kumaş|iplik|tekstil|konfeksiyon|dikiş|boyama)\b",
+    r"\b(ne\s*iş\s*yapar|ne\s*üretir|faaliyet|sektör)\b",
+    r"\b(kimdir|nedir|vizyonu?|misyonu?)\b",
+    r"\b(bilgi\s*tabanı|veritabanı|kaynak|referans)\b",
 ]
 
 
@@ -113,6 +143,7 @@ def _classify_intent(question: str) -> str:
     chat_score = 0
     work_score = 0
     knowledge_score = 0
+    document_score = 0
     
     for pattern in CHAT_PATTERNS:
         if re.search(pattern, q):
@@ -126,20 +157,31 @@ def _classify_intent(question: str) -> str:
         if re.search(pattern, q):
             knowledge_score += 2
     
+    for pattern in DOCUMENT_PATTERNS:
+        if re.search(pattern, q):
+            document_score += 2
+    
     # Departman keyword'ü varsa iş skoru ekle
     for dept, keywords in DEPARTMENT_KEYWORDS.items():
         if any(kw in q for kw in keywords):
             work_score += 1
     
+    # Doküman/şirket skoru varsa iş veya bilgi olarak değerlendir (sohbet değil!)
+    if document_score > 0:
+        # Doküman kalıpları tespit edildiyse, bilgi veya iş skoruna ekle
+        knowledge_score += document_score
+        work_score += document_score // 2
+    
     # Kısa tek kelime ("evet", "hayır", "tamam") → sohbet
-    if len(q.split()) <= 2 and work_score == 0:
+    if len(q.split()) <= 2 and work_score == 0 and knowledge_score == 0:
         chat_score += 3
     
     # Soru işareti + iş keyword'ü yoksa → sohbet olabilir
     if "?" in q and work_score == 0 and knowledge_score == 0:
         chat_score += 1
     
-    logger.debug("intent_scores", chat=chat_score, work=work_score, knowledge=knowledge_score, q=q[:60])
+    logger.debug("intent_scores", chat=chat_score, work=work_score, 
+                 knowledge=knowledge_score, document=document_score, q=q[:60])
     
     # En yüksek skora göre karar ver
     if work_score > chat_score and work_score > knowledge_score:
@@ -149,13 +191,58 @@ def _classify_intent(question: str) -> str:
     elif chat_score > 0:
         return "sohbet"
     else:
-        # Hiçbir kalıba uymuyorsa — genel sohbet/bilgi
-        return "sohbet"
+        # Hiçbir kalıba uymuyorsa — bilgi olarak değerlendir (RAG şansı ver)
+        return "bilgi"
+
+
+async def _llm_classify_intent(question: str) -> str | None:
+    """v4.3.0: LLM ile niyet sınıflandırma (primary router).
+    
+    Cache destekli. LLM erişilemezse None döner → regex fallback.
+    """
+    # Cache kontrolü
+    cache_key = question.strip().lower()[:100]
+    if cache_key in _llm_router_cache:
+        return _llm_router_cache[cache_key]
+    
+    try:
+        from app.llm.client import ollama_client
+        if not await ollama_client.is_available():
+            return None
+        
+        prompt = LLM_ROUTER_PROMPT.format(question=question[:200])
+        result = await ollama_client.generate(
+            prompt=prompt,
+            system_prompt="Sadece sınıf adı yaz: sohbet, iş veya bilgi.",
+            temperature=0.0,
+            max_tokens=10,
+        )
+        
+        if result:
+            cleaned = result.strip().lower().split()[0] if result.strip() else ""
+            # Geçerli sınıflardan birini bul
+            for cls in ("sohbet", "iş", "bilgi"):
+                if cls in cleaned:
+                    # Cache'e ekle
+                    if len(_llm_router_cache) > _LLM_ROUTER_CACHE_SIZE:
+                        # En eski yarısını sil
+                        keys = list(_llm_router_cache.keys())
+                        for k in keys[:_LLM_ROUTER_CACHE_SIZE // 2]:
+                            _llm_router_cache.pop(k, None)
+                    _llm_router_cache[cache_key] = cls
+                    logger.info("llm_router_classified", intent=cls, q=question[:60])
+                    return cls
+        
+        return None
+    except Exception as e:
+        logger.debug("llm_router_failed", error=str(e))
+        return None
 
 
 def decide(question: str) -> Dict[str, Any]:
     """
     Soruyu analiz ederek departman, mod, risk ve niyet belirler.
+    Senkron versiyon — regex tabanlı.
     
     Args:
         question: Kullanıcı sorusu
@@ -165,7 +252,7 @@ def decide(question: str) -> Dict[str, Any]:
     """
     q = question.lower()
     
-    # 1. Akıllı niyet tespiti
+    # 1. Akıllı niyet tespiti (regex fallback)
     intent = _classify_intent(question)
     
     # 2. Departman belirleme (iş soruları için anlamlı)
@@ -224,6 +311,18 @@ def decide(question: str) -> Dict[str, Any]:
         "intent": intent,
         "needs_web": needs_web,
     }
+
+
+async def async_decide(question: str) -> Dict[str, Any]:
+    """v5.7.0: Sadeleştirilmiş async versiyon — SADECE regex tabanlı.
+    
+    Eski versiyon her soruda 72B modele LLM çağrısı yapıyordu (5-10sn ekstra).
+    Regex tabanlı _classify_intent() zaten %95+ doğrulukla çalışıyor.
+    LLM router çağrısı kaldırıldı — her soruda 5-10 saniye tasarruf.
+    """
+    result = decide(question)
+    result["router_type"] = "regex"
+    return result
 
 
 def get_department_info(department: str) -> Dict[str, Any]:

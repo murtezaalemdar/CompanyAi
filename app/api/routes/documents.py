@@ -34,6 +34,23 @@ try:
 except ImportError:
     RAG_AVAILABLE = False
 
+# OCR Engine — easyocr (GPU destekli, Türkçe/İngilizce)
+try:
+    import easyocr
+    _ocr_reader = None  # lazy-load singleton
+    EASYOCR_AVAILABLE = True
+except ImportError:
+    EASYOCR_AVAILABLE = False
+    _ocr_reader = None
+
+def _get_ocr_reader():
+    """EasyOCR reader singleton (ilk çağrıda yüklenir)"""
+    global _ocr_reader
+    if _ocr_reader is None and EASYOCR_AVAILABLE:
+        _ocr_reader = easyocr.Reader(['tr', 'en'], gpu=False)  # CPU: GPU LLM için ayrılmış
+        logger.info("easyocr_reader_loaded", gpu=False)
+    return _ocr_reader
+
 # Web scraping kütüphaneleri
 try:
     import httpx
@@ -280,34 +297,67 @@ def extract_text_from_file(filename: str, file_content: bytes) -> tuple:
                 except Exception as e:
                     logger.warning("pypdf2_failed", filename=filename, error=str(e))
             
-            # 3) Hiçbiri çalışmazsa — görüntü tabanlı PDF
+            # 3) Hiçbiri çalışmazsa — görüntü tabanlı PDF → OCR ile dene
             if not content.strip():
                 try:
-                    # Sayfa sayısını al
-                    page_count = 0
-                    try:
-                        import pdfplumber
-                        with pdfplumber.open(io.BytesIO(file_content)) as pdf:
-                            page_count = len(pdf.pages)
-                    except Exception:
-                        try:
-                            from PyPDF2 import PdfReader
-                            pdf = PdfReader(io.BytesIO(file_content))
-                            page_count = len(pdf.pages)
-                        except Exception:
-                            pass
+                    import fitz  # PyMuPDF
+                    from PIL import Image
                     
+                    pdf_doc = fitz.open(stream=file_content, filetype="pdf")
+                    page_count = len(pdf_doc)
                     file_size_mb = round(len(file_content) / 1024 / 1024, 1)
-                    content = (
-                        f"[Görüntü tabanlı PDF dosyası: {filename}]\n"
-                        f"Boyut: {file_size_mb} MB, Sayfa sayısı: {page_count}\n"
-                        f"Bu PDF görüntü tabanlı olduğu için metin çıkarılamadı.\n"
-                        f"OCR (Tesseract) yüklü değil — metin tanıma yapılamıyor.\n"
-                        f"Dosya metadata olarak kaydedildi."
-                    )
-                    logger.warning("pdf_image_based", filename=filename, pages=page_count, size_mb=file_size_mb)
-                except Exception:
-                    content = f"[PDF dosyası: {filename}, metin çıkarılamadı]"
+                    
+                    logger.info("pdf_ocr_starting", filename=filename, 
+                                pages=page_count, size_mb=file_size_mb)
+                    
+                    ocr_reader = _get_ocr_reader() if EASYOCR_AVAILABLE else None
+                    
+                    if ocr_reader:
+                        pages_text = []
+                        for page_num in range(page_count):
+                            page = pdf_doc[page_num]
+                            # Sayfayı 200 DPI resme çevir (hız/kalite dengesi)
+                            mat = fitz.Matrix(200/72, 200/72)
+                            pix = page.get_pixmap(matrix=mat)
+                            img_bytes = pix.tobytes("png")
+                            
+                            # EasyOCR ile metin çıkar
+                            try:
+                                results = ocr_reader.readtext(img_bytes, detail=0, paragraph=True)
+                                page_text = "\n".join(results)
+                                if page_text.strip():
+                                    pages_text.append(f"--- Sayfa {page_num + 1} ---\n{page_text}")
+                                    logger.debug("pdf_ocr_page_done", page=page_num+1, 
+                                                chars=len(page_text))
+                            except Exception as ocr_err:
+                                logger.warning("pdf_ocr_page_error", page=page_num+1, 
+                                              error=str(ocr_err))
+                        
+                        pdf_doc.close()
+                        
+                        if pages_text:
+                            content = "\n\n".join(pages_text)
+                            logger.info("pdf_ocr_success", filename=filename, 
+                                        pages=page_count, chars=len(content),
+                                        pages_with_text=len(pages_text))
+                        else:
+                            content = (
+                                f"[Görüntü tabanlı PDF: {filename}]\n"
+                                f"Boyut: {file_size_mb} MB, Sayfa: {page_count}\n"
+                                f"OCR denendi fakat metin çıkarılamadı."
+                            )
+                    else:
+                        pdf_doc.close()
+                        content = (
+                            f"[Görüntü tabanlı PDF dosyası: {filename}]\n"
+                            f"Boyut: {file_size_mb} MB, Sayfa sayısı: {page_count}\n"
+                            f"OCR motoru (easyocr) yüklü değil — metin tanıma yapılamıyor."
+                        )
+                        logger.warning("pdf_image_based_no_ocr", filename=filename,
+                                      pages=page_count, size_mb=file_size_mb)
+                except Exception as e:
+                    logger.warning("pdf_ocr_fallback_error", filename=filename, error=str(e))
+                    content = f"[PDF dosyası: {filename}, metin çıkarılamadı: {str(e)[:100]}]"
         
         # ── Word (DOCX) ──
         elif doc_type == 'docx':
@@ -408,22 +458,38 @@ def extract_text_from_file(filename: str, file_content: bytes) -> tuple:
             except Exception as e:
                 content = file_content.decode('utf-8', errors='ignore')
         
-        # ── Görüntü dosyaları (OCR) ──
+        # ── Görüntü dosyaları (OCR) — easyocr veya pytesseract ──
         elif doc_type == 'image':
-            try:
-                from PIL import Image
-                import pytesseract
-                img = Image.open(io.BytesIO(file_content))
-                content = pytesseract.image_to_string(img, lang='tur+eng')
-            except ImportError:
-                # OCR mevcut değilse, görüntü metadatasını kullan
+            from PIL import Image
+            img = Image.open(io.BytesIO(file_content))
+            ocr_done = False
+            
+            # 1) EasyOCR (tercih edilen — Türkçe destekli)
+            if EASYOCR_AVAILABLE and not ocr_done:
                 try:
-                    from PIL import Image
-                    img = Image.open(io.BytesIO(file_content))
-                    content = f"[Görüntü dosyası: {filename}, Boyut: {img.size[0]}x{img.size[1]}, Format: {img.format}]"
-                    logger.warning("pytesseract_not_available", file=filename, msg="OCR için pytesseract yüklü değil, sadece metadata kaydedildi")
-                except ImportError:
-                    raise HTTPException(status_code=500, detail="Pillow yüklü değil, görüntü dosyaları işlenemiyor")
+                    reader = _get_ocr_reader()
+                    results = reader.readtext(file_content, detail=0, paragraph=True)
+                    content = "\n".join(results)
+                    if content.strip():
+                        ocr_done = True
+                        logger.info("image_ocr_easyocr", file=filename, chars=len(content))
+                except Exception as e:
+                    logger.warning("easyocr_failed", file=filename, error=str(e))
+            
+            # 2) Pytesseract fallback
+            if not ocr_done:
+                try:
+                    import pytesseract
+                    content = pytesseract.image_to_string(img, lang='tur+eng')
+                    if content.strip():
+                        ocr_done = True
+                except (ImportError, Exception):
+                    pass
+            
+            # 3) OCR yoksa metadata kaydet
+            if not ocr_done:
+                content = f"[Görüntü dosyası: {filename}, Boyut: {img.size[0]}x{img.size[1]}, Format: {img.format}]"
+                logger.warning("image_no_ocr", file=filename)
         
         return content, doc_type
         

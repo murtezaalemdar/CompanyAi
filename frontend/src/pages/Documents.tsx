@@ -206,6 +206,9 @@ export default function Documents() {
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedFiles, setSelectedFiles] = useState<File[]>([])
     const [uploadProgress, setUploadProgress] = useState<Record<string, 'pending' | 'success' | 'error'>>({})
+    const [uploadPercent, setUploadPercent] = useState<Record<string, number>>({})
+    const [uploadPhase, setUploadPhase] = useState<Record<string, 'uploading' | 'processing' | 'done'>>({})
+    const [uploadMessage, setUploadMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
     const [isDragging, setIsDragging] = useState(false)
     const [docListFilter, setDocListFilter] = useState<string>('all')
 
@@ -440,21 +443,81 @@ export default function Documents() {
 
     const uploadFiles = async () => {
         const progress: Record<string, 'pending' | 'success' | 'error'> = {}
-        selectedFiles.forEach(f => { progress[f.name] = 'pending' })
+        const phases: Record<string, 'uploading' | 'processing' | 'done'> = {}
+        const percents: Record<string, number> = {}
+        const errors: Record<string, string> = {}
+        selectedFiles.forEach(f => {
+            progress[f.name] = 'pending'
+            phases[f.name] = 'uploading'
+            percents[f.name] = 0
+        })
         setUploadProgress(progress)
+        setUploadPhase(phases)
+        setUploadPercent(percents)
+        setUploadMessage(null)
+
+        let successCount = 0
+        let errorCount = 0
 
         for (const file of selectedFiles) {
             try {
-                await uploadMutation.mutateAsync({ file, department: selectedDepartment })
+                setUploadPhase(prev => ({ ...prev, [file.name]: 'uploading' }))
+                setUploadPercent(prev => ({ ...prev, [file.name]: 0 }))
+
+                await ragApi.uploadDocument(file, selectedDepartment, (percent) => {
+                    setUploadPercent(prev => ({ ...prev, [file.name]: percent }))
+                    if (percent >= 100) {
+                        setUploadPhase(prev => ({ ...prev, [file.name]: 'processing' }))
+                    }
+                })
+
                 setUploadProgress(prev => ({ ...prev, [file.name]: 'success' }))
-            } catch {
+                setUploadPhase(prev => ({ ...prev, [file.name]: 'done' }))
+                setUploadPercent(prev => ({ ...prev, [file.name]: 100 }))
+                successCount++
+                queryClient.invalidateQueries({ queryKey: ['rag-status'] })
+                queryClient.invalidateQueries({ queryKey: ['documents-list'] })
+            } catch (err: any) {
+                errorCount++
+                let errorMsg = 'Bilinmeyen hata'
+                const status = err?.response?.status
+                if (status === 413) {
+                    errorMsg = `Dosya çok büyük (${formatFileSize(file.size)}). Maksimum 500 MB.`
+                } else if (status === 408 || err?.code === 'ECONNABORTED') {
+                    errorMsg = 'Zaman aşımı — dosya çok büyük veya bağlantı yavaş'
+                } else if (status === 500) {
+                    errorMsg = 'Sunucu hatası — dosya işlenirken bir sorun oluştu'
+                } else if (err?.message?.includes('Network Error')) {
+                    errorMsg = 'Bağlantı hatası — ağ bağlantınızı kontrol edin'
+                } else if (err?.response?.data?.detail) {
+                    errorMsg = err.response.data.detail
+                }
+                errors[file.name] = errorMsg
                 setUploadProgress(prev => ({ ...prev, [file.name]: 'error' }))
+                setUploadPhase(prev => ({ ...prev, [file.name]: 'done' }))
             }
         }
+
+        // Sonuç bildirimi
+        if (errorCount === 0 && successCount > 0) {
+            setUploadMessage({ type: 'success', text: `${successCount} dosya başarıyla yüklendi ve öğrenildi!` })
+        } else if (errorCount > 0 && successCount > 0) {
+            const errNames = Object.keys(errors)
+            setUploadMessage({ type: 'error', text: `${successCount} başarılı, ${errorCount} başarısız: ${errNames.map(n => `${n} (${errors[n]})`).join(', ')}` })
+        } else if (errorCount > 0) {
+            const firstErr = Object.values(errors)[0]
+            setUploadMessage({ type: 'error', text: `Yükleme başarısız: ${firstErr}` })
+        }
+
         setTimeout(() => {
             setSelectedFiles([])
             setUploadProgress({})
-        }, 2500)
+            setUploadPercent({})
+            setUploadPhase({})
+        }, errorCount > 0 ? 6000 : 3000)
+
+        // Mesajı daha uzun göster
+        setTimeout(() => setUploadMessage(null), 8000)
     }
 
     const handleSearch = (e: React.FormEvent) => {
@@ -530,16 +593,16 @@ export default function Documents() {
     return (
         <div className="space-y-6">
             {/* ── HEADER ── */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">Doküman Yönetimi & Öğrenme</h1>
-                    <p className="text-dark-400 mt-1">
+                    <h1 className="text-xl sm:text-2xl font-bold text-white">Doküman Yönetimi & Öğrenme</h1>
+                    <p className="text-dark-400 mt-1 text-sm">
                         {isRestricted
                             ? `${userDepartments.join(', ')} departmanı için içerik yönetimi`
                             : 'Departman bazlı doküman yükleyin, URL & video ile eğitin'}
                     </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-shrink-0">
                     {capabilities && (
                         <div className="hidden md:flex items-center gap-2 text-xs text-dark-500">
                             {capabilities.web_scraping && <span className="px-2 py-1 bg-cyan-500/10 text-cyan-400 rounded">🌐 URL</span>}
@@ -664,39 +727,141 @@ export default function Documents() {
                                         ) : (
                                             /* Düz dosya listesi */
                                             <div className="space-y-1">
-                                                {selectedFiles.map((file, index) => (
-                                                    <div key={index} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-dark-700 group">
-                                                        <div className="flex items-center gap-2 min-w-0">
-                                                            <FileText className="w-4 h-4 text-primary-400 flex-shrink-0" />
-                                                            <span className="text-sm text-dark-200 truncate">{file.name}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-2 flex-shrink-0">
-                                                            <span className="text-xs text-dark-500">{formatFileSize(file.size)}</span>
-                                                            {uploadProgress[file.name] === 'success' && <CheckCircle className="w-4 h-4 text-green-400" />}
-                                                            {uploadProgress[file.name] === 'error' && <AlertCircle className="w-4 h-4 text-red-400" />}
-                                                            {uploadProgress[file.name] === 'pending' && <Loader2 className="w-4 h-4 text-primary-400 animate-spin" />}
-                                                            {!uploadProgress[file.name] && (
-                                                                <button onClick={() => removeFileByIndex(index)} className="opacity-0 group-hover:opacity-100 p-0.5 text-dark-400 hover:text-red-400">
-                                                                    <X className="w-3.5 h-3.5" />
-                                                                </button>
+                                                {selectedFiles.map((file, index) => {
+                                                    const status = uploadProgress[file.name]
+                                                    const phase = uploadPhase[file.name]
+                                                    const percent = uploadPercent[file.name] ?? 0
+
+                                                    return (
+                                                        <div key={index} className="relative py-1.5 px-2 rounded hover:bg-dark-700 group overflow-hidden">
+                                                            {/* Animated progress background */}
+                                                            {status === 'pending' && (
+                                                                <div className="absolute inset-0 rounded overflow-hidden">
+                                                                    {phase === 'uploading' ? (
+                                                                        <div
+                                                                            className="absolute inset-y-0 left-0 bg-gradient-to-r from-primary-500/20 via-primary-400/30 to-primary-500/10 transition-all duration-300 ease-out"
+                                                                            style={{ width: `${percent}%` }}
+                                                                        >
+                                                                            <div className="absolute inset-0 animate-upload-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="absolute inset-0 bg-gradient-to-r from-amber-500/10 via-amber-400/20 to-amber-500/10">
+                                                                            <div className="absolute inset-0 animate-upload-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                                                                        </div>
+                                                                    )}
+                                                                </div>
                                                             )}
+                                                            {status === 'success' && (
+                                                                <div className="absolute inset-0 rounded bg-green-500/10 animate-fade-in" />
+                                                            )}
+                                                            {status === 'error' && (
+                                                                <div className="absolute inset-0 rounded bg-red-500/10 animate-fade-in" />
+                                                            )}
+
+                                                            {/* Content */}
+                                                            <div className="relative flex items-center justify-between z-10">
+                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                    <FileText className="w-4 h-4 text-primary-400 flex-shrink-0" />
+                                                                    <span className="text-sm text-dark-200 truncate">{file.name}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2 flex-shrink-0">
+                                                                    {/* Phase-specific status */}
+                                                                    {status === 'pending' && phase === 'uploading' && percent < 100 && (
+                                                                        <span className="text-xs text-primary-300 font-medium tabular-nums min-w-[3ch] text-right">%{percent}</span>
+                                                                    )}
+                                                                    {status === 'pending' && phase === 'processing' && (
+                                                                        <span className="text-xs text-amber-300 flex items-center gap-1">
+                                                                            <Brain className="w-3 h-3 animate-pulse" /> Öğreniyor
+                                                                        </span>
+                                                                    )}
+                                                                    <span className="text-xs text-dark-500">{formatFileSize(file.size)}</span>
+                                                                    {status === 'success' && <CheckCircle className="w-4 h-4 text-green-400" />}
+                                                                    {status === 'error' && <AlertCircle className="w-4 h-4 text-red-400" />}
+                                                                    {status === 'pending' && <Loader2 className="w-4 h-4 text-primary-400 animate-spin" />}
+                                                                    {!status && (
+                                                                        <button onClick={() => removeFileByIndex(index)} className="opacity-0 group-hover:opacity-100 p-0.5 text-dark-400 hover:text-red-400">
+                                                                            <X className="w-3.5 h-3.5" />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                ))}
+                                                    )
+                                                })}
                                             </div>
                                         )}
                                     </div>
 
                                     <button
                                         onClick={uploadFiles}
-                                        disabled={uploadMutation.isPending || Object.keys(uploadProgress).length > 0}
-                                        className="btn-primary w-full mt-3 flex justify-center items-center gap-2"
+                                        disabled={Object.keys(uploadProgress).length > 0}
+                                        className="relative w-full mt-3 overflow-hidden rounded-lg"
                                     >
-                                        {uploadMutation.isPending
-                                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Yükleniyor...</>
-                                            : <><Brain className="w-4 h-4" /> Yükle ve Öğren ({selectedFiles.length} dosya)</>
-                                        }
+                                        {Object.keys(uploadProgress).length > 0 ? (
+                                            (() => {
+                                                const total = selectedFiles.length
+                                                const completed = selectedFiles.filter(f => uploadProgress[f.name] === 'success' || uploadProgress[f.name] === 'error').length
+                                                const currentFile = selectedFiles.find(f => uploadProgress[f.name] === 'pending')
+                                                const currentPhase = currentFile ? uploadPhase[currentFile.name] : null
+                                                const currentPercent = currentFile ? (uploadPercent[currentFile.name] ?? 0) : 0
+                                                const overallPercent = total > 0 ? Math.round(((completed + (currentPercent / 100)) / total) * 100) : 0
+                                                const allDone = completed === total
+
+                                                return (
+                                                    <div className="relative bg-dark-800 border border-dark-600 rounded-lg overflow-hidden">
+                                                        {/* Background progress fill */}
+                                                        <div
+                                                            className="absolute inset-y-0 left-0 bg-gradient-to-r from-primary-600/30 via-primary-500/40 to-primary-400/30 transition-all duration-500 ease-out"
+                                                            style={{ width: `${overallPercent}%` }}
+                                                        >
+                                                            <div className="absolute inset-0 animate-upload-shimmer bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+                                                        </div>
+                                                        {/* Content */}
+                                                        <div className="relative z-10 flex items-center justify-between px-4 py-2.5">
+                                                            <div className="flex items-center gap-2">
+                                                                {allDone ? (
+                                                                    <CheckCircle className="w-4 h-4 text-green-400" />
+                                                                ) : currentPhase === 'processing' ? (
+                                                                    <Brain className="w-4 h-4 text-amber-300 animate-pulse" />
+                                                                ) : (
+                                                                    <Loader2 className="w-4 h-4 text-primary-300 animate-spin" />
+                                                                )}
+                                                                <span className="text-sm font-medium text-white">
+                                                                    {allDone
+                                                                        ? 'Tamamlandı!'
+                                                                        : currentPhase === 'processing'
+                                                                            ? `Öğreniyor... (${completed + 1}/${total})`
+                                                                            : `Yükleniyor... %${currentPercent} (${completed + 1}/${total})`
+                                                                    }
+                                                                </span>
+                                                            </div>
+                                                            <span className="text-xs font-bold text-primary-200 tabular-nums">%{overallPercent}</span>
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })()
+                                        ) : (
+                                            <div className="btn-primary w-full flex justify-center items-center gap-2">
+                                                <Brain className="w-4 h-4" /> Yükle ve Öğren ({selectedFiles.length} dosya)
+                                            </div>
+                                        )}
                                     </button>
+
+                                    {/* Upload sonuç bildirimi */}
+                                    {uploadMessage && (
+                                        <div className={clsx(
+                                            'mt-3 flex items-start gap-2 text-sm p-3 rounded-lg animate-fade-in',
+                                            uploadMessage.type === 'success'
+                                                ? 'text-green-400 bg-green-500/10 border border-green-500/20'
+                                                : 'text-red-400 bg-red-500/10 border border-red-500/20'
+                                        )}>
+                                            {uploadMessage.type === 'success'
+                                                ? <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                                : <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                                            }
+                                            <span>{uploadMessage.text}</span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </>
@@ -1111,11 +1276,11 @@ export default function Documents() {
                             <thead>
                                 <tr className="border-b border-dark-700">
                                     <th className="text-left text-xs font-medium text-dark-400 pb-3 pl-3">Kaynak</th>
-                                    <th className="text-left text-xs font-medium text-dark-400 pb-3">Tür</th>
-                                    <th className="text-left text-xs font-medium text-dark-400 pb-3">Departman</th>
-                                    <th className="text-left text-xs font-medium text-dark-400 pb-3">Ekleyen</th>
-                                    <th className="text-left text-xs font-medium text-dark-400 pb-3">Tarih</th>
-                                    <th className="text-center text-xs font-medium text-dark-400 pb-3">Parça</th>
+                                    <th className="text-left text-xs font-medium text-dark-400 pb-3 hidden sm:table-cell">Tür</th>
+                                    <th className="text-left text-xs font-medium text-dark-400 pb-3 hidden md:table-cell">Departman</th>
+                                    <th className="text-left text-xs font-medium text-dark-400 pb-3 hidden lg:table-cell">Ekleyen</th>
+                                    <th className="text-left text-xs font-medium text-dark-400 pb-3 hidden sm:table-cell">Tarih</th>
+                                    <th className="text-center text-xs font-medium text-dark-400 pb-3 hidden md:table-cell">Parça</th>
                                     <th className="text-right text-xs font-medium text-dark-400 pb-3 pr-3">İşlem</th>
                                 </tr>
                             </thead>
@@ -1130,30 +1295,30 @@ export default function Documents() {
                                                 </span>
                                             </div>
                                         </td>
-                                        <td className="py-2.5">
+                                        <td className="py-2.5 hidden sm:table-cell">
                                             <span className={clsx('text-xs px-2 py-0.5 rounded-full', getDocTypeBadgeColor(doc.type))}>
                                                 {doc.type}
                                             </span>
                                         </td>
-                                        <td className="py-2.5">
+                                        <td className="py-2.5 hidden md:table-cell">
                                             <span className="flex items-center gap-1 text-xs text-dark-300">
                                                 <Building2 className="w-3 h-3" />
                                                 {doc.department}
                                             </span>
                                         </td>
-                                        <td className="py-2.5">
+                                        <td className="py-2.5 hidden lg:table-cell">
                                             <span className="flex items-center gap-1 text-xs text-dark-400">
                                                 <User className="w-3 h-3" />
                                                 {doc.author || '-'}
                                             </span>
                                         </td>
-                                        <td className="py-2.5">
+                                        <td className="py-2.5 hidden sm:table-cell">
                                             <span className="flex items-center gap-1 text-xs text-dark-500">
                                                 <Clock className="w-3 h-3" />
                                                 {formatDate(doc.created_at)}
                                             </span>
                                         </td>
-                                        <td className="py-2.5 text-center">
+                                        <td className="py-2.5 text-center hidden md:table-cell">
                                             <span className="flex items-center justify-center gap-1 text-xs text-dark-400">
                                                 <Hash className="w-3 h-3" />
                                                 {doc.chunk_count}
@@ -1166,7 +1331,7 @@ export default function Documents() {
                                                         deleteMutation.mutate(doc.source)
                                                 }}
                                                 disabled={deleteMutation.isPending}
-                                                className="p-1.5 text-dark-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity rounded hover:bg-red-500/10"
+                                                className="p-1.5 text-dark-500 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity rounded hover:bg-red-500/10"
                                                 title="Sil"
                                             >
                                                 <Trash2 className="w-3.5 h-3.5" />

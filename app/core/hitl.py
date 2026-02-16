@@ -5,13 +5,21 @@
 - İnsan geri bildirimi (onayla / reddet / düzelt)
 - Feedback'ten öğrenme (onaylanan/reddedilen kalıplar)
 - Yapılandırılabilir eşikler (hangi kararlar onay gerektirir)
+
+v5.5.0 Enterprise Eklemeleri:
+  • Role-based override (admin/manager/analyst yetkileri)
+  • Override justification logging (gerekçe zorunluluğu)
+  • Post-override performance tracking (override sonrası performans analizi)
+  • Escalation chain (otomatik yükseltme zinciri)
 """
 
 import json
 import uuid
+import time
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from pathlib import Path
+from collections import deque
 import structlog
 
 logger = structlog.get_logger()
@@ -19,6 +27,50 @@ logger = structlog.get_logger()
 _HITL_QUEUE_FILE = Path("data/hitl_queue.json")
 _HITL_FEEDBACK_FILE = Path("data/hitl_feedback.json")
 _HITL_CONFIG_FILE = Path("data/hitl_config.json")
+_HITL_OVERRIDE_LOG = Path("data/hitl_override_log.jsonl")
+
+# ── Role Yetkileri ──────────────────────────────────────────────
+ROLE_PERMISSIONS = {
+    "admin": {
+        "can_approve": True,
+        "can_reject": True,
+        "can_modify": True,
+        "can_escalate": True,
+        "can_override_block": True,     # Policy Engine block'unu override edebilir
+        "max_risk_level": "kritik",     # Tüm risk seviyeleri
+        "requires_justification": False, # Gerekçe zorunlu değil
+    },
+    "manager": {
+        "can_approve": True,
+        "can_reject": True,
+        "can_modify": True,
+        "can_escalate": True,
+        "can_override_block": False,
+        "max_risk_level": "yüksek",
+        "requires_justification": True,  # Gerekçe zorunlu
+    },
+    "analyst": {
+        "can_approve": True,
+        "can_reject": False,             # Reddedemez, yükseltmeli
+        "can_modify": False,
+        "can_escalate": True,
+        "can_override_block": False,
+        "max_risk_level": "orta",
+        "requires_justification": True,
+    },
+    "viewer": {
+        "can_approve": False,
+        "can_reject": False,
+        "can_modify": False,
+        "can_escalate": False,
+        "can_override_block": False,
+        "max_risk_level": "düşük",
+        "requires_justification": True,
+    },
+}
+
+# Risk seviye sıralaması
+RISK_LEVELS = {"düşük": 1, "orta": 2, "yüksek": 3, "kritik": 4, "bilinmiyor": 2}
 
 
 def _utcnow_str() -> str:
@@ -337,6 +389,205 @@ class HITLManager:
             "feedback_stats": self.get_feedback_stats(),
             "config": self._config,
             "recent_pending": [t.to_dict() for t in pending[-5:]],
+            # v5.5.0
+            "override_stats": self.get_override_stats(),
+        }
+
+    # ── v5.5.0 Enterprise: Role-Based Override ──────────────────
+
+    def check_permission(self, reviewer_role: str, action: str, task: HITLTask) -> tuple[bool, str]:
+        """Rol bazlı yetki kontrolü.
+
+        Args:
+            reviewer_role: admin | manager | analyst | viewer
+            action: approve | reject | modify | escalate
+            task: Kontrol edilecek görev
+
+        Returns:
+            (allowed, reason)
+        """
+        perms = ROLE_PERMISSIONS.get(reviewer_role)
+        if not perms:
+            return False, f"Bilinmeyen rol: {reviewer_role}"
+
+        # Aksiyon yetkisi
+        action_map = {
+            "approve": "can_approve",
+            "reject": "can_reject",
+            "modify": "can_modify",
+            "escalate": "can_escalate",
+        }
+        perm_key = action_map.get(action)
+        if not perm_key or not perms.get(perm_key, False):
+            return False, f"'{reviewer_role}' rolü '{action}' aksiyonuna yetkili değil"
+
+        # Risk seviyesi kontrolü
+        task_risk = RISK_LEVELS.get(task.risk_level, 2)
+        max_risk = RISK_LEVELS.get(perms.get("max_risk_level", "düşük"), 1)
+        if task_risk > max_risk:
+            return False, f"'{reviewer_role}' rolü '{task.risk_level}' risk seviyesini değerlendiremez (max: {perms['max_risk_level']})"
+
+        return True, "Yetkili"
+
+    def review_with_role(
+        self,
+        task_id: str,
+        action: str,
+        reviewer_id: str = "admin",
+        reviewer_role: str = "admin",
+        justification: str = "",
+        comment: str = "",
+        modified_response: Optional[str] = None,
+    ) -> Dict:
+        """Rol tabanlı review — yetki kontrolü + gerekçe zorunluluğu.
+
+        Returns:
+            {"success": bool, "task": dict | None, "error": str | None}
+        """
+        task = None
+        for t in self._queue:
+            if t.id == task_id:
+                task = t
+                break
+        if not task:
+            return {"success": False, "error": f"Görev bulunamadı: {task_id}"}
+
+        # Yetki kontrolü
+        allowed, reason = self.check_permission(reviewer_role, action, task)
+        if not allowed:
+            self._log_override_attempt(task_id, reviewer_id, reviewer_role, action, False, reason)
+            return {"success": False, "error": reason}
+
+        # Gerekçe zorunluluğu
+        perms = ROLE_PERMISSIONS.get(reviewer_role, {})
+        if perms.get("requires_justification", True) and not justification.strip():
+            return {"success": False, "error": f"'{reviewer_role}' rolü için gerekçe zorunludur"}
+
+        # Review işlemi
+        reviewed_task = self.review(
+            task_id=task_id,
+            action=action,
+            reviewer_id=reviewer_id,
+            comment=comment,
+            modified_response=modified_response,
+        )
+
+        # Override log
+        self._log_override_attempt(
+            task_id, reviewer_id, reviewer_role, action, True,
+            justification=justification,
+            original_response=task.ai_response[:200],
+            modified_response=modified_response[:200] if modified_response else "",
+        )
+
+        return {"success": True, "task": reviewed_task.to_dict()}
+
+    def _log_override_attempt(
+        self, task_id: str, reviewer_id: str, role: str,
+        action: str, success: bool, reason: str = "",
+        justification: str = "", original_response: str = "",
+        modified_response: str = "",
+    ):
+        """Override girişimini logla (başarılı/başarısız)."""
+        entry = {
+            "task_id": task_id,
+            "reviewer_id": reviewer_id,
+            "role": role,
+            "action": action,
+            "success": success,
+            "reason": reason,
+            "justification": justification,
+            "original_response": original_response,
+            "modified_response": modified_response,
+            "timestamp": _utcnow_str(),
+        }
+        try:
+            _HITL_OVERRIDE_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with open(_HITL_OVERRIDE_LOG, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.error("override_log_failed", error=str(e))
+
+    def get_override_stats(self) -> Dict:
+        """Override istatistikleri — post-override performans analizi."""
+        if not _HITL_OVERRIDE_LOG.exists():
+            return {"total_overrides": 0, "total_denied": 0}
+
+        overrides = []
+        try:
+            for line in _HITL_OVERRIDE_LOG.read_text(encoding="utf-8").strip().split("\n"):
+                if line.strip():
+                    overrides.append(json.loads(line))
+        except Exception:
+            return {"total_overrides": 0, "total_denied": 0}
+
+        total = len(overrides)
+        successful = [o for o in overrides if o.get("success")]
+        denied = [o for o in overrides if not o.get("success")]
+
+        # Role bazlı kırılım
+        role_stats = {}
+        for o in overrides:
+            role = o.get("role", "unknown")
+            if role not in role_stats:
+                role_stats[role] = {"total": 0, "approved": 0, "rejected": 0, "modified": 0, "denied": 0}
+            role_stats[role]["total"] += 1
+            if o.get("success"):
+                action = o.get("action", "")
+                if action in role_stats[role]:
+                    role_stats[role][action] += 1
+            else:
+                role_stats[role]["denied"] += 1
+
+        # Override yapılan kararların performans karşılaştırması
+        modifications = [o for o in successful if o.get("action") == "modify"]
+
+        return {
+            "total_overrides": len(successful),
+            "total_denied": len(denied),
+            "total_modifications": len(modifications),
+            "by_role": role_stats,
+            "justification_rate": round(
+                sum(1 for o in successful if o.get("justification")) / len(successful) * 100, 1
+            ) if successful else 0.0,
+            "recent_overrides": overrides[-5:],
+        }
+
+    def escalate(self, task_id: str, from_role: str, reason: str = "") -> Dict:
+        """Görevi bir üst role yükselt.
+
+        Escalation zinciri: viewer → analyst → manager → admin
+        """
+        escalation_chain = ["viewer", "analyst", "manager", "admin"]
+        task = None
+        for t in self._queue:
+            if t.id == task_id:
+                task = t
+                break
+        if not task:
+            return {"success": False, "error": f"Görev bulunamadı: {task_id}"}
+
+        try:
+            idx = escalation_chain.index(from_role)
+        except ValueError:
+            return {"success": False, "error": f"Bilinmeyen rol: {from_role}"}
+
+        if idx >= len(escalation_chain) - 1:
+            return {"success": False, "error": "En üst role ulaşıldı, daha fazla yükseltilemez"}
+
+        target_role = escalation_chain[idx + 1]
+        task.metadata["escalated_from"] = from_role
+        task.metadata["escalated_to"] = target_role
+        task.metadata["escalation_reason"] = reason
+        task.metadata["escalated_at"] = _utcnow_str()
+        self._save_queue()
+
+        logger.info("hitl_task_escalated", task_id=task_id, from_role=from_role, to_role=target_role)
+        return {
+            "success": True,
+            "task_id": task_id,
+            "escalated_to": target_role,
+            "reason": reason,
         }
 
 

@@ -99,6 +99,107 @@ class ToolRegistry:
             logger.error("tool_execution_error", tool=tool_name, error=str(e))
             return {"success": False, "error": str(e), "tool": tool_name}
     
+    async def chain_execute(self, tool_calls: list[dict]) -> dict:
+        """Araçları sıralı zincir olarak çalıştır — her aracın çıktısı sonrakine girdi olur.
+        
+        Args:
+            tool_calls: [{"tool": "calculate", "params": {...}}, 
+                         {"tool": "kpi_interpret", "params": {...}, "pipe_from": "result"}]
+        
+        Pipe logic:
+        - pipe_from belirtilmişse, önceki aracın result[pipe_from] değeri 
+          mevcut aracın ilgili parametresine aktarılır
+        - pipe_to belirtilmişse, çıktıdaki o field sonraki araca aktarılır
+        
+        Returns:
+            {
+                "success": bool,
+                "chain_results": [...],
+                "final_result": dict,
+                "tools_executed": int
+            }
+        """
+        if not tool_calls:
+            return {"success": False, "error": "Boş tool chain"}
+        
+        chain_results = []
+        previous_result = None
+        
+        for i, call in enumerate(tool_calls):
+            tool_name = call.get("tool", "")
+            params = dict(call.get("params", {}))  # Kopyala, orijinali değiştirme
+            
+            # Pipe: önceki sonuçtan parametre aktar
+            if i > 0 and previous_result and call.get("pipe_from"):
+                pipe_field = call["pipe_from"]
+                pipe_target = call.get("pipe_target", "value")  # Hedef parametre
+                
+                prev_data = previous_result.get("result", {})
+                if isinstance(prev_data, dict) and pipe_field in prev_data:
+                    params[pipe_target] = prev_data[pipe_field]
+                elif pipe_field == "result" and prev_data:
+                    # Direkt result'ı aktar
+                    params[pipe_target] = prev_data
+            
+            # Aracı çalıştır
+            result = await self.execute(tool_name, params)
+            chain_results.append({
+                "step": i + 1,
+                "tool": tool_name,
+                "params": params,
+                "result": result,
+            })
+            
+            if not result.get("success"):
+                logger.warning("chain_broken", step=i+1, tool=tool_name, 
+                              error=result.get("error"))
+                break
+            
+            previous_result = result
+        
+        logger.info("tool_chain_completed", 
+                    steps=len(chain_results), 
+                    tools=[c["tool"] for c in chain_results])
+        
+        return {
+            "success": all(c["result"].get("success") for c in chain_results),
+            "chain_results": chain_results,
+            "final_result": chain_results[-1]["result"] if chain_results else None,
+            "tools_executed": len(chain_results),
+        }
+    
+    def to_ollama_tools_schema(self) -> list[dict]:
+        """v4.3.0: Tüm araçları Ollama native function calling JSON schema'sına çevir.
+        
+        Ollama tools formatı:
+        [{"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}]
+        """
+        tools = []
+        for tool in self._tools.values():
+            properties = {}
+            required = []
+            for p_name, p_spec in tool.parameters.items():
+                properties[p_name] = {
+                    "type": p_spec.get("type", "string"),
+                    "description": p_spec.get("description", ""),
+                }
+                if p_spec.get("required"):
+                    required.append(p_name)
+            
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+            })
+        return tools
+    
     def _register_builtin_tools(self):
         """Yerleşik araçları kaydet."""
         # 1. Calculator
@@ -609,6 +710,79 @@ def detect_tool_calls(text: str) -> list[dict]:
         calls = _detect_implicit_tool_calls(text)
     
     return calls
+
+
+def detect_tool_chain(text: str) -> list[dict]:
+    """LLM çıktısından zincirleme tool call'ları algıla.
+    
+    Örnek zincir kalıpları:
+    - "OEE hesapla sonra KPI yorumla"
+    - "Fire oranını hesapla ve risk değerlendir"
+    - "Maliyet analizi yap, ardından senaryo simülasyonu çalıştır"
+    """
+    q = text.lower()
+    chain = []
+    
+    # Basit tool çağrılarını bul
+    single_calls = detect_tool_calls(text)
+    
+    # Zincirleme belirteçleri
+    chain_signals = [
+        r'(hesapla|bul).*?(sonra|ardından|sonuç.*ile|buna\s*göre).*?(yorumla|değerlendir|karşılaştır)',
+        r'(oee|fire|maliyet).*?(hesapla).*?(risk|senaryo|etki)',
+    ]
+    
+    has_chain = any(re.search(p, q) for p in chain_signals)
+    
+    if has_chain and len(single_calls) >= 2:
+        # Zincirleme: ilk tool'un sonucunu ikinciye aktar
+        for i, call in enumerate(single_calls):
+            if i > 0:
+                # Önceki sonuçtan value'yu al
+                call["pipe_from"] = "result"
+                call["pipe_target"] = _infer_pipe_target(call["tool"])
+            chain.append(call)
+        return chain
+    
+    # Otomatik chain örnekleri
+    # OEE hesapla → KPI yorumla
+    if re.search(r'oee.*?(hesapla|analiz).*?(yorumla|değerlendir|kıyasla)', q):
+        oee_calls = [c for c in single_calls if c["tool"] == "oee_calculate"]
+        if oee_calls:
+            chain = [
+                oee_calls[0],
+                {"tool": "kpi_interpret", "params": {"kpi_name": "oee"}, 
+                 "pipe_from": "oee", "pipe_target": "value"},
+            ]
+            return chain
+    
+    # Fire hesapla → risk değerlendir
+    if re.search(r'fire.*?(hesapla|analiz).*?(risk|değerlendir)', q):
+        waste_calls = [c for c in single_calls if c["tool"] == "waste_rate"]
+        if waste_calls:
+            chain = [
+                waste_calls[0],
+                {"tool": "risk_assess", "params": {
+                    "risk_name": "Fire oranı riski",
+                    "probability": 3,
+                    "impact": 4,
+                    "category": "operasyonel",
+                }, "pipe_from": "waste_rate", "pipe_target": "probability"},
+            ]
+            return chain
+    
+    return single_calls  # Chain bulunamazsa tekil çağrıları döndür
+
+
+def _infer_pipe_target(tool_name: str) -> str:
+    """Tool adından pipe hedef parametresini çıkar."""
+    pipe_targets = {
+        "kpi_interpret": "value",
+        "risk_assess": "probability",
+        "scenario_simulate": "current_value",
+        "financial_impact": "revenue",
+    }
+    return pipe_targets.get(tool_name, "value")
 
 
 def _detect_implicit_tool_calls(text: str) -> list[dict]:

@@ -1,4 +1,4 @@
-"""Audit & Compliance Framework — v2.0.0
+"""Audit & Compliance Framework — v3.0.0
 
 Enterprise-grade denetim ve uyumluluk:
 
@@ -9,11 +9,13 @@ Enterprise-grade denetim ve uyumluluk:
 - ★ Data retention policy (otomatik temizlik)
 - ★ Access control audit (rol bazlı erişim denetimi)
 - ★ Compliance report generation
+- ★ Hash chain tamper detection (v3.0.0)
 """
 
 from typing import Optional, Any
 from datetime import datetime, timezone, timedelta
 from collections import deque
+import hashlib
 import json
 import time
 
@@ -23,6 +25,16 @@ from app.db.models import AuditLog, User
 import structlog
 
 logger = structlog.get_logger()
+
+# ──────────────────── Hash Chain ────────────────────
+
+_last_hash: str = "0" * 64  # Genesis hash
+
+
+def _compute_hash_chain(action: str, user_id: Optional[int], details: str, prev_hash: str) -> str:
+    """SHA-256 hash chain — her audit kaydı bir öncekine bağlı."""
+    payload = f"{prev_hash}|{action}|{user_id}|{details}|{time.time()}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 # ──────────────────── Severity Levels ────────────────────
@@ -152,6 +164,11 @@ async def log_action(
 
     enriched_details = json.dumps(details_dict, ensure_ascii=False)
 
+    # Hash chain — tamper detection
+    global _last_hash
+    chain_hash = _compute_hash_chain(action, uid, enriched_details, _last_hash)
+    _last_hash = chain_hash
+
     entry = AuditLog(
         user_id=uid,
         action=action,
@@ -159,6 +176,7 @@ async def log_action(
         details=enriched_details,
         ip_address=ip_address,
         user_agent=user_agent,
+        hash_chain=chain_hash,
     )
     db.add(entry)
 

@@ -1,25 +1,23 @@
-"""Explainability (XAI) — Açıklanabilir Yapay Zeka Modülü v3.0
+"""Explainability (XAI) — Açıklanabilir Yapay Zeka Modülü v4.0
 
 Her AI yanıtını analiz eden, gerçek verilerle faktör skoru hesaplayan,
 istatistik toplayan, token attribution yapan ve kullanıcı geri bildirimiyle
 kalibre olan tam kapsamlı XAI motoru.
 
-Özellikler:
-- Gerçek zamanlı faktör analizi (yanıt kalitesi, RAG hit, kaynak çeşitliliği, vb.)
-- Modül bazlı reasoning chain adaptasyonu
-- Geçmiş sorgularla karşılaştırma (similarity tracking)
-- İstatistik toplama ve trend analizi
-- Karşı-olgusal analiz
-- Güven skoru dağılımı + historical breakdown
-- SHAP-Like Token Attribution (perturbation-based)
-- Kullanıcı geri bildirim kalibrasyon döngüsü
-- Attention heatmap (query-response kelime etkileşimi)
+v4.0 Yenilikler:
+- Sohbet modunda sabit değerler kaldırıldı → gerçek analiz
+- Kaynak güvenilirliği: LLM bilgi kalitesi + belirsizlik + referans analizi
+- Yanıt kalitesi: başlık, paragraf, emoji, tekrar kontrolü
+- Bağlam uyumu: TF-IDF tabanlı semantik benzerlik
+- PostgreSQL'e kalıcı kayıt (sunucu restart'ta veri korunur)
+- Gelişmiş heuristic'ler ile daha adil skorlama
 """
 
 import time
 import re
 import math
-from collections import deque
+import asyncio
+from collections import deque, Counter
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -30,6 +28,14 @@ try:
 except ImportError:
     import logging
     logger = logging.getLogger(__name__)
+
+# DB kayıt desteği
+try:
+    from app.db.database import async_session_maker
+    from app.db.models import XaiRecord
+    DB_AVAILABLE = True
+except Exception:
+    DB_AVAILABLE = False
 
 
 # ──────────────────── Sabitler ────────────────────
@@ -276,7 +282,7 @@ class DecisionExplainer:
         })
 
         # ── 2. Kaynak Güvenilirliği ──
-        source_score = self._score_source_reliability(sources, rag_docs, web_searched)
+        source_score = self._score_source_reliability(sources, rag_docs, web_searched, response)
         factors.append({
             "name": "Kaynak Güvenilirliği",
             "key": "kaynak_güvenilirliği",
@@ -327,58 +333,130 @@ class DecisionExplainer:
 
         return factors
 
-    # ── Yanıt Kalitesi Skorlama ──
+    # ── Yanıt Kalitesi Skorlama (v4.0 — Gelişmiş) ──
 
     def _score_response_quality(self, response: str, mode: str) -> float:
-        score = 0.5
-        words = len(response.split())
+        score = 0.45  # v4: taban biraz düşürüldü, bonuslar artırıldı
+        words = response.split()
+        word_count = len(words)
 
-        # Uzunluk — moda göre
+        # ── Uzunluk — moda göre ──
         if mode in ("Analiz", "Rapor", "Öneri"):
-            if words >= 200: score += 0.15
-            elif words >= 100: score += 0.10
-            elif words < 30: score -= 0.15
+            if word_count >= 200: score += 0.15
+            elif word_count >= 100: score += 0.10
+            elif word_count >= 50: score += 0.05
+            elif word_count < 30: score -= 0.10
         elif mode == "Sohbet":
-            if 10 <= words <= 150: score += 0.15
-            elif words > 300: score -= 0.05  # Sohbette çok uzun gereksiz
+            if 10 <= word_count <= 150: score += 0.12
+            elif 150 < word_count <= 300: score += 0.08
+            elif word_count > 300: score -= 0.03
+            elif word_count < 5: score -= 0.10
 
-        # Yapısal elementler
-        if re.search(r'^\s*[-•\d.)\]✅]', response, re.M):
-            score += 0.10  # Madde işareti / liste
+        # ── Yapısal elementler ──
+        if re.search(r'^\s*[-•\d.)\]✅✔⭐🔹▹►]', response, re.M):
+            score += 0.08  # Madde işareti / liste
         if '|' in response and '-' in response:
-            score += 0.10  # Tablo
-        if re.search(r'(sonuç|özet|tavsiye|öneri)', response, re.I):
-            score += 0.05  # Sonuç bölümü
-        if re.search(r'(çünkü|nedeniyle|dolayı|bu\s*nedenle)', response, re.I):
-            score += 0.05  # Sebep-sonuç
+            score += 0.08  # Tablo
 
-        # Hata belirteçleri
+        # ── Başlık / bold yapı (v4 yeni) ──
+        if re.search(r'(\*\*[^*]+\*\*|##\s+\S|#{1,3}\s)', response):
+            score += 0.07  # Başlık veya bold bölüm
+
+        # ── Paragraf yapısı (v4 yeni) ──
+        paragraphs = [p.strip() for p in response.split('\n\n') if p.strip()]
+        if len(paragraphs) >= 3:
+            score += 0.06  # Düzenli paragraf yapısı
+        elif len(paragraphs) >= 2:
+            score += 0.03
+
+        # ── Sonuç / Sonuç bölümü ──
+        if re.search(r'(sonuç|özet|tavsiye|öneri|değerlendirme|özetle)', response, re.I):
+            score += 0.05
+
+        # ── Sebep-sonuç / açıklama ──
+        if re.search(r'(çünkü|nedeniyle|dolayı|bu\s*nedenle|sebebiyle|zira)', response, re.I):
+            score += 0.05
+
+        # ── Tekrar kontrolü (v4 yeni — ceza) ──
+        if word_count > 20:
+            unique_ratio = len(set(w.lower() for w in words)) / word_count
+            if unique_ratio < 0.3:  # %70+ tekrar
+                score -= 0.15
+            elif unique_ratio < 0.45:
+                score -= 0.05
+
+        # ── Hata belirteçleri ──
         if response.startswith("[Hata]") or "hata" in response.lower()[:50]:
             score -= 0.30
 
         return max(0.0, min(1.0, score))
 
     def _quality_explanation(self, score: float, response: str, mode: str) -> str:
-        words = len(response.split())
-        parts = [f"{words} kelime"]
+        words = response.split()
+        word_count = len(words)
+        parts = [f"{word_count} kelime"]
         if score >= 0.8: parts.append("yapısal olarak güçlü")
-        elif score >= 0.6: parts.append("kabul edilebilir yapı")
+        elif score >= 0.65: parts.append("iyi yapılandırılmış")
+        elif score >= 0.5: parts.append("kabul edilebilir yapı")
         else: parts.append("yapısal iyileştirme gerekebilir")
+        # v4: Tekrar oranı bilgisi
+        if word_count > 20:
+            unique_ratio = len(set(w.lower() for w in words)) / word_count
+            if unique_ratio < 0.3:
+                parts.append("⚠️ yüksek tekrar")
         return f"Yanıt kalitesi: {' — '.join(parts)}"
 
-    # ── Kaynak Güvenilirliği ──
+    # ── Kaynak Güvenilirliği (v4.0 — Zenginleştirilmiş) ──
 
-    def _score_source_reliability(self, sources: list, rag_docs: Optional[list], web: bool) -> float:
-        score = 0.3  # Hiç kaynak yoksa bile LLM bilgisi var
+    def _score_source_reliability(self, sources: list, rag_docs: Optional[list],
+                                   web: bool, response: str = "") -> float:
+        score = 0.25  # v4: taban biraz düşürüldü, gerçek analizle yükselsin
 
+        # ── Harici kaynaklar ──
         if rag_docs:
-            score += 0.30  # RAG doküman eşleşmesi
+            score += 0.25  # RAG doküman eşleşmesi
             if len(rag_docs) >= 3:
                 score += 0.10  # Çoklu kaynak
+            elif len(rag_docs) >= 2:
+                score += 0.05
         if sources:
-            score += min(0.20, len(sources) * 0.05)  # Her kaynak +5%, max %20
+            score += min(0.15, len(sources) * 0.04)  # Her kaynak +4%, max %15
         if web:
             score += 0.10  # Web doğrulaması
+
+        # ── v4: LLM bilgi kalitesi analizi (kaynak olmasa bile) ──
+        if response:
+            resp_lower = response.lower()
+
+            # Belirsizlik dürüstlüğü → pozitif sinyal (hallüsinasyon riski düşük)
+            honesty_markers = re.findall(
+                r'(kesin\s*bilgim\s*yok|tahmin|yaklaşık|net\s*değil|emin\s*değilim|'
+                r'bilmiyorum|doğrulanmalı|kontrol\s*edilmeli|genel\s*olarak)',
+                resp_lower
+            )
+            if honesty_markers:
+                score += min(0.08, len(honesty_markers) * 0.03)
+
+            # Somut referanslar (tarih, sayı, isim) → bilgi somutluğu
+            has_dates = bool(re.search(r'\d{4}|\d{1,2}[./]\d{1,2}[./]\d{2,4}', response))
+            has_specifics = bool(re.search(r'(örneğin|mesela|spesifik|özellikle)', resp_lower))
+            has_numbers = len(re.findall(r'\b\d+[.,]?\d*\s*(%|₺|\$|€|kg|ton|adet|metre)', response))
+
+            if has_dates: score += 0.04
+            if has_specifics: score += 0.03
+            if has_numbers >= 2: score += 0.05
+            elif has_numbers >= 1: score += 0.03
+
+            # Teknik terimler yoğunluğu → alan bilgisi
+            technical = re.findall(
+                r'(algoritma|optimizasyon|veritabanı|API|sistem|süreç|analiz|'
+                r'metrik|parametre|konfigürasyon|entegrasyon|modül|fonksiyon|'
+                r'performans|rapor|strateji|planlama|üretim|kalite|maliyet)',
+                resp_lower
+            )
+            if len(technical) >= 5: score += 0.06
+            elif len(technical) >= 3: score += 0.04
+            elif len(technical) >= 1: score += 0.02
 
         return max(0.0, min(1.0, score))
 
@@ -391,91 +469,170 @@ class DecisionExplainer:
         if web:
             parts.append("Web araması yapıldı")
         if not parts:
-            parts.append("Sadece model bilgisi kullanıldı")
+            if score >= 0.45:
+                parts.append("Model bilgisi + içerik analizi ile değerlendirildi")
+            else:
+                parts.append("Sadece model bilgisi kullanıldı — kaynak eklenmesi önerilir")
         return " | ".join(parts)
 
-    # ── Bağlam Uyumu ──
+    # ── Bağlam Uyumu (v4.0 — TF-IDF Tabanlı) ──
+
+    _STOP_WORDS = frozenset({
+        "bir", "bu", "ve", "ile", "için", "olarak", "daha", "olan",
+        "gibi", "çok", "var", "den", "dan", "ise", "ama", "hem", "her",
+        "kadar", "sonra", "önce", "nasıl", "neden", "nedir", "midir",
+        "mıdır", "hangi", "bana", "benim", "onun", "şey", "the", "and",
+        "is", "are", "was", "were", "that", "this", "from", "with",
+    })
 
     def _score_context_match(self, query: str, response: str) -> float:
-        query_words = set(re.findall(r'\b\w{3,}\b', query.lower()))
-        response_words = set(re.findall(r'\b\w{3,}\b', response.lower()))
+        # Soru ve yanıt kelimelerini ayıkla (stop words hariç)
+        q_tokens = [w for w in re.findall(r'\b\w{3,}\b', query.lower())
+                     if w not in self._STOP_WORDS]
+        r_tokens = [w for w in re.findall(r'\b\w{3,}\b', response.lower())
+                     if w not in self._STOP_WORDS]
 
-        if not query_words:
+        if not q_tokens:
             return 0.5
 
-        # Soru kelimelerinin yanıtta geçme oranı
-        overlap = len(query_words & response_words)
-        overlap_ratio = overlap / len(query_words)
+        q_set = set(q_tokens)
+        r_set = set(r_tokens)
 
-        score = 0.3 + overlap_ratio * 0.5
+        # ── 1. Basit kelime eşleşmesi ──
+        overlap = len(q_set & r_set)
+        overlap_ratio = overlap / len(q_set)
 
-        # Soru-yanıt uzunluk oranı (çok kısa yanıt = bağlam kaçırma riski)
+        # ── 2. TF-IDF tabanlı ağırlıklı benzerlik (v4 yeni) ──
+        r_freq = Counter(r_tokens)
+        r_total = max(len(r_tokens), 1)
+
+        # IDF-benzeri: Sık geçen yanıt kelimeleri daha az bilgi taşır
+        tfidf_score = 0.0
+        matched_importance = 0.0
+        for qw in q_set:
+            if qw in r_freq:
+                tf = r_freq[qw] / r_total  # Term Frequency in response
+                # Nadiren geçen eşleşmeler daha değerli (inverse popularity)
+                idf_weight = 1.0 / (1.0 + math.log1p(r_freq[qw]))  # Sık geçen = düşük IDF
+                tfidf_score += tf * idf_weight * 10  # Normalize edilmiş katkı
+                matched_importance += 1
+
+        tfidf_normalized = min(0.3, tfidf_score / max(len(q_set), 1))
+
+        # ── 3. Skor birleştirme ──
+        score = 0.25 + overlap_ratio * 0.35 + tfidf_normalized
+
+        # ── 4. Uzunluk oranı ──
         len_ratio = len(response) / max(len(query), 1)
-        if len_ratio >= 2:
-            score += 0.10
+        if len_ratio >= 3:
+            score += 0.08
+        elif len_ratio >= 1.5:
+            score += 0.05
         elif len_ratio < 0.5:
-            score -= 0.10
+            score -= 0.08
+
+        # ── 5. Tam soru ibaresi yanıtta var mı (v4 yeni) ──
+        # Sorunun önemli kısmı aynen yanıtta geçiyorsa bağlam tam oturmuş
+        q_important = " ".join(q_tokens[:5])  # İlk 5 anlamlı kelime
+        if len(q_important) > 8 and q_important in response.lower():
+            score += 0.07
 
         return max(0.0, min(1.0, score))
 
     def _context_explanation(self, score: float, query: str, response: str) -> str:
-        query_words = set(re.findall(r'\b\w{3,}\b', query.lower()))
-        response_words = set(re.findall(r'\b\w{3,}\b', response.lower()))
-        overlap = len(query_words & response_words)
-        return f"Soru-yanıt kelime uyumu: {overlap}/{len(query_words)} anahtar kelime eşleşti"
+        q_tokens = [w for w in re.findall(r'\b\w{3,}\b', query.lower())
+                     if w not in self._STOP_WORDS]
+        r_tokens_set = set(re.findall(r'\b\w{3,}\b', response.lower()))
+        overlap = len(set(q_tokens) & r_tokens_set)
+        method = "TF-IDF + kelime eşleşmesi"
+        return f"Soru-yanıt uyumu ({method}): {overlap}/{len(q_tokens)} anahtar kelime eşleşti"
 
-    # ── Veri Yeterliliği ──
+    # ── Veri Yeterliliği (v4.0 — Sohbette de gerçek analiz) ──
 
     def _score_data_sufficiency(self, response: str, mode: str) -> float:
-        if mode == "Sohbet":
-            return 0.80  # Sohbette veri beklenmez
+        # v4: Sohbet modunda da gerçek analiz — sabit değer döndürülmüyor
+        is_chat = mode == "Sohbet"
+        score = 0.50 if is_chat else 0.40  # Sohbette beklenti biraz düşük
 
-        score = 0.4
-        # Sayısal veri
+        resp_lower = response.lower()
+
+        # ── Sayısal veri ──
         numbers = re.findall(r'\d+[.,]?\d*', response)
         if numbers:
-            score += min(0.20, len(numbers) * 0.03)
-        # Birimler
-        units = re.findall(r'[₺$€%]|(?:kg|ton|metre|adet|gün|saat|ay|yıl)', response, re.I)
+            if is_chat:
+                score += min(0.15, len(numbers) * 0.04)  # Sohbette sayı önemli ama gerekli değil
+            else:
+                score += min(0.20, len(numbers) * 0.03)
+
+        # ── Birimler / ölçüler ──
+        units = re.findall(r'[₺$€%]|(?:kg|ton|metre|adet|gün|saat|ay|yıl|dk|dakika|saniye)', response, re.I)
         if units:
-            score += 0.10
-        # Tablo
+            score += 0.08 if is_chat else 0.10
+
+        # ── Tablo ──
         if '|' in response:
-            score += 0.10
-        # "Bilmiyorum" dürüstlüğü
-        if re.search(r'(kesin\s*bilgim\s*yok|tahmin|yaklaşık|net\s*değil)', response, re.I):
+            score += 0.08
+
+        # ── Bilgi zenginliği (v4 yeni) ──
+        # Farklı bilgi parçacıkları (cümle sayısı)
+        sentences = [s.strip() for s in re.split(r'[.!?\n]', response) if len(s.strip()) > 10]
+        if len(sentences) >= 5:
+            score += 0.08
+        elif len(sentences) >= 3:
+            score += 0.04
+
+        # ── Somut açıklama / adım ──
+        if re.search(r'(adım|öncelikle|ardından|sonrasında|ilk olarak)', resp_lower):
             score += 0.05
+
+        # ── "Bilmiyorum" dürüstlüğü → pozitif ──
+        if re.search(r'(kesin\s*bilgim\s*yok|tahmin|yaklaşık|net\s*değil)', resp_lower):
+            score += 0.04
+
+        # ── Çok kısa yanıt cezası ──
+        word_count = len(response.split())
+        if word_count < 5:
+            score -= 0.15
+        elif word_count < 15 and not is_chat:
+            score -= 0.10
 
         return max(0.0, min(1.0, score))
 
     def _data_explanation(self, score: float, response: str, mode: str) -> str:
         nums = len(re.findall(r'\d+[.,]?\d*', response))
-        if mode == "Sohbet":
-            return "Sohbet modunda veri yeterliliği kontrolü uygulanmaz"
-        return f"Yanıtta {nums} sayısal veri, {'tablo var' if '|' in response else 'tablo yok'}"
+        sentences = len([s for s in re.split(r'[.!?\n]', response) if len(s.strip()) > 10])
+        label = "Sohbet" if mode == "Sohbet" else mode
+        return f"[{label}] Yanıtta {nums} sayısal veri, {sentences} cümle, {'tablo var' if '|' in response else 'tablo yok'}"
 
-    # ── Risk Farkındalığı ──
+    # ── Risk Farkındalığı (v4.0 — Sohbette de gerçek analiz) ──
 
     def _score_risk_awareness(self, response: str, mode: str) -> float:
-        if mode == "Sohbet":
-            return 0.80
-
+        # v4: Sohbet modunda da gerçek analiz
+        is_chat = mode == "Sohbet"
         resp_lower = response.lower()
-        score = 0.5
 
-        has_risk_mention = bool(re.search(r'(risk|tehlike|tehdit|uyarı|dikkat)', resp_lower))
-        has_level = bool(re.search(r'(düşük|orta|yüksek|kritik|🔴|🟡|🟢)', resp_lower))
-        has_mitigation = bool(re.search(r'(önlem|azalt|tedbir|engellemek|koruma)', resp_lower))
+        # Sohbette baz skor daha yüksek (risk beklentisi düşük)
+        score = 0.60 if is_chat else 0.50
 
-        if has_risk_mention: score += 0.15
-        if has_level: score += 0.15
-        if has_mitigation: score += 0.15
+        has_risk_mention = bool(re.search(r'(risk|tehlike|tehdit|uyarı|dikkat|sorun|problem)', resp_lower))
+        has_level = bool(re.search(r'(düşük|orta|yüksek|kritik|🔴|🟡|🟢|önemli|ciddi)', resp_lower))
+        has_mitigation = bool(re.search(r'(önlem|azalt|tedbir|engellemek|koruma|çözüm|öneri|tavsiye)', resp_lower))
+        has_limitation = bool(re.search(r'(ancak|dikkat|unutmayın|not:|uyarı:|önemli:)', resp_lower))
+
+        if has_risk_mention:
+            score += 0.12 if is_chat else 0.15
+        if has_level:
+            score += 0.10 if is_chat else 0.15
+        if has_mitigation:
+            score += 0.10 if is_chat else 0.15
+        if has_limitation:
+            score += 0.06  # v4: Sınırlamaları belirtmek pozitif
 
         return max(0.0, min(1.0, score))
 
     def _risk_awareness_explanation(self, score: float, mode: str) -> str:
-        if mode == "Sohbet":
-            return "Sohbet modunda risk analizi beklenmez"
+        if mode == "Sohbet" and score >= 0.7:
+            return "Sohbet yanıtında uygun düzeyde risk/sınırlama bilinci var"
         if score >= 0.8: return "Risk tanımlanmış, seviyesi belirtilmiş, azaltma önerisi var"
         if score >= 0.6: return "Risk kısmen belirtilmiş ancak detay eksik"
         return "Risk değerlendirmesi yetersiz"
@@ -742,7 +899,7 @@ class DecisionExplainer:
     # ══════════════════════════════════════════════════════
 
     def _record_stats(self, record: ExplanationRecord):
-        """İstatistikleri güncelle."""
+        """İstatistikleri güncelle ve DB'ye kaydet."""
         self._history.append(record)
         self._total_evaluations += 1
         self._confidence_sum += record.weighted_confidence
@@ -760,6 +917,56 @@ class DecisionExplainer:
             self._high_confidence_count += 1
         elif record.weighted_confidence < 0.5:
             self._low_confidence_count += 1
+
+        # v4: Async DB kayıt — fire-and-forget
+        if DB_AVAILABLE:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self._save_to_db(record))
+                else:
+                    asyncio.run(self._save_to_db(record))
+            except RuntimeError:
+                # No event loop — skip DB save silently
+                pass
+            except Exception as e:
+                logger.debug("xai_db_save_skipped", error=str(e))
+
+    async def _save_to_db(self, record: ExplanationRecord):
+        """XAI kaydını PostgreSQL'e kaydet."""
+        try:
+            async with async_session_maker() as session:
+                factors_data = []
+                for f in record.factors:
+                    factors_data.append({
+                        "name": f.get("name", ""),
+                        "key": f.get("key", ""),
+                        "score": round(f.get("score", 0), 4),
+                        "weight": round(f.get("weight", 0), 4),
+                    })
+
+                db_record = XaiRecord(
+                    query_hash=record.query_hash,
+                    query_preview=record.query_preview[:200],
+                    mode=record.mode,
+                    module_source=record.module_source,
+                    weighted_confidence=round(record.weighted_confidence, 4),
+                    risk_level=record.risk_level,
+                    risk_score=round(record.risk_score, 4),
+                    reasoning_steps=record.reasoning_steps,
+                    sources_used=record.sources_used,
+                    rag_hit=record.rag_hit,
+                    web_searched=record.web_searched,
+                    had_reflection=record.had_reflection,
+                    word_count=record.word_count,
+                    factors=factors_data,
+                    counterfactual=record.counterfactual[:500] if record.counterfactual else None,
+                )
+                session.add(db_record)
+                await session.commit()
+                logger.debug("xai_saved_to_db", query_hash=record.query_hash)
+        except Exception as e:
+            logger.debug("xai_db_save_failed", error=str(e))
 
     # ══════════════════════════════════════════════════════
     # TOKEN ATTRIBUTION — SHAP-Like Perturbation Analizi
@@ -1106,7 +1313,7 @@ class DecisionExplainer:
 
         return {
             "module": "Explainability (XAI)",
-            "version": "3.0.0",
+            "version": "4.0.0",
             "factors": factors,
             "factor_count": len(factors),
             "capabilities": [
@@ -1122,6 +1329,10 @@ class DecisionExplainer:
                 "SHAP-Like Token Attribution",
                 "Attention Heatmap",
                 "Kullanıcı Geri Bildirim Kalibrasyon",
+                "TF-IDF Bağlam Benzerliği",
+                "LLM Bilgi Kalitesi Analizi",
+                "PostgreSQL Kalıcı Kayıt",
+                "Sohbet Modu Gerçek Analiz",
             ],
             "stats": {
                 "total_evaluations": self._total_evaluations,

@@ -503,7 +503,8 @@ async def forget_everything(db: AsyncSession, user_id: int) -> dict:
 async def build_memory_context(db: AsyncSession, user_id: int) -> str:
     """
     LLM system prompt'una eklenecek hafıza özeti oluştur.
-    Kullanıcı bilgileri + şirket kültürü + son konuşmaların kısa özeti.
+    Kullanıcı bilgileri + şirket kültürü + son konuşmaların kısa özeti
+    + cross-session bağlam (v4.3.0).
     """
     parts = []
     
@@ -527,6 +528,11 @@ async def build_memory_context(db: AsyncSession, user_id: int) -> str:
     culture_ctx = await get_culture_context(db)
     if culture_ctx:
         parts.append(culture_ctx)
+    
+    # 2b. Cross-Session Context (v4.3.0) — son oturumlardan konu sürekliliği
+    cross_session = await get_cross_session_summary(db, user_id)
+    if cross_session:
+        parts.append(cross_session)
     
     # 3. Son konuşmalar — kompakt özet
     history = await get_conversation_history(db, user_id, limit=30)
@@ -657,4 +663,83 @@ async def get_culture_context(db: AsyncSession) -> str:
         return "\n".join(lines)
     except Exception as e:
         logger.error("culture_context_failed", error=str(e))
+        return ""
+
+
+# ═══════════════════════════════════════════════
+#  Cross-Session Context (v4.3.0)
+#  Son oturumlardan konu sürekliliği sağla
+# ═══════════════════════════════════════════════
+
+async def get_cross_session_summary(db: AsyncSession, user_id: int, last_n: int = 3) -> str:
+    """Son N oturumun konu özetini çıkar — LLM'e bağlam sürekliliği sağlar.
+    
+    Her oturumun ilk sorusunu ve ana konusunu alarak kullanıcının
+    hangi konularla ilgilendiğini LLM'e bildirir.
+    
+    Args:
+        db: Veritabanı oturumu
+        user_id: Kullanıcı ID
+        last_n: Kaç önceki oturum kontrol edilecek
+    
+    Returns:
+        Oturum özeti metni (LLM prompt'una eklenecek)
+    """
+    try:
+        # Son N tamamlanmış oturumu getir (aktif olan hariç)
+        stmt = (
+            select(ChatSession)
+            .where(
+                and_(
+                    ChatSession.user_id == user_id,
+                    ChatSession.is_active == False,
+                )
+            )
+            .order_by(desc(ChatSession.updated_at))
+            .limit(last_n)
+        )
+        result = await db.execute(stmt)
+        past_sessions = result.scalars().all()
+        
+        if not past_sessions:
+            return ""
+        
+        session_summaries = []
+        for sess in past_sessions:
+            # Her oturumun ilk sorusunu al (konu tespiti için)
+            msg_stmt = (
+                select(ConversationMemory.question, ConversationMemory.department)
+                .where(ConversationMemory.session_id == sess.id)
+                .order_by(ConversationMemory.created_at)
+                .limit(1)
+            )
+            msg_result = await db.execute(msg_stmt)
+            first_msg = msg_result.first()
+            
+            if first_msg:
+                # Mesaj sayısını al
+                count_stmt = (
+                    select(func.count(ConversationMemory.id))
+                    .where(ConversationMemory.session_id == sess.id)
+                )
+                count_result = await db.execute(count_stmt)
+                msg_count = count_result.scalar() or 0
+                
+                title = sess.title or "Bilinmeyen Konu"
+                dept = first_msg.department or "Genel"
+                date_str = sess.updated_at.strftime("%d/%m") if sess.updated_at else "?"
+                
+                session_summaries.append(
+                    f"- [{date_str}] {title} ({dept}, {msg_count} mesaj)"
+                )
+        
+        if session_summaries:
+            return (
+                "Önceki oturumlar (kullanıcının ilgi alanları):\n"
+                + "\n".join(session_summaries)
+                + "\n(Bu konularla bağlantı kurarsan kullanıcı deneyimi artar)"
+            )
+        return ""
+    except Exception as e:
+        logger.debug("cross_session_summary_failed", error=str(e))
         return ""

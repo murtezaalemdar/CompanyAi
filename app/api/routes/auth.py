@@ -46,6 +46,7 @@ class Token(BaseModel):
     access_token: str
     refresh_token: str | None = None
     token_type: str = "bearer"
+    must_change_password: bool = False
 
 
 class TokenData(BaseModel):
@@ -133,8 +134,40 @@ async def login(
     # Kullanıcıyı bul
     result = await db.execute(select(User).where(User.email == form_data.username))
     user = result.scalar_one_or_none()
-    
+
+    ip = request.client.host if request and request.client else None
+    ua = request.headers.get("user-agent", "")[:255] if request else None
+
+    # Hesap kilidi kontrolü
+    if user and hasattr(user, "locked_until") and user.locked_until:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if user.locked_until > now:
+            await log_action(
+                db, user=user, action="login_failed",
+                resource="auth", ip_address=ip, user_agent=ua,
+                details='{"reason": "account_locked"}',
+            )
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail="Hesabınız çok fazla başarısız giriş nedeniyle kilitlendi. Lütfen 15 dakika sonra tekrar deneyin.",
+            )
+
     if not user or not verify_password(form_data.password, user.hashed_password):
+        # Başarısız giriş sayacı
+        if user and hasattr(user, "failed_login_attempts"):
+            user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+            # 5 başarısız giriş → 15 dakika kilitle
+            if user.failed_login_attempts >= 5:
+                from datetime import datetime, timezone, timedelta
+                user.locked_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=15)
+            await log_action(
+                db, user=user, action="login_failed",
+                resource="auth", ip_address=ip, user_agent=ua,
+                details=f'{{"attempts": {user.failed_login_attempts}}}',
+            )
+            await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Email veya şifre hatalı",
@@ -143,22 +176,30 @@ async def login(
     
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Hesap devre dışı")
+
+    # Başarılı giriş — sayacı sıfırla
+    if hasattr(user, "failed_login_attempts"):
+        user.failed_login_attempts = 0
+        user.locked_until = None
     
-    # Token öluştur
+    # Token oluştur — must_change_password bilgisini ekle
+    must_change = getattr(user, "must_change_password", False) or False
     token_data = {"sub": str(user.id), "role": user.role}
     access_token = create_access_token(data=token_data)
     refresh_token = create_refresh_token(data=token_data)
     
     # Audit log
-    ip = request.client.host if request and request.client else None
-    ua = request.headers.get("user-agent", "")[:255] if request else None
     await log_action(
         db, user=user, action="login",
         resource="auth", ip_address=ip, user_agent=ua,
     )
     await db.commit()
     
-    return Token(access_token=access_token, refresh_token=refresh_token)
+    return Token(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        must_change_password=must_change,
+    )
 
 
 class RefreshRequest(BaseModel):
@@ -195,3 +236,121 @@ async def refresh_access_token(
 async def get_me(current_user: User = Depends(get_current_user)):
     """Mevcut kullanıcı bilgilerini döner"""
     return current_user
+
+
+# ──────────────────── Şifre Değiştirme ────────────────────
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    request: Request = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanıcının kendi şifresini değiştirmesi"""
+    # Mevcut şifre doğrulama
+    if not verify_password(body.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mevcut şifre hatalı",
+        )
+
+    # Yeni şifre validasyonu
+    if len(body.new_password) < settings.PASSWORD_MIN_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Yeni şifre en az {settings.PASSWORD_MIN_LENGTH} karakter olmalıdır",
+        )
+    if body.new_password.isdigit() or body.new_password.isalpha():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Şifre hem harf hem rakam içermelidir",
+        )
+    if body.new_password == body.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Yeni şifre eski şifreyle aynı olamaz",
+        )
+
+    # Şifreyi güncelle
+    current_user.hashed_password = hash_password(body.new_password)
+    # must_change_password bayrağını kaldır
+    if hasattr(current_user, "must_change_password"):
+        current_user.must_change_password = False
+    if hasattr(current_user, "password_changed_at"):
+        from datetime import datetime, timezone
+        current_user.password_changed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.commit()
+
+    # Audit log
+    ip = request.client.host if request and request.client else None
+    ua = request.headers.get("user-agent", "")[:255] if request else None
+    await log_action(
+        db, user=current_user, action="password_change",
+        resource="auth", ip_address=ip, user_agent=ua,
+    )
+    await db.commit()
+
+    return {"message": "Şifre başarıyla değiştirildi"}
+
+
+# ──────────────────── Tema Tercihi ────────────────────
+
+class ThemeRequest(BaseModel):
+    theme: str  # "dark" | "light" | "system"
+
+
+@router.get("/preferences/theme")
+async def get_theme(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanıcının tema tercihini döner"""
+    from app.db.models import UserPreference
+    result = await db.execute(
+        select(UserPreference).where(
+            UserPreference.user_id == current_user.id,
+            UserPreference.key == "ui_theme",
+        )
+    )
+    pref = result.scalar_one_or_none()
+    return {"theme": pref.value if pref else "dark"}
+
+
+@router.put("/preferences/theme")
+async def set_theme(
+    body: ThemeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanıcının tema tercihini kaydeder"""
+    if body.theme not in ("dark", "light", "system"):
+        raise HTTPException(status_code=400, detail="Geçersiz tema değeri")
+
+    from app.db.models import UserPreference
+    result = await db.execute(
+        select(UserPreference).where(
+            UserPreference.user_id == current_user.id,
+            UserPreference.key == "ui_theme",
+        )
+    )
+    pref = result.scalar_one_or_none()
+
+    if pref:
+        pref.value = body.theme
+    else:
+        pref = UserPreference(
+            user_id=current_user.id,
+            key="ui_theme",
+            value=body.theme,
+            source="user_settings",
+        )
+        db.add(pref)
+
+    await db.commit()
+    return {"theme": body.theme, "message": "Tema güncellendi"}

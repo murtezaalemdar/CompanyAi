@@ -24,6 +24,8 @@ import {
     Target,
     Layers,
     ShieldCheck,
+    FileDown,
+    File,
 } from 'lucide-react'
 import { analyzeApi } from '../services/api'
 
@@ -95,6 +97,7 @@ export default function Analyze() {
     const [isQuerying, setIsQuerying] = useState(false)
     const [streamingText, setStreamingText] = useState('')
     const [error, setError] = useState<string | null>(null)
+    const [exportingFormat, setExportingFormat] = useState<string | null>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const resultRef = useRef<HTMLDivElement>(null)
 
@@ -240,8 +243,40 @@ export default function Analyze() {
         setError(null)
         setQuestion('')
         setQueryInput('')
+        setExportingFormat(null)
         if (fileInputRef.current) fileInputRef.current.value = ''
     }
+
+    // ── DIŞA AKTAR ──
+    const EXPORT_FORMATS = [
+        { value: 'excel', label: 'Excel', icon: '📊', color: 'bg-green-600 hover:bg-green-500', ext: '.xlsx' },
+        { value: 'pdf', label: 'PDF', icon: '📄', color: 'bg-red-600 hover:bg-red-500', ext: '.pdf' },
+        { value: 'word', label: 'Word', icon: '📝', color: 'bg-blue-600 hover:bg-blue-500', ext: '.docx' },
+        { value: 'csv', label: 'CSV', icon: '📋', color: 'bg-teal-600 hover:bg-teal-500', ext: '.csv' },
+        { value: 'pptx', label: 'PowerPoint', icon: '📽️', color: 'bg-orange-600 hover:bg-orange-500', ext: '.pptx' },
+    ]
+
+    const handleExport = useCallback(async (format: string) => {
+        if (!result?.answer) return
+        setExportingFormat(format)
+        try {
+            const res = await analyzeApi.exportAnalysis(
+                result.answer,
+                format,
+                undefined,
+                result.analysis_type,
+                result.filename,
+            )
+            if (res.success && res.file_id) {
+                await analyzeApi.downloadExport(res.file_id, res.filename)
+            }
+        } catch (err: any) {
+            console.error('Export error:', err)
+            setError(`Dışa aktarma hatası: ${err.message || 'Bilinmeyen hata'}`)
+        } finally {
+            setExportingFormat(null)
+        }
+    }, [result])
 
     // ── MARKDOWN → basit HTML dönüştürücü ──
     const renderMarkdown = (text: string) => {
@@ -560,6 +595,38 @@ export default function Analyze() {
                         <div className="flex items-center gap-2 mt-4 text-blue-400 text-sm">
                             <Loader2 className="w-4 h-4 animate-spin" />
                             AI analiz ediyor...
+                        </div>
+                    )}
+
+                    {/* ── DIŞA AKTARMA BUTONLARI (v3.9.7) ── */}
+                    {result?.answer && !isLoading && (
+                        <div className="mt-6 pt-4 border-t border-dark-700">
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="text-sm font-medium text-dark-300 flex items-center gap-2">
+                                    <FileDown className="w-4 h-4 text-blue-400" />
+                                    Raporu İndir
+                                </h3>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {EXPORT_FORMATS.map(fmt => (
+                                    <button
+                                        key={fmt.value}
+                                        onClick={() => handleExport(fmt.value)}
+                                        disabled={exportingFormat !== null}
+                                        className={`px-4 py-2 rounded-lg text-white text-sm font-medium
+                                            flex items-center gap-2 transition
+                                            disabled:opacity-50 disabled:cursor-not-allowed
+                                            ${fmt.color}`}
+                                    >
+                                        {exportingFormat === fmt.value ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <span>{fmt.icon}</span>
+                                        )}
+                                        {fmt.label}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     )}
                 </div>

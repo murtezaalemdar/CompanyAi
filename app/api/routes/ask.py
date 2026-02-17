@@ -351,15 +351,19 @@ async def ask_ai_stream(
     web_results_text = ""
     web_rich_data = []
 
-    if WEB_SEARCH_AVAILABLE and search_and_summarize:
+    # RAG'da iyi sonuç varsa web aramayı atla (öğretilen içerik öncelikli)
+    _rag_has_good_results = any(d.get('relevance', 0) > 0.10 or d.get('distance', 999) < 1.5 for d in stream_rag_docs) if stream_rag_docs else False
+
+    if WEB_SEARCH_AVAILABLE and search_and_summarize and not _rag_has_good_results:
+        _explicit_web_kw = any(kw in request.question.lower() for kw in [
+            "hava", "dolar", "euro", "kur", "borsa", "maç", "skor",
+            "güncel", "son dakika", "bugün", "şu an",
+            "araştır", "internet", "web", "google",
+        ])
         should_search = (
             needs_web
-            or intent == "bilgi"
-            or any(kw in request.question.lower() for kw in [
-                "hava", "dolar", "euro", "kur", "borsa", "maç", "skor",
-                "güncel", "son dakika", "bugün", "şu an",
-                "araştır", "internet", "web", "google",
-            ])
+            or _explicit_web_kw
+            or (intent == "bilgi" and not stream_rag_docs)
         )
         # İş sorusu ama RAG'da cevap bulunamadıysa da web'e düş
         if not should_search and intent == "iş" and not stream_rag_docs:
@@ -390,9 +394,12 @@ async def ask_ai_stream(
             context=stream_context,
         )
     
-    # Web sonuçlarını system prompt'a ekle
+    # Web sonuçlarını system prompt'a ekle (RAG yoksa ana kaynak, RAG varsa ek referans)
     if web_results_text:
-        system_prompt += f"\n\nAşağıda internetten bulunan güncel bilgiler var. Bu bilgileri kullanarak kullanıcının sorusunu yanıtla:\n{web_results_text[:2000]}"
+        if stream_rag_docs:
+            system_prompt += f"\n\nEk referans (internetten): Aşağıdaki bilgiler tamamlayıcıdır. Önceliği yukarıdaki doküman bilgilerine ver:\n{web_results_text[:1500]}"
+        else:
+            system_prompt += f"\n\nAşağıda internetten bulunan güncel bilgiler var. Bu bilgileri kullanarak kullanıcının sorusunu yanıtla:\n{web_results_text[:2000]}"
 
     # Kişiselleştirme
     user_name = current_user.full_name or current_user.email.split("@")[0]

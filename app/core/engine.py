@@ -789,13 +789,14 @@ async def process_question(
         except Exception as e:
             logger.error("rag_search_error", error=str(e))
     
-    # Web araması
+    # Web araması — RAG'da iyi sonuç varsa web aramayı atla (öğretilen içerik öncelikli)
     web_results = None
     web_rich_data = None
-    if WEB_SEARCH_AVAILABLE and search_and_summarize:
+    _rag_has_good = any(d.get('relevance', 0) > 0.12 or d.get('distance', 999) < 1.4 for d in relevant_docs) if relevant_docs else False
+    if WEB_SEARCH_AVAILABLE and search_and_summarize and not _rag_has_good:
         should_search_web = (
             needs_web or 
-            (intent == "bilgi") or
+            (intent == "bilgi" and not relevant_docs) or
             (intent == "iş" and not relevant_docs)
         )
         if should_search_web:
@@ -820,12 +821,15 @@ async def process_question(
     if memory_context:
         system_prompt += f"\n\nKullanıcı Hafızası (geçmiş konusmalardan öğrenilen bilgiler):\n{memory_context}"    
     
-    # Web sonuçlarını prompt'a ekle
+    # Web sonuçlarını prompt'a ekle (RAG yoksa ana kaynak, RAG varsa ek referans)
     if web_results:
         _web_text = web_results[:1500]
         if TOKEN_BUDGET_AVAILABLE:
             _web_text = truncate_to_budget(_web_text, "web_results")
-        system_prompt += f"\n\nAşağıda internetten bulunan güncel bilgiler var. Bu bilgileri kullanarak yanıt ver:\n{_web_text}"
+        if relevant_docs:
+            system_prompt += f"\n\nEk referans (internetten): Aşağıdaki bilgiler tamamlayıcıdır. Önceliği yukarıdaki doküman bilgilerine ver:\n{_web_text}"
+        else:
+            system_prompt += f"\n\nAşağıda internetten bulunan güncel bilgiler var. Bu bilgileri kullanarak yanıt ver:\n{_web_text}"
     
     # v4.3.0: Token Bütçe Kontrolü — tüm bileşenleri bütçeye sığdır
     if TOKEN_BUDGET_AVAILABLE and smart_truncate_all:

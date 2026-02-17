@@ -353,7 +353,7 @@ async def process_document_content(file: UploadFile) -> dict:
             logger.error("docx_extraction_error", error=str(e))
             text_content = f"[Word okuma hatası: {file.filename}]"
     
-    # Excel dosyaları için
+    # Excel dosyaları için (v5.10.1: RAG-optimized row-by-row)
     elif file.content_type in {
         "application/vnd.ms-excel",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -364,8 +364,26 @@ async def process_document_content(file: UploadFile) -> dict:
                 tmp.write(content)
                 tmp_path = tmp.name
             
-            df = pd.read_excel(tmp_path)
-            text_content = df.to_string()
+            xls = pd.ExcelFile(tmp_path)
+            all_rows_text = []
+            for sheet_name in xls.sheet_names:
+                df = pd.read_excel(xls, sheet_name=sheet_name)
+                if df.empty:
+                    continue
+                if len(xls.sheet_names) > 1:
+                    all_rows_text.append(f"\n[Sayfa: {sheet_name}]")
+                columns = [str(c).strip() for c in df.columns]
+                for idx, row in df.iterrows():
+                    parts = []
+                    for col in columns:
+                        val = row[col]
+                        if pd.notna(val):
+                            val_str = str(val).strip()
+                            if val_str:
+                                parts.append(f"{col}: {val_str}")
+                    if parts:
+                        all_rows_text.append(f"{file.filename} | Satır {idx + 1}: {', '.join(parts)}")
+            text_content = "\n".join(all_rows_text)
             os.unlink(tmp_path)
         except ImportError:
             logger.warning("pandas/openpyxl not installed, Excel text extraction skipped")

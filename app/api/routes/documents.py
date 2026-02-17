@@ -368,12 +368,41 @@ def extract_text_from_file(filename: str, file_content: bytes) -> tuple:
             except ImportError:
                 raise HTTPException(status_code=500, detail="python-docx yüklü değil")
         
-        # ── Excel ──
+        # ── Excel ── (v5.10.1: RAG-optimized row-by-row extraction)
         elif doc_type == 'excel':
             try:
                 import pandas as pd
-                df = pd.read_excel(io.BytesIO(file_content))
-                content = df.to_string()
+                xls = pd.ExcelFile(io.BytesIO(file_content))
+                all_rows_text = []
+                
+                for sheet_name in xls.sheet_names:
+                    df = pd.read_excel(xls, sheet_name=sheet_name)
+                    if df.empty:
+                        continue
+                    
+                    # Birden fazla sayfa varsa başlık ekle
+                    if len(xls.sheet_names) > 1:
+                        all_rows_text.append(f"\n[Sayfa: {sheet_name}]")
+                    
+                    # Sütun adları
+                    columns = [str(c).strip() for c in df.columns]
+                    
+                    # Her satırı "Kolon: Değer" formatında yaz (RAG semantic search için)
+                    for idx, row in df.iterrows():
+                        parts = []
+                        for col in columns:
+                            val = row[col]
+                            if pd.notna(val):
+                                val_str = str(val).strip()
+                                if val_str:
+                                    parts.append(f"{col}: {val_str}")
+                        if parts:
+                            row_text = f"{filename} | Satır {idx + 1}: {', '.join(parts)}"
+                            all_rows_text.append(row_text)
+                
+                content = "\n".join(all_rows_text)
+                logger.info("excel_rag_extracted", filename=filename,
+                           sheets=len(xls.sheet_names), rows=len(all_rows_text))
             except ImportError:
                 raise HTTPException(status_code=500, detail="pandas/openpyxl yüklü değil")
         

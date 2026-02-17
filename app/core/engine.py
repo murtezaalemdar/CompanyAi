@@ -911,6 +911,20 @@ async def process_question(
     else:
         system_prompt, user_prompt = build_prompt(question, context)
     
+    # v6.02.00: Görsel intent + varlık kontrolü — LLM'e KOŞULLU bilgi ver
+    _has_pdf_images = False
+    if _detect_image_intent(question) and relevant_docs and PDF_IMAGES_AVAILABLE:
+        # Görsellerin disk üzerinde gerçekten mevcut olup olmadığını kontrol et
+        _pre_image_card = _build_pdf_image_rich_data(question, relevant_docs)
+        if _pre_image_card and _pre_image_card.get("images"):
+            _has_pdf_images = True
+            system_prompt += """
+
+📸 GÖRSEL BİLGİSİ: Bu konuyla ilgili PDF dokümanlarından çıkarılmış görseller MEVCUT.
+- "Metin tabanlı asistanım, görsel gösteremem" gibi şeyler SÖYLEME.
+- Görsellerin yanıtla birlikte otomatik olarak aşağıda gösterildiğini belirt.
+- Konu hakkında bildiklerini kısaca açıkla, "ilgili görselleri aşağıda bulabilirsiniz" de."""
+    
     # Kişiselleştirme — kullanıcı kimliği (tek seferde, v5.9.0)
     if user_name:
         system_prompt += f"\n\nKullanıcının adı: '{user_name}'. Ona '{user_name.split()[0]}' diye hitap edebilirsin. Geçmiş konuşmalardaki farklı isimler başka kişilere aittir."
@@ -1023,13 +1037,11 @@ async def process_question(
         if not isinstance(rich_data, list):
             rich_data = [rich_data]
         
-        # v6.02.00: PDF görsel desteği — kullanıcı görsel istiyorsa ilgili görselleri ekle
-        if _detect_image_intent(question) and relevant_docs:
-            pdf_image_card = _build_pdf_image_rich_data(question, relevant_docs)
-            if pdf_image_card:
-                rich_data.append(pdf_image_card)
-                logger.info("pdf_images_injected_bilgi",
-                           image_count=len(pdf_image_card["images"]))
+        # v6.02.00: PDF görsel desteği — önceden hesaplanan _pre_image_card'ı kullan
+        if _has_pdf_images and _pre_image_card:
+            rich_data.append(_pre_image_card)
+            logger.info("pdf_images_injected_bilgi",
+                       image_count=len(_pre_image_card["images"]))
         
         # Export talebi varsa dosya üret (bu hızlı)
         if EXPORT_AVAILABLE:
@@ -1591,13 +1603,11 @@ async def process_question(
     if not isinstance(rich_data, list):
         rich_data = [rich_data]
     
-    # v6.02.00: PDF görsel desteği — Enterprise modunda da çalışır
-    if _detect_image_intent(question) and relevant_docs:
-        pdf_image_card = _build_pdf_image_rich_data(question, relevant_docs)
-        if pdf_image_card:
-            rich_data.append(pdf_image_card)
-            logger.info("pdf_images_injected_enterprise",
-                       image_count=len(pdf_image_card["images"]))
+    # v6.02.00: PDF görsel desteği — Enterprise modunda da çalışır (önceden hesaplandı)
+    if _has_pdf_images and _pre_image_card:
+        rich_data.append(_pre_image_card)
+        logger.info("pdf_images_injected_enterprise",
+                   image_count=len(_pre_image_card["images"]))
     
     # 6b. Export talebi varsa dosya üret
     export_format = None

@@ -152,6 +152,18 @@ SUPPORTED_FORMATS = {
 }
 
 
+# ═══════════════════════════════════════════════════════════════
+# v6.02.00: PDF GÖRSEL ÇIKARMA — app.rag.pdf_images modülünden import
+# ═══════════════════════════════════════════════════════════════
+from app.rag.pdf_images import (
+    extract_pdf_images,
+    get_pdf_images_for_pages,
+    get_all_pdf_images,
+    PDF_IMAGES_DIR,
+    _safe_dirname,
+)
+
+
 class DocumentAddRequest(BaseModel):
     content: str
     source: str
@@ -743,6 +755,15 @@ async def upload_document(
         
         logger.info("upload_content_extracted", filename=file.filename, chars=len(content), doc_type=doc_type)
         
+        # v6.02.00: PDF ise görselleri de çıkar
+        images_extracted = 0
+        if doc_type == 'pdf':
+            try:
+                page_images = extract_pdf_images(file.filename, file_content)
+                images_extracted = sum(len(v) for v in page_images.values())
+            except Exception as img_err:
+                logger.warning("upload_image_extract_error", filename=file.filename, error=str(img_err))
+        
         # Dokümanı ekle
         success = add_document(
             content=content,
@@ -756,12 +777,15 @@ async def upload_document(
         )
         
         if success:
-            return {
+            result = {
                 "message": f"Dosya yüklendi: {file.filename}",
                 "success": True,
                 "type": doc_type,
                 "chars": len(content)
             }
+            if images_extracted > 0:
+                result["images_extracted"] = images_extracted
+            return result
         else:
             raise HTTPException(status_code=500, detail="Doküman eklenemedi")
             
@@ -829,6 +853,56 @@ async def upload_multiple_documents(
         "message": f"{success_count}/{len(files)} dosya yüklendi",
         "results": results,
         "success": success_count > 0
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# v6.02.00: PDF GÖRSEL SUNMA — Çıkarılmış görselleri HTTP ile sun
+# ═══════════════════════════════════════════════════════════════
+from fastapi.responses import FileResponse
+
+@router.get("/images/{source_dir}/{filename}")
+async def serve_pdf_image(source_dir: str, filename: str):
+    """PDF'den çıkarılmış görseli sun (v6.02.00)"""
+    # Güvenlik: path traversal koruması
+    if ".." in source_dir or ".." in filename:
+        raise HTTPException(status_code=400, detail="Geçersiz yol")
+    if "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Geçersiz dosya adı")
+    
+    filepath = PDF_IMAGES_DIR / source_dir / filename
+    
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Görsel bulunamadı")
+    
+    # MIME type belirleme
+    ext = filepath.suffix.lower()
+    media_types = {
+        ".webp": "image/webp",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+    }
+    media_type = media_types.get(ext, "image/webp")
+    
+    return FileResponse(
+        path=str(filepath),
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},  # 1 gün cache
+    )
+
+
+@router.get("/images/list/{source}")
+async def list_pdf_images(
+    source: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Bir PDF dosyasının çıkarılmış görsellerini listele (v6.02.00)"""
+    images = get_all_pdf_images(source)
+    return {
+        "source": source,
+        "total": len(images),
+        "images": images,
     }
 
 

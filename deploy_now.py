@@ -170,6 +170,7 @@ BACKEND_FILES = [
     "app/memory/persistent_memory.py",
     "app/rag/__init__.py",
     "app/rag/vector_store.py",
+    "app/rag/pdf_images.py",
     "app/cache/__init__.py",
     "app/cache/redis_cache.py",
     "app/router/__init__.py",
@@ -186,6 +187,7 @@ ROOT_DOCS = [
     "reference.md",
     "NOTES.md",
     "README.md",
+    "extract_existing_pdf_images.py",
 ]
 
 DATA_FILES = [

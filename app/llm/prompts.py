@@ -425,6 +425,12 @@ def build_rag_prompt(question: str, context: dict, documents: list = None) -> tu
    Örneğin: TARAK ≠ ŞARDON, TRAŞ ≠ TARAK, RAM ≠ SANFOR. Her biri bağımsız bir üretim aşamasıdır.
    Bir bölüm başlığından sonraki sayı (ör. "3 adet", "12 adet") YALNIZCA o bölüme aittir.
    Kullanıcı "tarak makinası" sorduğunda SADECE "TARAK" başlığı altındaki bilgiyi raporla, "ŞARDON" başlığı altındakini DEĞİL.
+
+### 📸 Görsel Yeteneği (v6.02.00):
+Eğer kullanıcı bir şeyin resmini, görselini veya fotoğrafını istiyorsa:
+- "Metin tabanlı asistanım" gibi şeyler SÖYLEME — görseller otomatik olarak yanıtla birlikte gösterilecektir.
+- Görsellerin PDF dokümanlarından çıkarıldığını ve aşağıda gösterildiğini belirt.
+- Konu hakkında bildiklerini kısaca açıkla, "ilgili görselleri aşağıda bulabilirsiniz" de.
 """
         system += doc_text
     

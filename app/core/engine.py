@@ -543,6 +543,104 @@ except ImportError:
     DQ_OUTCOME_AVAILABLE = False
     dq_record_prediction = None
 
+# v6.02.00: PDF Görsel Desteği
+try:
+    from app.rag.pdf_images import (
+        get_pdf_images_for_pages, get_all_pdf_images, PDF_IMAGES_DIR, _safe_dirname
+    )
+    PDF_IMAGES_AVAILABLE = True
+except ImportError:
+    PDF_IMAGES_AVAILABLE = False
+    get_pdf_images_for_pages = lambda s, p: []
+    get_all_pdf_images = lambda s: []
+
+# v6.02.00: Görsel istemi algılama anahtar kelimeleri
+_IMAGE_INTENT_KEYWORDS = {
+    "resim", "resmini", "resimler", "resimlerini", "resminden",
+    "görsel", "görseli", "görseller", "görsellerini",
+    "fotoğraf", "fotoğrafı", "fotoğraflar", "fotoğrafını", "foto",
+    "image", "picture", "photo",
+    "göster", "gösterir",
+}
+
+def _detect_image_intent(question: str) -> bool:
+    """Kullanıcının görsel isteyip istemediğini algıla (v6.02.00)"""
+    q_lower = question.lower()
+    words = set(re.findall(r'\w+', q_lower))
+    return bool(words & _IMAGE_INTENT_KEYWORDS)
+
+
+def _extract_page_numbers_from_chunk(content: str) -> list:
+    """Chunk içeriğinden sayfa numaralarını çıkar (v6.02.00)
+    
+    '--- Sayfa N ---' marker'larını arar. OCR ile işlenmiş PDF'lerde
+    her sayfa bu şekilde işaretlenmiştir.
+    """
+    pages = re.findall(r'---\s*Sayfa\s+(\d+)\s*---', content)
+    return [int(p) for p in pages]
+
+
+def _build_pdf_image_rich_data(question: str, relevant_docs: list) -> dict | None:
+    """
+    RAG sonuçlarından PDF görsellerini rich_data formatında döndür (v6.02.00).
+    
+    Akış:
+    1. relevant_docs'tan PDF kaynaklarını bul
+    2. Chunk'lardan sayfa numaralarını çıkar
+    3. İlgili sayfalardaki görselleri al
+    4. ImageResultsCard formatında rich_data döndür
+    """
+    if not PDF_IMAGES_AVAILABLE or not relevant_docs:
+        return None
+    
+    all_images = []
+    seen_sources = set()
+    
+    for doc in relevant_docs:
+        source = doc.get("source", "")
+        doc_type = doc.get("type", "")
+        
+        # Sadece PDF kaynaklarını işle
+        if not source.lower().endswith(".pdf"):
+            continue
+        
+        # Sayfa numaralarını chunk içeriğinden çıkar
+        content = doc.get("content", "")
+        page_numbers = _extract_page_numbers_from_chunk(content)
+        
+        if page_numbers:
+            # Belirli sayfalardaki görselleri al
+            images = get_pdf_images_for_pages(source, page_numbers)
+        elif source not in seen_sources:
+            # Sayfa bilgisi yoksa tüm görselleri al (max 6)
+            images = get_all_pdf_images(source)[:6]
+        else:
+            continue
+        
+        seen_sources.add(source)
+        all_images.extend(images)
+    
+    if not all_images:
+        return None
+    
+    # Tekrarlayan görselleri kaldır
+    unique_images = []
+    seen_srcs = set()
+    for img in all_images:
+        if img["src"] not in seen_srcs:
+            seen_srcs.add(img["src"])
+            unique_images.append(img)
+    
+    # Maksimum 12 görsel
+    unique_images = unique_images[:12]
+    
+    return {
+        "type": "images",
+        "query": question,
+        "images": unique_images,
+        "source": "PDF Doküman Görselleri",
+    }
+
 logger = structlog.get_logger()
 
 
@@ -924,6 +1022,14 @@ async def process_question(
         rich_data = web_rich_data if web_rich_data else []
         if not isinstance(rich_data, list):
             rich_data = [rich_data]
+        
+        # v6.02.00: PDF görsel desteği — kullanıcı görsel istiyorsa ilgili görselleri ekle
+        if _detect_image_intent(question) and relevant_docs:
+            pdf_image_card = _build_pdf_image_rich_data(question, relevant_docs)
+            if pdf_image_card:
+                rich_data.append(pdf_image_card)
+                logger.info("pdf_images_injected_bilgi",
+                           image_count=len(pdf_image_card["images"]))
         
         # Export talebi varsa dosya üret (bu hızlı)
         if EXPORT_AVAILABLE:
@@ -1484,6 +1590,14 @@ async def process_question(
     rich_data = web_rich_data if web_rich_data else []
     if not isinstance(rich_data, list):
         rich_data = [rich_data]
+    
+    # v6.02.00: PDF görsel desteği — Enterprise modunda da çalışır
+    if _detect_image_intent(question) and relevant_docs:
+        pdf_image_card = _build_pdf_image_rich_data(question, relevant_docs)
+        if pdf_image_card:
+            rich_data.append(pdf_image_card)
+            logger.info("pdf_images_injected_enterprise",
+                       image_count=len(pdf_image_card["images"]))
     
     # 6b. Export talebi varsa dosya üret
     export_format = None

@@ -14,6 +14,43 @@ Tüm önemli değişiklikler bu dosyada belgelenir.
 
 ---
 
+## [6.02.00] — 2025-06-19
+
+### Eklendi — PDF Görsel Çıkarma ve Gösterim Özelliği
+
+PDF dokümanlarındaki görseller artık otomatik olarak çıkarılır ve
+kullanıcı istediğinde gösterilir. Kullanıcı "resmini göster", "görseli var mı"
+gibi sorular sorduğunda ilgili PDF sayfalarındaki görseller rich_data olarak döner.
+
+#### app/api/routes/documents.py — PDF Görsel Altyapısı
+- **`extract_pdf_images()`**: PyMuPDF (fitz) ile her sayfadan görsel çıkarma
+  - Küçük görseller (<5KB, <80px) otomatik filtrelenir (logo/ikon eleme)
+  - WebP formatında optimize edilmiş kayıt (quality=85)
+  - `manifest.json` ile sayfa→görsel eşleme bilgisi
+- **`get_pdf_images_for_pages()`**: Belirli sayfalardaki görselleri döndürür
+- **`get_all_pdf_images()`**: Bir PDF'in tüm görsellerini listeler
+- **`GET /api/rag/images/{source}/{filename}`**: Görsel sunma endpoint'i
+  - Path traversal koruması, 1 gün cache header
+- **`GET /api/rag/images/list/{source}`**: PDF görsel listesi endpoint'i
+- Upload sırasında PDF görselleri otomatik çıkarılır
+
+#### app/core/engine.py — Görsel İstem Algılama ve Rich Data Enjeksiyonu
+- **`_detect_image_intent()`**: "resim", "görsel", "fotoğraf", "göster" gibi
+  anahtar kelimeleri algılar
+- **`_build_pdf_image_rich_data()`**: RAG sonuçlarından PDF sayfa numaralarını
+  çıkarır (--- Sayfa N --- marker), ilgili görselleri `ImageResultsCard` formatında döndürür
+- Hem Bilgi fast-path hem Enterprise pipeline'da çalışır
+
+#### app/llm/prompts.py — LLM Görsel Yeteneği Bilgilendirmesi
+- `build_rag_prompt()` içinde LLM'e "görsel gösterebilirsin" talimatı eklendi
+- "Metin tabanlı asistanım" cevabı engellendi
+
+#### extract_existing_pdf_images.py — Migration Script
+- Mevcut PDF'ler için tek seferlik görsel çıkarma
+- ChromaDB'den PDF kaynaklarını tarar, diskteki dosyalarla eşleştirir
+
+---
+
 ## [6.01.01] — 2026-02-17
 
 ### Düzeltildi — PDF RAG: Bölüm Başlığı Karışıklığı ve Semantic Scoring

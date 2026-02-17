@@ -554,6 +554,9 @@ def search_documents(
                     except (ValueError, TypeError):
                         pass
                 
+                # v6.03.00: Skoru 1.0 ile cap'le (multi-entity bonus %100'ü aşabilir)
+                hybrid_score = min(hybrid_score, 1.0)
+                
                 # v6.01.01: keyword_match flag'ını tüm sonuçlara ata
                 # (CE reranking'de keyword-protected ağırlıklama için gerekli)
                 _has_kw_match = keyword_score > 0
@@ -607,6 +610,7 @@ def search_documents(
                 _kw_hybrid *= 0.5
             elif _kw_type in ("chat_learned", "qa_learned", "voice_learned"):
                 _kw_hybrid *= 0.70
+            _kw_hybrid = min(_kw_hybrid, 1.0)  # v6.03.00: cap at 1.0
             documents.append({
                 "content": _kw_doc,
                 "source": _kw_meta.get("source", "Bilinmeyen"),

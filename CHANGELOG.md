@@ -14,6 +14,35 @@ Tüm önemli değişiklikler bu dosyada belgelenir.
 
 ---
 
+## [6.03.00] — 2025-06-20
+
+### Eklendi — "Resimden Öğren" Özelliği
+
+Doküman yönetimi sayfasına 5. sekme olarak "Resimden Öğren" eklendi.
+Kullanıcılar görsel dosyaları yükleyerek OCR ile metin çıkarabilir ve
+opsiyonel olarak Vision AI ile detaylı görsel açıklaması ürettirebilir.
+Çıkarılan içerik RAG sistemine (ChromaDB) kaydedilir.
+
+#### app/api/routes/documents.py — `POST /learn-image` Endpoint
+- **OCR Metin Çıkarma**: EasyOCR ile görselden Türkçe/İngilizce metin çıkarma
+- **Vision AI Açıklama** (opsiyonel): minicpm-v vision modeli ile detaylı görsel analizi
+- Dosya tipi kontrolü (PNG, JPG, GIF, BMP, TIFF, WebP)
+- Departman yetki kontrolü, boyut limiti (max 20 MB)
+- `capabilities` endpoint'ine `image_learning` özelliği eklendi
+
+#### frontend/src/pages/Documents.tsx — "Resimden Öğren" Sekmesi
+- Drag & drop / click ile görsel seçme ve önizleme
+- Opsiyonel başlık alanı
+- Vision AI toggle butonu (OCR + AI açıklama birlikte)
+- Yükleme durumu, başarı/hata bildirimleri
+- OCR kelime sayısı ve güven skoru detayları
+
+#### frontend/src/services/api.ts — `ragApi.learnFromImage()`
+- FormData ile görsel dosya upload (multipart/form-data)
+- 120 saniye timeout (Vision AI kullanımı için yeterli süre)
+
+---
+
 ## [6.02.00] — 2025-06-19
 
 ### Eklendi — PDF Görsel Çıkarma ve Gösterim Özelliği

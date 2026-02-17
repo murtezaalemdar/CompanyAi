@@ -1397,6 +1397,176 @@ async def learn_from_video(
         raise HTTPException(status_code=500, detail=f"Video işleme hatası: {str(e)}")
 
 
+# ═══════════════════════════════════════════════════════════════
+# RESİMDEN ÖĞRENME (OCR + Vision LLM)
+# ═══════════════════════════════════════════════════════════════
+
+ALLOWED_IMAGE_TYPES = {
+    "image/png", "image/jpeg", "image/jpg", "image/gif",
+    "image/bmp", "image/tiff", "image/webp",
+}
+
+@router.post("/learn-image")
+async def learn_from_image(
+    file: UploadFile = File(...),
+    department: str = Form("Genel"),
+    title: Optional[str] = Form(None),
+    use_vision: bool = Form(False),
+    current_user: User = Depends(get_current_user),
+):
+    """Resimden bilgi öğren — OCR ile metin çıkarır, opsiyonel olarak Vision LLM ile açıklama üretir."""
+    if not RAG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="RAG sistemi kullanılamıyor")
+
+    # Dosya tipi kontrolü
+    content_type = file.content_type or ""
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        ext = (file.filename or "").rsplit(".", 1)[-1].lower() if file.filename else ""
+        if ext not in {"png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Desteklenmeyen dosya formatı. Lütfen bir görsel dosyası yükleyin (PNG, JPG, GIF, BMP, TIFF, WebP).",
+            )
+
+    # Departman yetki kontrolü
+    if current_user.role == "user":
+        user_depts = parse_user_departments(current_user.department)
+        if department not in user_depts:
+            raise HTTPException(status_code=403, detail="Bu departmana içerik ekleme yetkiniz yok")
+
+    try:
+        image_bytes = await file.read()
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="Boş dosya yüklendi")
+
+        # Dosya boyut kontrolü (max 20 MB)
+        if len(image_bytes) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Dosya boyutu çok büyük (max 20 MB)")
+
+        image_title = title or file.filename or "Adsız Görsel"
+        content_parts: list[str] = []
+
+        # ── 1) OCR ile metin çıkar ──
+        try:
+            from app.core.ocr_engine import extract_text_from_image_bytes, EASYOCR_AVAILABLE
+            if EASYOCR_AVAILABLE:
+                ocr_result = extract_text_from_image_bytes(image_bytes, detail=False)
+                ocr_text = ocr_result.get("text", "").strip()
+                ocr_confidence = ocr_result.get("confidence", 0)
+                ocr_word_count = ocr_result.get("word_count", 0)
+
+                if ocr_text and ocr_word_count >= 2:
+                    content_parts.append(f"[OCR ile çıkarılan metin — güven: %{int(ocr_confidence * 100)}]\n{ocr_text}")
+                    logger.info("image_ocr_done", words=ocr_word_count, confidence=ocr_confidence)
+                else:
+                    logger.info("image_ocr_empty", filename=file.filename)
+            else:
+                ocr_text = ""
+                ocr_confidence = 0
+                ocr_word_count = 0
+                logger.warning("easyocr_not_available_for_learn_image")
+        except Exception as ocr_err:
+            ocr_text = ""
+            ocr_confidence = 0
+            ocr_word_count = 0
+            logger.warning("image_ocr_failed", error=str(ocr_err))
+
+        # ── 2) Vision LLM ile açıklama üret (opsiyonel) ──
+        vision_description = ""
+        if use_vision:
+            try:
+                import base64
+                from PIL import Image as PILImage
+
+                img = PILImage.open(io.BytesIO(image_bytes))
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+
+                # Boyutlandır (max 1024px)
+                max_size = 1024
+                if max(img.size) > max_size:
+                    img.thumbnail((max_size, max_size), PILImage.Resampling.LANCZOS)
+
+                # WebP olarak sıkıştır
+                buf = io.BytesIO()
+                img.save(buf, format="WEBP", quality=80, optimize=True)
+                b64_image = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+                from app.llm.client import ollama_client
+                vision_prompt = (
+                    "Bu görseli ayrıntılı olarak Türkçe açıkla. "
+                    "Görselde ne var, ne yazıyor, hangi nesneler var, varsa tablo veya grafik bilgileri nelerdir? "
+                    "Mümkün olduğunca detaylı ve bilgi dolu bir açıklama yaz."
+                )
+                vision_description = await ollama_client.generate(
+                    prompt=vision_prompt,
+                    system_prompt="Sen bir görsel analiz asistanısın. Görselleri Türkçe olarak ayrıntılı açıklarsın.",
+                    images=[b64_image],
+                    use_omni=False,
+                )
+                if vision_description and vision_description.strip():
+                    content_parts.append(f"[Vision AI açıklaması]\n{vision_description.strip()}")
+                    logger.info("image_vision_done", desc_len=len(vision_description))
+            except Exception as vision_err:
+                logger.warning("image_vision_failed", error=str(vision_err))
+
+        # ── 3) İçerik kontrolü ──
+        if not content_parts:
+            raise HTTPException(
+                status_code=400,
+                detail="Görselden metin veya açıklama çıkarılamadı. "
+                       "Lütfen metin içeren veya daha net bir görsel deneyin.",
+            )
+
+        combined_content = f"# Görsel: {image_title}\n\n" + "\n\n".join(content_parts)
+
+        # ── 4) RAG'a kaydet ──
+        source_name = f"Resim: {image_title}"
+        success = add_document(
+            content=combined_content,
+            source=source_name,
+            doc_type="image_content",
+            metadata={
+                "department": department,
+                "author": current_user.full_name or current_user.email,
+                "type": "image_content",
+                "original_filename": file.filename,
+                "ocr_confidence": ocr_confidence,
+                "ocr_word_count": ocr_word_count,
+                "has_vision_description": bool(vision_description),
+                "created_at": datetime.utcnow().isoformat(),
+            },
+        )
+
+        if success:
+            logger.info(
+                "image_learned",
+                title=image_title,
+                chars=len(combined_content),
+                ocr_words=ocr_word_count,
+                has_vision=bool(vision_description),
+                user=current_user.email,
+            )
+            return {
+                "message": f"Görsel içeriği öğrenildi: {image_title}",
+                "success": True,
+                "title": image_title,
+                "chars": len(combined_content),
+                "ocr_word_count": ocr_word_count,
+                "ocr_confidence": round(ocr_confidence, 2),
+                "has_vision_description": bool(vision_description),
+                "type": "image_content",
+            }
+        else:
+            raise HTTPException(status_code=500, detail="İçerik kaydedilemedi")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("image_learn_error", filename=file.filename, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Görsel işleme hatası: {str(e)}")
+
+
 @router.get("/capabilities")
 async def get_capabilities(current_user: User = Depends(get_current_user)):
     """Sistemin mevcut öğrenme yeteneklerini döndür"""
@@ -1405,6 +1575,7 @@ async def get_capabilities(current_user: User = Depends(get_current_user)):
         "web_scraping": WEB_SCRAPING_AVAILABLE,
         "youtube_transcript": YOUTUBE_AVAILABLE,
         "ocr": _check_ocr_available(),
+        "image_learning": RAG_AVAILABLE and EASYOCR_AVAILABLE,
         "supported_formats_count": len(SUPPORTED_FORMATS),
     }
 

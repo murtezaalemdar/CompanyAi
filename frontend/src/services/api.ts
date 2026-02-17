@@ -588,6 +588,19 @@ export const ragApi = {
         return response.data
     },
 
+    learnFromImage: async (file: File, department: string, title?: string, useVision: boolean = false) => {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('department', department)
+        if (title) formData.append('title', title)
+        formData.append('use_vision', String(useVision))
+        const response = await api.post('/rag/learn-image', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 120000,
+        })
+        return response.data
+    },
+
     deleteDocument: async (source: string) => {
         const response = await api.delete(`/rag/documents/${encodeURIComponent(source)}`)
         return response.data

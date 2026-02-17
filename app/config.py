@@ -7,7 +7,7 @@
 #   MINOR (orta) → Önemli değişiklik (yeni özellik, önemli iyileştirme)
 #   PATCH (son)  → Küçük işlem (bugfix, ufak düzeltme)
 #   MINOR artınca PATCH=00, MAJOR artınca MINOR=00 ve PATCH=00 olur.
-APP_VERSION = "6.02.00"
+APP_VERSION = "6.03.00"
 
 from pydantic_settings import BaseSettings
 from typing import List

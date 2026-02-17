@@ -35,7 +35,9 @@ import {
     ExternalLink,
     Video,
     ShieldAlert,
-    Lock
+    Lock,
+    ImagePlus,
+    ScanEye
 } from 'lucide-react'
 import clsx from 'clsx'
 import { ragApi } from '../services/api'
@@ -45,7 +47,7 @@ import { useAuth } from '../contexts/AuthContext'
 // ═══════════════════════════════════════════════════════════════
 // TİPLER
 // ═══════════════════════════════════════════════════════════════
-type TabType = 'upload' | 'teach' | 'url' | 'video'
+type TabType = 'upload' | 'teach' | 'url' | 'video' | 'image'
 
 interface DocumentItem {
     source: string
@@ -73,7 +75,7 @@ function getDocTypeIcon(type: string): string {
         'text': '📃', 'markdown': '📋', 'csv': '📈', 'json': '🔧',
         'python': '🐍', 'javascript': '⚡', 'typescript': '💎',
         'web_page': '🌐', 'video_transcript': '🎬', 'manual': '✍️',
-        'image': '🖼️', 'email': '📧', 'epub': '📚',
+        'image': '🖼️', 'image_content': '🖼️', 'email': '📧', 'epub': '📚',
         'html': '🌐', 'xml': '📐', 'sql': '🗃️', 'yaml': '⚙️',
     }
     return icons[type] || '📄'
@@ -89,6 +91,7 @@ function getDocTypeBadgeColor(type: string): string {
         'video_transcript': 'bg-purple-500/20 text-purple-400',
         'manual': 'bg-yellow-500/20 text-yellow-400',
         'image': 'bg-pink-500/20 text-pink-400',
+        'image_content': 'bg-pink-500/20 text-pink-400',
     }
     return colors[type] || 'bg-dark-600 text-dark-300'
 }
@@ -226,6 +229,12 @@ export default function Documents() {
     const [videoTitle, setVideoTitle] = useState('')
     const [videoLanguage, setVideoLanguage] = useState('tr')
 
+    // Image Learning States
+    const [imageFile, setImageFile] = useState<File | null>(null)
+    const [imageTitle, setImageTitle] = useState('')
+    const [imageUseVision, setImageUseVision] = useState(false)
+    const [imagePreview, setImagePreview] = useState<string | null>(null)
+
     // Clear All Modal States
     const [showClearModal, setShowClearModal] = useState(false)
     const [clearPassword, setClearPassword] = useState('')
@@ -322,6 +331,18 @@ export default function Documents() {
             queryClient.invalidateQueries({ queryKey: ['documents-list'] })
             setVideoUrl('')
             setVideoTitle('')
+        },
+    })
+
+    const imageLearnMutation = useMutation({
+        mutationFn: (data: { file: File, department: string, title?: string, useVision: boolean }) =>
+            ragApi.learnFromImage(data.file, data.department, data.title, data.useVision),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['rag-status'] })
+            queryClient.invalidateQueries({ queryKey: ['documents-list'] })
+            setImageFile(null)
+            setImageTitle('')
+            setImagePreview(null)
         },
     })
 
@@ -558,6 +579,22 @@ export default function Documents() {
         videoLearnMutation.mutate({ url: videoUrl.trim(), department: selectedDepartment, title: videoTitle || undefined, language: videoLanguage })
     }
 
+    const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (file) {
+            setImageFile(file)
+            const reader = new FileReader()
+            reader.onload = (ev) => setImagePreview(ev.target?.result as string)
+            reader.readAsDataURL(file)
+        }
+    }
+
+    const handleImageSubmit = (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!imageFile) return
+        imageLearnMutation.mutate({ file: imageFile, department: selectedDepartment, title: imageTitle || undefined, useVision: imageUseVision })
+    }
+
     // ── COMPUTED ──
 
     const documents: DocumentItem[] = documentsData?.documents || []
@@ -585,6 +622,7 @@ export default function Documents() {
         { id: 'teach', label: 'Bilgi Gir', icon: PenTool, desc: 'Metin ile öğretin' },
         { id: 'url', label: 'URL Öğren', icon: Globe, desc: 'Web sayfasından öğrenin' },
         { id: 'video', label: 'Video Öğren', icon: Play, desc: 'YouTube videosundan öğrenin' },
+        { id: 'image', label: 'Resimden Öğren', icon: ImagePlus, desc: 'Görsellerden bilgi öğrenin' },
     ]
 
     // ═══════════════════════════════════════════════════════════════
@@ -1064,6 +1102,144 @@ export default function Documents() {
                                 <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 p-3 rounded-lg">
                                     <AlertCircle className="w-4 h-4" />
                                     <span>{(videoLearnMutation.error as any)?.response?.data?.detail || 'Video işlenirken hata oluştu.'}</span>
+                                </div>
+                            )}
+                        </form>
+                    )}
+
+                    {/* ═══ RESİMDEN ÖĞREN TAB ═══ */}
+                    {activeTab === 'image' && (
+                        <form onSubmit={handleImageSubmit} className="space-y-4">
+                            {/* Görsel Seçimi */}
+                            <div>
+                                <label className="block text-xs font-medium text-dark-400 mb-1.5">Görsel Dosyası</label>
+                                <div
+                                    className={clsx(
+                                        "border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors",
+                                        imageFile
+                                            ? "border-primary-500/50 bg-primary-500/5"
+                                            : "border-dark-600 hover:border-dark-500 bg-dark-800/50"
+                                    )}
+                                    onClick={() => document.getElementById('image-learn-input')?.click()}
+                                >
+                                    {imagePreview ? (
+                                        <div className="space-y-3">
+                                            <img
+                                                src={imagePreview}
+                                                alt="Önizleme"
+                                                className="max-h-48 mx-auto rounded-lg border border-dark-600"
+                                            />
+                                            <div className="flex items-center justify-center gap-2 text-sm text-dark-300">
+                                                <FileIcon className="w-4 h-4" />
+                                                <span>{imageFile?.name}</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        setImageFile(null)
+                                                        setImagePreview(null)
+                                                    }}
+                                                    className="ml-2 text-red-400 hover:text-red-300"
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <ImagePlus className="w-10 h-10 mx-auto text-dark-500" />
+                                            <p className="text-sm text-dark-400">Görsel seçmek için tıklayın</p>
+                                            <p className="text-xs text-dark-500">PNG, JPG, GIF, BMP, TIFF, WebP</p>
+                                        </div>
+                                    )}
+                                    <input
+                                        id="image-learn-input"
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/gif,image/bmp,image/tiff,image/webp"
+                                        onChange={handleImageFileSelect}
+                                        className="hidden"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Başlık */}
+                            <div>
+                                <label className="block text-xs font-medium text-dark-400 mb-1.5">Başlık (Opsiyonel)</label>
+                                <input
+                                    type="text"
+                                    value={imageTitle}
+                                    onChange={(e) => setImageTitle(e.target.value)}
+                                    placeholder="Dosya adı varsayılan olarak kullanılır"
+                                    className="input w-full"
+                                />
+                            </div>
+
+                            {/* Vision AI Toggle */}
+                            <div className="flex items-center gap-3 bg-dark-800 rounded-lg p-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setImageUseVision(!imageUseVision)}
+                                    className={clsx(
+                                        "relative w-10 h-5 rounded-full transition-colors",
+                                        imageUseVision ? "bg-primary-500" : "bg-dark-600"
+                                    )}
+                                >
+                                    <span
+                                        className={clsx(
+                                            "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform",
+                                            imageUseVision && "translate-x-5"
+                                        )}
+                                    />
+                                </button>
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-1.5 text-sm text-dark-300">
+                                        <ScanEye className="w-4 h-4" />
+                                        <span>Vision AI ile açıklama üret</span>
+                                    </div>
+                                    <p className="text-xs text-dark-500 mt-0.5">OCR'a ek olarak yapay zeka ile görsel detaylarını açıklar (daha yavaş)</p>
+                                </div>
+                            </div>
+
+                            {/* İpucu */}
+                            <div className="bg-dark-800 rounded-lg p-3 text-xs text-dark-400 space-y-1">
+                                <p>🖼️ <strong className="text-dark-300">İpucu:</strong> Metin içeren görselleri yükleyin (etiketler, tablolar, belgeler, vb.).</p>
+                                <p>Sistem OCR ile görseldeki metni çıkarır ve bilgi deposuna kaydeder.</p>
+                                <p>Vision AI seçeneği ile görselin detaylı yapay zeka açıklaması da eklenir.</p>
+                            </div>
+
+                            {/* Submit */}
+                            <button
+                                type="submit"
+                                disabled={!imageFile || imageLearnMutation.isPending}
+                                className="btn-primary w-full flex justify-center items-center gap-2"
+                            >
+                                {imageLearnMutation.isPending
+                                    ? <><Loader2 className="w-4 h-4 animate-spin" /> Görsel işleniyor...</>
+                                    : <><ImagePlus className="w-4 h-4" /> Görselden Öğren</>
+                                }
+                            </button>
+
+                            {/* Başarı */}
+                            {imageLearnMutation.isSuccess && (
+                                <div className="flex items-start gap-2 text-sm text-green-400 bg-green-500/10 p-3 rounded-lg">
+                                    <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                                    <div>
+                                        <p>Görsel içeriği öğrenildi! ({imageLearnMutation.data?.chars?.toLocaleString()} karakter)</p>
+                                        {imageLearnMutation.data?.ocr_word_count > 0 && (
+                                            <p className="text-xs text-green-300/70 mt-1">
+                                                OCR: {imageLearnMutation.data.ocr_word_count} kelime (güven: %{Math.round((imageLearnMutation.data.ocr_confidence || 0) * 100)})
+                                                {imageLearnMutation.data.has_vision_description && ' • Vision AI açıklaması eklendi'}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Hata */}
+                            {imageLearnMutation.isError && (
+                                <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 p-3 rounded-lg">
+                                    <AlertCircle className="w-4 h-4" />
+                                    <span>{(imageLearnMutation.error as any)?.response?.data?.detail || 'Görsel işlenirken hata oluştu.'}</span>
                                 </div>
                             )}
                         </form>

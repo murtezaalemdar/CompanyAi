@@ -13,7 +13,7 @@ Tekstil sektörü odaklı, her bölümün kendi bilgi tabanı ve yetkilendirmesi
   - SSH Key: `keys/server2_key` (private key eksik — deploy paramiko ile şifre fallback kullanır)
   - Şifre: `Kc435102mn`
 - **Modeller:** qwen2.5:72b (text), minicpm-v (vision/OCR), minicpm-o (omni-modal), mpnet-base-v2 (embedding)
-- **Versiyon:** v5.10.0
+- **Versiyon:** v6.03.00
 
 ## Önemli Kararlar
 - Tamamen lokal LLM (Ollama + qwen2.5:72b) — GPU yok, CPU-only (Xeon Silver 4316), 64GB RAM
@@ -38,6 +38,67 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 - deploy_now.py BACKEND_FILES listesi statik — yeni dosya eklendiğinde güncellenmeli!
 
 ## 🔄 Oturum Özetleri
+
+### Tarih: 17 Şubat 2026 — v6.03.00: Resimden Öğren + Skor Cap + Desktop v2.7.0
+
+**Oturum 1 — v6.03.00: "Resimden Öğren" Özelliği**
+
+**Amaç:** Doküman yönetimi sayfasına görsel dosyalardan öğrenme özelliği eklemek.
+
+**Yapılan İşler:**
+
+| # | İş | Dosya | Detay |
+|---|---|---|---|
+| 1 | Backend Endpoint | documents.py | `POST /learn-image` — OCR (EasyOCR TR+EN) + opsiyonel Vision AI (minicpm-v) + ChromaDB kayıt |
+| 2 | Frontend 5. Sekme | Documents.tsx | "Resimden Öğren" sekmesi — drag&drop, önizleme, Vision AI toggle |
+| 3 | API Fonksiyonu | api.ts | `ragApi.learnFromImage()` — FormData POST, 120s timeout |
+| 4 | Capabilities | documents.py | `capabilities` endpoint'ine `image_learning` eklendi |
+
+**Deploy:** Server 1 ✅ + Server 2 ✅ — Commit `a0bf3e1`
+
+---
+
+**Oturum 2 — RAG Skor %103 Bug Fix**
+
+**Problem:** Multi-entity bonus formülü `hybrid_score`'u 1.0 üzerine çıkarabiliyordu (%103).
+**Çözüm:** `vector_store.py`'de 2 yere `min(hybrid_score, 1.0)` cap eklendi.
+**Deploy:** Server 1 ✅ + Server 2 ✅ — Commit `b476b78`
+
+---
+
+**Oturum 3 — CompanyAI.exe S2 Download Fix**
+
+**Problem:** `https://88.246.13.23:2015/downloads/CompanyAI.exe` indirilemiyordu.
+**Kök neden:** S2'de `/var/www/html/downloads/` dizini yoktu.
+**Çözüm:** Dizin oluşturuldu, exe S1'den kopyalandı, S2 nginx'e `/downloads/` location bloğu eklendi (HTTP + HTTPS).
+
+---
+
+**Oturum 4 — Desktop v2.7.0: Sunucu-Spesifik Build + Logo İkon**
+
+**Amaç:** Her sunucu için ayrı exe, kısayol ismi sunucu adıyla, şirket logosu ikon olarak.
+
+**Yapılan İşler:**
+
+| # | İş | Dosya | Detay |
+|---|---|---|---|
+| 1 | Sunucu ayrımı | desktop/app.py | `SERVER_ID`, `SERVERS` dict, `SERVER_URL`/`SERVER_NAME` derivasyonu |
+| 2 | Kısayol güncelleme | desktop/app.py | `create_desktop_shortcut()`: isim = "CompanyAI (Sunucu X)", ikon = exe |
+| 3 | SSL desteği | desktop/app.py | `check_server()`: `ssl.create_default_context()` + self-signed cert bypass |
+| 4 | Pencere başlığı | desktop/app.py | `f"{APP_TITLE} — {SERVER_NAME}  v{APP_VERSION}"` |
+| 5 | Toplu build | desktop/build_all.py | YENİ — S1 + S2 için otomatik build scripti |
+| 6 | Logo ikonu | desktop/icon.ico | LOGO.png → icon.ico (7 boyut: 16-256px, Pillow ile oluşturuldu) |
+| 7 | Eski ikon yedek | desktop/icon_old.ico | Orijinal ikon yedeklendi |
+
+**Build Çıktıları:**
+- `dist/CompanyAI.exe` → S1 (12,821,956 bytes, SERVER_ID=1)
+- `dist/CompanyAI_S2.exe` → S2 (12,822,117 bytes, SERVER_ID=2)
+
+**Deploy:** S1 exe → `/var/www/html/downloads/` (S1), S2 exe → `/var/www/html/downloads/` (S2)
+
+**Not:** Desktop değişiklikleri henüz git'e commit edilmedi.
+
+---
 
 ### Tarih: 16 Şubat 2026 — v5.9.0: Modül Koordinasyonu & Prompt Kalitesi
 

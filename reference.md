@@ -2,7 +2,7 @@
 
 > **Proje Adı:** Kurumsal Yapay Zeka Asistanı – LOCAL & ÖĞRENEN  
 > **Amaç:** Kurumsal kullanım için tasarlanmış, tamamen lokal çalışan ve öğrenen bir AI asistan sistemi.  
-> **Son Güncelleme:** 17 Şubat 2026 (v5.10.0 — Upload Progress UI + OCR Fix + Sync + Nginx Fix)
+> **Son Güncelleme:** 17 Şubat 2026 (v6.03.00 — Resimden Öğren + Score Cap + Desktop v2.7.0 + S2 Downloads)
 
 ---
 
@@ -303,6 +303,7 @@ flowchart LR
 | Metin Girişi | `POST /rag/teach` | Elle/sesle metin girişi |
 | URL/Web Sayfası | `POST /rag/learn-url` | Web scraping (httpx + BeautifulSoup) |
 | YouTube Video | `POST /rag/learn-video` | Altyazı çekme (youtube-transcript-api) |
+| Resim Öğrenme | `POST /rag/learn-image` | OCR + opsiyonel Vision LLM (minicpm-v) — görsel analiz |
 
 **Ek Bağımlılıklar (URL/Video):** beautifulsoup4, lxml, youtube-transcript-api, striprtf
 
@@ -380,7 +381,7 @@ flowchart LR
 |-------|-------|----------|
 | `Login.tsx` | ✅ | JWT giriş |
 | `Ask.tsx` | ✅ | Chat + multimodal soru-cevap + oturum geçmişi sidebar + session persistence |
-| `Documents.tsx` | ✅ | RAG doküman yönetimi — 4 sekmeli (Dosya/Bilgi/URL/Video), klasör ağacı, doküman tablosu |
+| `Documents.tsx` | ✅ | RAG doküman yönetimi — 5 sekmeli (Dosya/Bilgi/URL/Video/Resim), klasör ağacı, doküman tablosu |
 | `Dashboard.tsx` | ✅ | Grafik + CPU/Memory + LLM model bilgisi gerçek API'den |
 | `Queries.tsx` | ✅ | Sorgu geçmişi (departman filtreli) |
 | `Users.tsx` | ✅ | Kullanıcı CRUD (admin only) |
@@ -1014,7 +1015,7 @@ Desktop viewer (pywebview) mantığı tüm platformlara genişletildi. Tüm nati
 
 | Platform | Araç | Build Komutu | Çıktı | Durum |
 |----------|------|-------------|-------|-------|
-| **Windows** | pywebview + PyInstaller | `desktop\build.bat` | `dist/CompanyAI.exe` (~12MB) | ✅ Hazır |
+| **Windows** | pywebview + PyInstaller | `desktop\build_all.py` | `dist/CompanyAI.exe` (S1) + `dist/CompanyAI_S2.exe` (S2) | ✅ Hazır |
 | **macOS** | pywebview + PyInstaller | `./desktop/build_mac.sh` | `dist/CompanyAI.app` | ✅ Hazır (macOS'ta test edilecek) |
 | **Android** | Capacitor 6 + WebView | `npm run mobile:android` | `.apk` | ✅ Hazır (Android Studio gerekli) |
 | **iOS** | Capacitor 6 + WKWebView | `npm run mobile:ios` | `.ipa` | ✅ Hazır (macOS + Xcode gerekli) |
@@ -1086,6 +1087,15 @@ Desktop viewer (pywebview) mantığı tüm platformlara genişletildi. Tüm nati
 | `Assets.xcassets/AppIcon.appiconset/` | 1024×1024 CompanyAI ikonu üretildi |
 | `Assets.xcassets/Splash.imageset/` | 2732×2732 CompanyAI splash üretildi (3 varyant) |
 
+### Desktop v2.7.0 — Sunucu-Spesifik Build + Logo İkon
+
+| Dosya | Değişiklik |
+|-------|------------|
+| `desktop/app.py` | `SERVER_ID` + `SERVERS` dict — S1(HTTP) / S2(HTTPS) ayrı build. Kısayol adı: `CompanyAI (Sunucu X).lnk`. SSL: `check_hostname=False`, `verify_mode=CERT_NONE` |
+| `desktop/build_all.py` | **Yeni** — Toplu build scripti: `set_server_id()` ile S1+S2 exe üretir (`CompanyAI.exe` + `CompanyAI_S2.exe`) |
+| `desktop/icon.ico` | LOGO.png'den üretildi (7 boyut: 16/20/24/32/48/64/256px) — Orhan Karakoç gold tree logosu |
+| `desktop/icon_old.ico` | Eski ikon yedek |
+
 ### macOS Desktop
 
 | Dosya | Değişiklik |
@@ -1102,7 +1112,7 @@ Desktop viewer (pywebview) mantığı tüm platformlara genişletildi. Tüm nati
 |----------|-------------------|
 | **Android** | 5 mipmap boyutu × 3 varyant (launcher, round, foreground) = 15 ikon + 11 splash |
 | **iOS** | 1 × 1024×1024 AppIcon + 3 × 2732×2732 splash |
-| **Windows** | 1 × icon.ico (6 boyut: 16/32/48/64/128/256px) |
+| **Windows** | 1 × icon.ico (7 boyut: 16/20/24/32/48/64/256px — LOGO.png kaynaklı) |
 | **macOS** | 1 × icon_1024.png (iconutil ile .icns'e dönüştürülür) |
 
 **Marka tasarımı:**
@@ -1141,7 +1151,7 @@ cd frontend && npx cap sync
 | Dosya | Değiştirilecek Yer |
 |-------|-------------------|
 | `frontend/capacitor.config.ts` | `server.url` |
-| `desktop/app.py` | `SERVER_URL` sabiti |
+| `desktop/app.py` | `SERVER_ID` + `SERVERS` dict (S1/S2 ayrı URL'ler) |
 | `frontend/android/.../network_security_config.xml` | `<domain>` |
 | `frontend/ios/.../Info.plist` | `NSExceptionDomains` key |
 | `frontend/public/error.html` | Bilgi metni (opsiyonel) |
@@ -1292,6 +1302,34 @@ cd frontend && npx cap sync
 
 ---
 
+## 📦 v6.01.00 → v6.03.00 Değişiklik Özeti
+
+### v6.03.00 — Resimden Öğren + Score Cap + Desktop v2.7.0 (17 Şubat 2026)
+
+#### Resimden Öğren (Image Learning)
+- **Backend:** `POST /rag/learn-image` endpoint — OCR (easyocr) + opsiyonel Vision LLM (minicpm-v)
+- **Frontend:** Documents.tsx 5. sekme "Resimden Öğren" — resim yükleme, önizleme, Vision AI toggle
+- **API:** `ragApi.learnFromImage(file, department, title?, useVision)` — FormData POST, 120s timeout
+- Desteklenen formatlar: PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP
+
+#### RAG Score Cap Fix
+- **Problem:** Multi-entity bonus formülü `hybrid_score`'u %100 üzerine çıkarabiliyordu (%103 gibi)
+- **Çözüm:** `vector_store.py`'de 2 yerde `min(hybrid_score, 1.0)` cap eklendi
+
+#### Desktop v2.7.0 — Sunucu-Spesifik Build + Logo İkon
+- `desktop/app.py`: `SERVER_ID` + `SERVERS` dict — S1(HTTP) / S2(HTTPS) ayrı URL
+- `desktop/build_all.py`: Toplu build scripti — `set_server_id()` ile S1+S2 exe üretir
+- Kısayol adı: `CompanyAI (Sunucu 1).lnk` / `CompanyAI (Sunucu 2).lnk`
+- `desktop/icon.ico`: LOGO.png'den Pillow ile üretildi (7 boyut: 16-256px)
+- S2 için SSL: `ssl.create_default_context()` + `check_hostname=False` + `verify_mode=CERT_NONE`
+
+#### S2 CompanyAI.exe İndirme Düzeltmesi
+- `/var/www/html/downloads/` dizini oluşturuldu, exe kopyalandı
+- Nginx'e `/downloads/` location block eklendi (HTTP + HTTPS)
+- İndirme URL: `https://88.246.13.23:2015/downloads/CompanyAI.exe`
+
+---
+
 ## 📦 v5.9.0 → v5.10.0 Değişiklik Özeti
 
 ### v5.9.0 — Modül Koordinasyonu & Prompt Kalitesi (24 Şubat 2026)
@@ -1344,11 +1382,11 @@ cd frontend && npx cap sync
 - **Koleksiyonlar:** `learned_knowledge` (5), `company_documents` (62), `company_memory` (180) = 247 kayıt
 - **Cron (S1):** `*/15 * * * *` `/opt/companyai/sync_chromadb.py`
 
-#### Sunucu Durum (v5.10.0)
-| Sunucu | IP | Donanım | Nginx Body Size | Proxy Timeout | SSL |
-|--------|-----|---------|-----------------|---------------|-----|
-| Server 1 | 192.168.0.12:22 | CPU-only, Xeon 4316, 64GB | 500M | — | Mevcut HTTPS |
-| Server 2 | 88.246.13.23:2013 | 2× RTX 3090, 48GB VRAM | 500M | 900s | Self-signed (2036'ya kadar) |
+#### Sunucu Durum (v6.03.00)
+| Sunucu | IP | Donanım | Nginx Body Size | Proxy Timeout | SSL | Downloads |
+|--------|-----|---------|-----------------|---------------|-----|----------|
+| Server 1 | 192.168.0.12:22 | CPU-only, Xeon 4316, 64GB | 500M | — | Mevcut HTTPS | — |
+| Server 2 | 88.246.13.23:2013 | 2× RTX 3090, 48GB VRAM | 500M | 900s | Self-signed (2036'ya kadar) | `/downloads/` location (nginx) |
 
 #### SSL Yapılandırması (Server 2)
 - Self-signed sertifika (RSA 2048, 10 yıl geçerli: 2026–2036)

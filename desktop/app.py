@@ -14,11 +14,21 @@ import os
 import subprocess
 import urllib.request
 import urllib.error
+import ssl
+
+# ── Sunucu Ayarları ──────────────────────────────────────
+SERVER_ID = 1  # 1 = Sunucu 1 (LAN), 2 = Sunucu 2 (WAN)  ← build_all.py otomatik değiştirir
+
+SERVERS = {
+    1: {"url": "http://192.168.0.12",          "name": "Sunucu 1"},
+    2: {"url": "https://88.246.13.23:2015",    "name": "Sunucu 2"},
+}
 
 # ── Ayarlar ──────────────────────────────────────────────
 APP_TITLE = "CompanyAI — Kurumsal AI Asistanı"
-APP_VERSION = "2.6.0"
-SERVER_URL = "http://192.168.0.12"
+APP_VERSION = "2.7.0"
+SERVER_URL = SERVERS[SERVER_ID]["url"]
+SERVER_NAME = SERVERS[SERVER_ID]["name"]
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 820
 MIN_WIDTH = 900
@@ -152,7 +162,8 @@ def create_desktop_shortcut():
             return  # Sadece Windows'ta kısayol oluştur
         exe_path = os.path.abspath(sys.executable)
         desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-        shortcut_path = os.path.join(desktop, "CompanyAI.lnk")
+        shortcut_name = f"CompanyAI ({SERVER_NAME}).lnk"
+        shortcut_path = os.path.join(desktop, shortcut_name)
         if os.path.exists(shortcut_path):
             return  # Zaten var
         ps = (
@@ -160,7 +171,8 @@ def create_desktop_shortcut():
             f'$sc = $ws.CreateShortcut("{shortcut_path}"); '
             f'$sc.TargetPath = "{exe_path}"; '
             f'$sc.WorkingDirectory = "{os.path.dirname(exe_path)}"; '
-            f'$sc.Description = "CompanyAI Kurumsal AI Asistanı"; '
+            f'$sc.Description = "CompanyAI Kurumsal AI Asistanı — {SERVER_NAME}"; '
+            f'$sc.IconLocation = "{exe_path},0"; '
             f'$sc.Save()'
         )
         subprocess.run(
@@ -172,11 +184,15 @@ def create_desktop_shortcut():
 
 
 def check_server(url: str, timeout: int = 5) -> str | None:
-    """Sunucunun erişilebilir olup olmadığını kontrol et (HTTP)."""
+    """Sunucunun erişilebilir olup olmadığını kontrol et (HTTP/HTTPS)."""
     try:
         health = url.rstrip("/") + "/api/health"
         req = urllib.request.Request(health, method="GET")
-        resp = urllib.request.urlopen(req, timeout=timeout)
+        # Self-signed sertifika desteği (Sunucu 2 HTTPS)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        resp = urllib.request.urlopen(req, timeout=timeout, context=ctx)
         if resp.status == 200:
             return url
     except Exception:
@@ -214,7 +230,7 @@ def main():
 
     # Ana pencereyi oluştur (loading ekranıyla)
     window = webview.create_window(
-        title=f"{APP_TITLE}  v{APP_VERSION}",
+        title=f"{APP_TITLE} — {SERVER_NAME}  v{APP_VERSION}",
         html=LOADING_HTML,
         width=WINDOW_WIDTH,
         height=WINDOW_HEIGHT,

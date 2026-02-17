@@ -13,8 +13,8 @@ Bu dosya GitHub Copilot Chat için ana bağlamdır. Kod üretirken bu dosya önc
 - **DB:** PostgreSQL 14.20, port 5433, user `companyai`, db `companyai`
 - **Auth:** JWT (HS256) + pbkdf2_sha256 + RBAC (Admin/Manager/User)
 - **Frontend:** React + TypeScript + Vite + Tailwind CSS + TanStack Query
-- **Desktop:** pywebview + PyInstaller → CompanyAI.exe (12MB)
-- **Versiyon:** v5.10.0
+- **Desktop:** pywebview + PyInstaller → CompanyAI.exe (S1+S2 ayrı build)
+- **Versiyon:** v6.03.00
 - **AI Modül Sayısı:** 49
 - **Proje dizini (lokal):** `C:\Users\murteza.KARAKOC\Desktop\Python\CompanyAi`
 - **Proje dizini (sunucu):** `/opt/companyai`
@@ -44,9 +44,13 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 
 ## 🖥️ Desktop Uygulaması (Windows + macOS)
 - **Windows:** `desktop/app.py` → pywebview (Edge WebView2) native pencere
-  - Build: `desktop/build.bat` veya `pyinstaller desktop/companyai.spec`
-  - Çıktı: `dist/CompanyAI.exe` (~12MB tek dosya)
-  - Download: `https://192.168.0.12/downloads/CompanyAI.exe`
+  - Build: `python desktop/build_all.py` (S1+S2 toplu) veya `pyinstaller desktop/companyai.spec`
+  - Çıktı: `dist/CompanyAI.exe` (S1) + `dist/CompanyAI_S2.exe` (S2)
+  - Download S1: `https://192.168.0.12/downloads/CompanyAI.exe`
+  - Download S2: `https://88.246.13.23:2015/downloads/CompanyAI.exe`
+  - SERVER_ID + SERVERS dict: S1(HTTP) / S2(HTTPS+SSL) ayrı URL
+  - Kısayol adı: `CompanyAI (Sunucu 1).lnk` / `CompanyAI (Sunucu 2).lnk`
+  - İkon: LOGO.png'den üretilmiş `icon.ico` (7 boyut: 16-256px) — Orhan Karakoç gold tree logosu
 - **macOS:** `desktop/app.py` → pywebview (WebKit cocoa) native pencere
   - Build: `./desktop/build_mac.sh` veya `pyinstaller desktop/companyai_mac.spec`
   - Çıktı: `dist/CompanyAI.app` bundle
@@ -170,11 +174,12 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 | `frontend/src/services/api.ts` | Axios API client |
 | `frontend/capacitor.config.ts` | Capacitor mobil ayarları (sunucu URL, splash, statusbar) |
 | `frontend/public/error.html` | Mobil sunucu bağlantı hatası sayfası |
-| `desktop/app.py` | Masaüstü uygulaması (pywebview — Windows + macOS) |
+| `desktop/app.py` | Masaüstü uygulaması (pywebview — Windows + macOS, SERVER_ID config) |
 | `desktop/companyai.spec` | Windows PyInstaller build config |
 | `desktop/companyai_mac.spec` | macOS PyInstaller build config (.app bundle) |
+| `desktop/build_all.py` | S1+S2 toplu build scripti (set_server_id + PyInstaller) |
 | `desktop/build_mac.sh` | macOS otomatik build scripti |
-| `desktop/icon.ico` / `icon_1024.png` | Desktop ikonları (Windows .ico + macOS PNG) |
+| `desktop/icon.ico` / `icon_1024.png` | Desktop ikonları (LOGO.png kaynaklı Windows .ico + macOS PNG) |
 | `scripts/generate_icons.py` | Tüm platformlar ikon + splash üretici (Pillow) |
 | `MOBILE_BUILD.md` | Mobil uygulama build rehberi |
 | `deploy_now.py` | Otomatik deploy script |

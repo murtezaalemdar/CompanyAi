@@ -41,6 +41,31 @@ opsiyonel olarak Vision AI ile detaylı görsel açıklaması ürettirebilir.
 - FormData ile görsel dosya upload (multipart/form-data)
 - 120 saniye timeout (Vision AI kullanımı için yeterli süre)
 
+### Düzeltildi — RAG Skor %100 Üzeri Bug
+
+- **Problem:** Multi-entity bonus formülü `hybrid_score`'u %100 üzerine çıkarabiliyordu (%103 gibi)
+- **Çözüm:** `app/rag/vector_store.py`'de 2 yerde `min(hybrid_score, 1.0)` cap eklendi
+  - Ana arama döngüsünde (search fonksiyonu)
+  - `_add_kw_result()` yardımcı fonksiyonunda
+
+### Eklendi — Desktop v2.7.0: Sunucu-Spesifik Build + Logo İkon
+
+- `desktop/app.py`: `SERVER_ID` + `SERVERS` dict — S1(HTTP) / S2(HTTPS) ayrı URL
+- `desktop/build_all.py`: Toplu build scripti — `set_server_id()` ile S1+S2 exe üretir
+- Çıktılar: `dist/CompanyAI.exe` (S1) + `dist/CompanyAI_S2.exe` (S2)
+- Kısayol adı: `CompanyAI (Sunucu 1).lnk` / `CompanyAI (Sunucu 2).lnk`
+- `desktop/icon.ico`: LOGO.png'den Pillow ile üretildi (7 boyut: 16-256px)
+- `make_icon.py`: LOGO.png → icon.ico dönüştürme scripti
+- S2 için SSL: `ssl.create_default_context()` + `check_hostname=False` + `verify_mode=CERT_NONE`
+- Window title: `CompanyAI — Sunucu X  v2.7.0`
+
+### Düzeltildi — S2 CompanyAI.exe İndirme
+
+- `/var/www/html/downloads/` dizini oluşturuldu, exe S1'den S2'ye kopyalandı
+- Nginx'e `/downloads/` location block eklendi (HTTP + HTTPS server blokları)
+- `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff` header'ları
+- İndirme URL: `https://88.246.13.23:2015/downloads/CompanyAI.exe`
+
 ---
 
 ## [6.02.00] — 2025-06-19

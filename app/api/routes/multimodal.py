@@ -370,6 +370,34 @@ async def process_document_content(file: UploadFile) -> dict:
                 df = pd.read_excel(xls, sheet_name=sheet_name)
                 if df.empty:
                     continue
+                
+                # v5.10.8: "Unnamed" sütun tespiti → başlık satırını otomatik bul
+                unnamed_count = sum(1 for c in df.columns if str(c).startswith("Unnamed:"))
+                if unnamed_count > len(df.columns) // 2:
+                    df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+                    best_row, best_score = 0, 0
+                    for ri in range(min(20, len(df_raw))):
+                        row_vals = df_raw.iloc[ri].dropna()
+                        if len(row_vals) < 2:
+                            continue
+                        str_count = sum(
+                            1 for v in row_vals
+                            if isinstance(v, str) and len(str(v).strip()) > 1
+                            and not str(v).strip().replace('.', '').replace(',', '').isdigit()
+                        )
+                        score = str_count / max(len(df_raw.columns), 1)
+                        if score > best_score:
+                            best_score = score
+                            best_row = ri
+                    if best_score >= 0.3:
+                        new_headers = df_raw.iloc[best_row].tolist()
+                        df = df_raw.iloc[best_row + 1:].copy()
+                        df.columns = [
+                            str(h).strip() if pd.notna(h) else f"Sütun_{j}"
+                            for j, h in enumerate(new_headers)
+                        ]
+                        df = df.reset_index(drop=True)
+                
                 if len(xls.sheet_names) > 1:
                     all_rows_text.append(f"\n[Sayfa: {sheet_name}]")
                 columns = [str(c).strip() for c in df.columns]

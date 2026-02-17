@@ -39,6 +39,31 @@ except ImportError:
 
 CROSS_ENCODER_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"  # v4.4.0: Türkçe/çok dilli model
 
+# ── v5.10.8: Türkçe arama yardımcıları ──
+_TR_SEARCH_STOPWORDS = frozenset({
+    "hakkında", "hakkinda", "bilgi", "bilgisi", "nedir", "kimdir",
+    "var", "mı", "mi", "mu", "mü", "bir", "bu", "şu", "ve", "ile",
+    "için", "den", "dan", "de", "da", "ne", "nasıl", "kaç", "kac",
+    "olan", "ait", "hangi", "kimin", "verin", "ver", "söyle", "soyle",
+    "bana", "listele", "göster", "goster", "lütfen", "lutfen",
+})
+
+
+def _normalize_tr(text: str) -> str:
+    """Türkçe büyük-küçük harf farkını ortadan kaldıran normalizasyon.
+    İ→i, I→ı→i, ı→i şeklinde tüm i varyantlarını birleştirir."""
+    text = text.replace('İ', 'i').replace('I', 'ı')
+    text = text.lower()
+    text = text.replace('ı', 'i')
+    return text
+
+
+def _turkish_upper(text: str) -> str:
+    """Türkçe kurallarına uygun büyük harf dönüşümü: i→İ, ı→I, ğ→Ğ, vb."""
+    _map = {'i': 'İ', 'ı': 'I', 'ğ': 'Ğ', 'ü': 'Ü', 'ş': 'Ş', 'ö': 'Ö', 'ç': 'Ç'}
+    return ''.join(_map.get(ch, ch.upper()) for ch in text)
+
+
 # ── Retrieval Metrikleri (v4.4.0) ──
 # Son N aramanın istatistiklerini circular buffer'da sakla
 _RETRIEVAL_METRICS_BUFFER = deque(maxlen=200)
@@ -163,12 +188,27 @@ def _cross_encoder_rerank(query: str, documents: list, top_k: int = 5) -> list:
             original_score = doc.get("relevance", 0)
             ce_score = ce_normalized[i]
             doc["cross_encoder_score"] = round(float(ce_scores[i]), 4)
-            doc["relevance"] = round(0.4 * original_score + 0.6 * ce_score, 4)
+            # v5.10.8: Keyword-matched sonuçlara ters ağırlık — keyword sinyali korunur
+            if doc.get("keyword_match"):
+                doc["relevance"] = round(0.65 * original_score + 0.35 * ce_score, 4)
+            else:
+                doc["relevance"] = round(0.4 * original_score + 0.6 * ce_score, 4)
         
         # Yeniden sırala
         documents.sort(key=lambda x: x["relevance"], reverse=True)
+        
+        # v5.10.8: Keyword-matched sonuçların en az 1'inin top_k'da kalmasını garanti et
+        top_k_docs = documents[:top_k]
+        kw_in_top = any(d.get("keyword_match") for d in top_k_docs)
+        if not kw_in_top:
+            # Top_k dışında keyword match var mı?
+            remaining_kw = [d for d in documents[top_k:] if d.get("keyword_match")]
+            if remaining_kw:
+                top_k_docs[-1] = remaining_kw[0]  # En düşük sonucu keyword match ile değiştir
+                top_k_docs.sort(key=lambda x: x["relevance"], reverse=True)
+        
         logger.info("cross_encoder_reranked", candidates=len(documents), top_k=top_k)
-        return documents[:top_k]
+        return top_k_docs
         
     except Exception as e:
         logger.warning("cross_encoder_rerank_failed", error=str(e))
@@ -439,20 +479,34 @@ def search_documents(
         # Sonuçları formatla + hybrid skor hesapla
         documents = []
         if results and results['documents']:
-            query_terms = set(query.lower().split())
+            # v5.10.8: Türkçe-aware normalizasyon (İ/I/ı/i farkını kaldırır)
+            import re as _re
+            query_normalized = _normalize_tr(query)
+            query_terms = set(query_normalized.split())
+            # Anlamlı terimler: stopword olmayan, 3+ karakter
+            _entity_terms = {t for t in query_terms
+                             if len(t) >= 3 and t not in _TR_SEARCH_STOPWORDS}
             
             for i, doc in enumerate(results['documents'][0]):
                 metadata = results['metadatas'][0][i] if results['metadatas'] else {}
                 distance = results['distances'][0][i] if results['distances'] else 0
                 
-                # Semantic skor (ChromaDB L2 distance → similarity)
-                # L2 distance 768-dim embeddinglerden tipik 1.0-2.5 aralığında
-                semantic_score = max(0, 1 - distance / 2.0)
+                # Semantic skor (ChromaDB L2² distance → similarity)
+                # v5.10.8: Divisor 2.0→4.0 — yapısal veriler (Excel) daha yüksek mesafe üretir
+                semantic_score = max(0, 1 - distance / 4.0)
                 
-                # Keyword skor (BM25-like basit)
-                doc_lower = doc.lower()
-                keyword_hits = sum(1 for t in query_terms if t in doc_lower)
-                keyword_score = keyword_hits / max(len(query_terms), 1)
+                # Keyword skor — v5.10.8: word-boundary matching
+                # Substring yerine kelime sınırı eşleşmesi kullan
+                # (false positive azaltır: "bilgi"≠"bilgisayar", "var"≠"vardiya")
+                doc_normalized = _normalize_tr(doc)
+                doc_word_set = set(_re.findall(r'\w+', doc_normalized))
+                keyword_hits = 0
+                for t in _entity_terms:
+                    if t in doc_word_set:
+                        keyword_hits += 1  # Tam kelime eşleşmesi
+                    elif len(t) >= 5 and t in doc_normalized:
+                        keyword_hits += 1  # 5+ karakter için substring da kabul (Türkçe ek)
+                keyword_score = keyword_hits / max(len(_entity_terms), 1)
                 
                 # Hybrid skor: %70 semantic + %30 keyword
                 hybrid_score = 0.7 * semantic_score + 0.3 * keyword_score
@@ -491,11 +545,53 @@ def search_documents(
                     "keyword_score": round(keyword_score, 4),
                 })
         
-        # ── v5.10.6: Keyword-aware tamamlayıcı arama ──
+        # ── v5.10.6 + v5.10.8: Keyword-aware tamamlayıcı arama ──
         # Vector search'in döndüremediği ama sorgu kelimelerini
         # birebir içeren dokümanları yakala (isim, varlık, kısa girişler).
+        # v5.10.8: Türkçe büyük harf varyantları + tekil kelime araması eklendi
         _existing_contents = {d["content"][:100] for d in documents}
         _kw_words = [w for w in query.lower().split() if len(w) >= 2]
+
+        # v5.10.8: Stopword'leri filtrele — entity kelimeleri (isim/soyisim) kalsın
+        _entity_words = [w for w in _kw_words
+                         if len(w) >= 3 and _normalize_tr(w) not in _TR_SEARCH_STOPWORDS]
+
+        def _add_kw_result(_kw_doc, _kw_meta, _kw_dist, bonus=1.15):
+            """Keyword sonucunu documents listesine ekle (ortak yardımcı)."""
+            if _kw_doc[:100] in _existing_contents:
+                return
+            _existing_contents.add(_kw_doc[:100])
+            _kw_sem = max(0, 1 - _kw_dist / 4.0)
+            _kw_doc_norm = _normalize_tr(_kw_doc)
+            _kw_word_set = set(_re.findall(r'\w+', _kw_doc_norm))
+            _kw_hits = 0
+            for t in _entity_terms:
+                if t in _kw_word_set:
+                    _kw_hits += 1
+                elif len(t) >= 5 and t in _kw_doc_norm:
+                    _kw_hits += 1
+            _kw_kw_score = _kw_hits / max(len(_entity_terms), 1)
+            _kw_hybrid = 0.7 * _kw_sem + 0.3 * _kw_kw_score
+            _kw_hybrid *= bonus
+            _kw_src = _kw_meta.get("source", "")
+            _kw_type = _kw_meta.get("type", "")
+            if "web_search" in _kw_src or _kw_type == "web_learned":
+                _kw_hybrid *= 0.5
+            elif _kw_type in ("chat_learned", "qa_learned", "voice_learned"):
+                _kw_hybrid *= 0.70
+            documents.append({
+                "content": _kw_doc,
+                "source": _kw_meta.get("source", "Bilinmeyen"),
+                "type": _kw_meta.get("type", "text"),
+                "department": _kw_meta.get("department", "Genel"),
+                "relevance": round(_kw_hybrid, 4),
+                "distance": _kw_dist,
+                "semantic_score": round(_kw_sem, 4),
+                "keyword_score": round(_kw_kw_score, 4),
+                "keyword_match": True,
+            })
+
+        # (A) Bigram $contains araması (v5.10.6 — mevcut)
         if len(_kw_words) >= 2 and collection:
             _kw_phrases = []
             for _ki in range(min(len(_kw_words) - 1, 3)):
@@ -504,51 +600,43 @@ def search_documents(
                     _kw_phrases.append(_p)
 
             for _phrase in _kw_phrases:
-                try:
-                    kw_results = collection.query(
-                        query_embeddings=[query_embedding],
-                        where_document={"$contains": _phrase},
-                        n_results=3,
-                    )
-                    if kw_results and kw_results['documents'] and kw_results['documents'][0]:
-                        for _j, _kw_doc in enumerate(kw_results['documents'][0]):
-                            if _kw_doc[:100] in _existing_contents:
-                                continue
-                            _existing_contents.add(_kw_doc[:100])
+                # Hem orijinal hem Türkçe büyük harf varyantını dene
+                _variants = {_phrase, _turkish_upper(_phrase)}
+                for _variant in _variants:
+                    try:
+                        kw_results = collection.query(
+                            query_embeddings=[query_embedding],
+                            where_document={"$contains": _variant},
+                            n_results=3,
+                        )
+                        if kw_results and kw_results['documents'] and kw_results['documents'][0]:
+                            for _j, _kw_doc in enumerate(kw_results['documents'][0]):
+                                _kw_meta = kw_results['metadatas'][0][_j] if kw_results.get('metadatas') else {}
+                                _kw_dist = kw_results['distances'][0][_j] if kw_results.get('distances') else 999
+                                _add_kw_result(_kw_doc, _kw_meta, _kw_dist, bonus=1.15)
+                    except Exception as _kw_err:
+                        logger.debug("keyword_supplement_skip", phrase=_variant, error=str(_kw_err))
 
-                            _kw_meta = kw_results['metadatas'][0][_j] if kw_results.get('metadatas') else {}
-                            _kw_dist = kw_results['distances'][0][_j] if kw_results.get('distances') else 999
-
-                            _kw_sem = max(0, 1 - _kw_dist / 2.0)
-                            _kw_doc_lower = _kw_doc.lower()
-                            _kw_hits = sum(1 for t in query_terms if t in _kw_doc_lower)
-                            _kw_kw_score = _kw_hits / max(len(query_terms), 1)
-                            _kw_hybrid = 0.7 * _kw_sem + 0.3 * _kw_kw_score
-
-                            # Keyword tam eşleşme bonusu (%15)
-                            _kw_hybrid *= 1.15
-
-                            # Web/chat cezaları
-                            _kw_src = _kw_meta.get("source", "")
-                            _kw_type = _kw_meta.get("type", "")
-                            if "web_search" in _kw_src or _kw_type == "web_learned":
-                                _kw_hybrid *= 0.5
-                            elif _kw_type in ("chat_learned", "qa_learned", "voice_learned"):
-                                _kw_hybrid *= 0.70
-
-                            documents.append({
-                                "content": _kw_doc,
-                                "source": _kw_meta.get("source", "Bilinmeyen"),
-                                "type": _kw_meta.get("type", "text"),
-                                "department": _kw_meta.get("department", "Genel"),
-                                "relevance": round(_kw_hybrid, 4),
-                                "distance": _kw_dist,
-                                "semantic_score": round(_kw_sem, 4),
-                                "keyword_score": round(_kw_kw_score, 4),
-                                "keyword_match": True,
-                            })
-                except Exception as _kw_err:
-                    logger.debug("keyword_supplement_skip", phrase=_phrase, error=str(_kw_err))
+        # (B) v5.10.8: Tekil entity kelime araması (isim, soyisim vb.)
+        # Excel personel listesi gibi yapısal verilerde Ad ve Soyadı
+        # farklı sütunlarda olduğu için bigram eşleşmez — tekil arama gerekir.
+        if _entity_words and collection:
+            for _word in _entity_words[:4]:  # En fazla 4 kelime
+                _upper_word = _turkish_upper(_word)
+                for _variant in {_word, _upper_word}:
+                    try:
+                        kw_results = collection.query(
+                            query_embeddings=[query_embedding],
+                            where_document={"$contains": _variant},
+                            n_results=5,
+                        )
+                        if kw_results and kw_results['documents'] and kw_results['documents'][0]:
+                            for _j, _kw_doc in enumerate(kw_results['documents'][0]):
+                                _kw_meta = kw_results['metadatas'][0][_j] if kw_results.get('metadatas') else {}
+                                _kw_dist = kw_results['distances'][0][_j] if kw_results.get('distances') else 999
+                                _add_kw_result(_kw_doc, _kw_meta, _kw_dist, bonus=1.10)
+                    except Exception as _kw_err:
+                        logger.debug("entity_keyword_skip", word=_variant, error=str(_kw_err))
 
         # Re-rank: önce hybrid skora göre sırala
         documents.sort(key=lambda x: x["relevance"], reverse=True)
@@ -571,7 +659,7 @@ def search_documents(
                     for i, doc in enumerate(learned_results['documents'][0]):
                         l_metadata = learned_results['metadatas'][0][i] if learned_results['metadatas'] else {}
                         l_distance = learned_results['distances'][0][i] if learned_results['distances'] else 999
-                        l_semantic = max(0, 1 - l_distance / 2.0)
+                        l_semantic = max(0, 1 - l_distance / 4.0)
                         # Öğrenilen bilgi %80 ağırlık (dokümanlardan sonra)
                         l_score = l_semantic * 0.80
                         if l_score > 0.15:  # Minimum eşik

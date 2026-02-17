@@ -3,6 +3,30 @@
 Tüm önemli değişiklikler bu dosyada belgelenir.
 Format: [Semantic Versioning](https://semver.org/lang/tr/)
 
+## [5.10.8] — 2025-07-26
+
+### Düzeltildi — Excel RAG: Personel Listesi Sorguları Yanıtsız Kalıyor
+
+Excel dosyası (personelListe_.xls gibi) yüklendiğinde başlık satırı 1. satırda değilse
+`pd.read_excel()` varsayılan `header=0` kullanarak tüm sütunlara `Unnamed: 0`, `Unnamed: 1`
+gibi anlamsız isimler veriyordu. Bu durum hem chunk kalitesini ("Ad: SİBEL" yerine
+"Unnamed: 1: SİBEL") hem de arama başarısını ciddi şekilde düşürüyordu.
+
+#### app/api/routes/documents.py, multimodal.py, app/core/document_analyzer.py — Otomatik Başlık Tespiti
+- Excel okunurken sütunların >%50'si `Unnamed:` ise otomatik başlık tespiti devreye girer
+- İlk 20 satır taranarak string içerik oranı en yüksek satır başlık olarak seçilir
+- Başlık üstündeki metadata satırları (firma adı vb.) otomatik atlanır
+
+#### app/rag/vector_store.py — Türkçe-Aware Arama Motoru (v5.10.8)
+- **Türkçe normalizasyon**: `_normalize_tr()` ile İ/I/ı/i farkları ortadan kaldırılır
+- **Türkçe büyük harf**: `_turkish_upper()` ile personel listesindeki BÜYÜK HARF isimlere
+  `$contains` araması yapılabilir (i→İ, ı→I doğru dönüşüm)
+- **Tekil entity kelime araması**: İsim ve soyisim farklı sütunlarda olduğu için bigram
+  eşleşmesi çalışmıyordu — artık her entity kelimesi ayrı ayrı da aranır
+- **Semantic skor formülü**: L2² mesafe böleni 2.0→4.0 — yapısal veriler (Excel) için
+  daha dengeli skor üretir
+- Stopword filtresi eklendi (hakkında, bilgi, nedir, kimdir vb.)
+
 ## [5.10.7] — 2025-07-26
 
 ### Düzeltildi — Export İndirme: Türkçe Karakter UnicodeEncodeError

@@ -407,6 +407,7 @@ def extract_text_from_file(filename: str, file_content: bytes) -> tuple:
                 raise HTTPException(status_code=500, detail="python-docx yüklü değil")
         
         # ── Excel ── (v5.10.1: RAG-optimized row-by-row extraction)
+        # v5.10.8: Auto header detection — "Unnamed" sütunlar tespit edilip gerçek başlık bulunur
         elif doc_type == 'excel':
             try:
                 import pandas as pd
@@ -417,6 +418,41 @@ def extract_text_from_file(filename: str, file_content: bytes) -> tuple:
                     df = pd.read_excel(xls, sheet_name=sheet_name)
                     if df.empty:
                         continue
+                    
+                    # ── v5.10.8: "Unnamed" sütun tespiti → başlık satırını otomatik bul ──
+                    unnamed_count = sum(1 for c in df.columns if str(c).startswith("Unnamed:"))
+                    if unnamed_count > len(df.columns) // 2:
+                        # Başlık satırı hatalı → header=None ile yeniden oku
+                        df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+                        # İlk 20 satırda başlık satırını bul
+                        best_row = 0
+                        best_score = 0
+                        for ri in range(min(20, len(df_raw))):
+                            row_vals = df_raw.iloc[ri].dropna()
+                            if len(row_vals) < 2:
+                                continue
+                            # Başlık satırı: çoğu hücre metin, rakam değil
+                            str_count = sum(
+                                1 for v in row_vals
+                                if isinstance(v, str) and len(str(v).strip()) > 1
+                                and not str(v).strip().replace('.', '').replace(',', '').isdigit()
+                            )
+                            score = str_count / max(len(df_raw.columns), 1)
+                            if score > best_score:
+                                best_score = score
+                                best_row = ri
+                        
+                        if best_score >= 0.3:
+                            new_headers = df_raw.iloc[best_row].tolist()
+                            df = df_raw.iloc[best_row + 1:].copy()
+                            df.columns = [
+                                str(h).strip() if pd.notna(h) else f"Sütun_{j}"
+                                for j, h in enumerate(new_headers)
+                            ]
+                            df = df.reset_index(drop=True)
+                            logger.info("excel_header_autodetected", filename=filename,
+                                       sheet=sheet_name, header_row=best_row,
+                                       score=round(best_score, 2))
                     
                     # Birden fazla sayfa varsa başlık ekle
                     if len(xls.sheet_names) > 1:

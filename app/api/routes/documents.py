@@ -62,8 +62,10 @@ except ImportError:
 # YouTube transcript kütüphanesi
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
+    _yt_api = YouTubeTranscriptApi()
     YOUTUBE_AVAILABLE = True
 except ImportError:
+    _yt_api = None
     YOUTUBE_AVAILABLE = False
 
 router = APIRouter()
@@ -1120,7 +1122,7 @@ async def learn_from_video(
         used_language = None
         
         try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript_list = _yt_api.list(video_id)
             
             # Tercih edilen dilde manuel altyazı
             for lang in lang_prefs:
@@ -1147,17 +1149,17 @@ async def learn_from_video(
                     break
                     
         except Exception:
-            # list_transcripts başarısız olursa direkt fetch dene
+            # list başarısız olursa direkt fetch dene
             try:
-                raw = YouTubeTranscriptApi.get_transcript(video_id, languages=lang_prefs)
-                if raw:
+                fetched = _yt_api.fetch(video_id, languages=lang_prefs)
+                if fetched:
                     content_parts = []
-                    for entry in raw:
-                        text = entry.get('text', '').strip()
+                    for entry in fetched:
+                        text = entry.text.strip()
                         if text:
                             content_parts.append(text)
                     content = '\n'.join(content_parts)
-                    used_language = request.language
+                    used_language = getattr(fetched, 'language_code', request.language)
                     
                     if not content or len(content) < 20:
                         raise HTTPException(status_code=400, detail="Video altyazısından yeterli içerik çıkarılamadı")
@@ -1197,7 +1199,8 @@ async def learn_from_video(
                         
             except HTTPException:
                 raise
-            except Exception:
+            except Exception as e:
+                logger.error("youtube_fetch_fallback_error", video_id=video_id, error=str(e))
                 raise HTTPException(
                     status_code=400,
                     detail="Bu videonun altyazısı mevcut değil veya erişilemiyor. "
@@ -1215,7 +1218,7 @@ async def learn_from_video(
         transcript_data = transcript.fetch()
         content_parts = []
         for entry in transcript_data:
-            text = entry.get('text', '').strip()
+            text = entry.text.strip()
             if text:
                 content_parts.append(text)
         

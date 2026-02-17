@@ -419,7 +419,7 @@ def search_documents(
             where_filter = {"$and": where_conditions}
 
         # Daha fazla aday getir, sonra re-rank et
-        fetch_n = min(n_results * 3, 20)
+        fetch_n = min(n_results * 3, 30)
         
         # Ara — önce department filtresi ile, sonuç yoksa filtresiz dene
         results = collection.query(
@@ -445,8 +445,9 @@ def search_documents(
                 metadata = results['metadatas'][0][i] if results['metadatas'] else {}
                 distance = results['distances'][0][i] if results['distances'] else 0
                 
-                # Semantic skor (ChromaDB distance → similarity)
-                semantic_score = max(0, 1 - distance)
+                # Semantic skor (ChromaDB L2 distance → similarity)
+                # L2 distance 768-dim embeddinglerden tipik 1.0-2.5 aralığında
+                semantic_score = max(0, 1 - distance / 2.0)
                 
                 # Keyword skor (BM25-like basit)
                 doc_lower = doc.lower()
@@ -490,6 +491,65 @@ def search_documents(
                     "keyword_score": round(keyword_score, 4),
                 })
         
+        # ── v5.10.6: Keyword-aware tamamlayıcı arama ──
+        # Vector search'in döndüremediği ama sorgu kelimelerini
+        # birebir içeren dokümanları yakala (isim, varlık, kısa girişler).
+        _existing_contents = {d["content"][:100] for d in documents}
+        _kw_words = [w for w in query.lower().split() if len(w) >= 2]
+        if len(_kw_words) >= 2 and collection:
+            _kw_phrases = []
+            for _ki in range(min(len(_kw_words) - 1, 3)):
+                _p = f"{_kw_words[_ki]} {_kw_words[_ki + 1]}"
+                if len(_p) >= 5:
+                    _kw_phrases.append(_p)
+
+            for _phrase in _kw_phrases:
+                try:
+                    kw_results = collection.query(
+                        query_embeddings=[query_embedding],
+                        where_document={"$contains": _phrase},
+                        n_results=3,
+                    )
+                    if kw_results and kw_results['documents'] and kw_results['documents'][0]:
+                        for _j, _kw_doc in enumerate(kw_results['documents'][0]):
+                            if _kw_doc[:100] in _existing_contents:
+                                continue
+                            _existing_contents.add(_kw_doc[:100])
+
+                            _kw_meta = kw_results['metadatas'][0][_j] if kw_results.get('metadatas') else {}
+                            _kw_dist = kw_results['distances'][0][_j] if kw_results.get('distances') else 999
+
+                            _kw_sem = max(0, 1 - _kw_dist / 2.0)
+                            _kw_doc_lower = _kw_doc.lower()
+                            _kw_hits = sum(1 for t in query_terms if t in _kw_doc_lower)
+                            _kw_kw_score = _kw_hits / max(len(query_terms), 1)
+                            _kw_hybrid = 0.7 * _kw_sem + 0.3 * _kw_kw_score
+
+                            # Keyword tam eşleşme bonusu (%15)
+                            _kw_hybrid *= 1.15
+
+                            # Web/chat cezaları
+                            _kw_src = _kw_meta.get("source", "")
+                            _kw_type = _kw_meta.get("type", "")
+                            if "web_search" in _kw_src or _kw_type == "web_learned":
+                                _kw_hybrid *= 0.5
+                            elif _kw_type in ("chat_learned", "qa_learned", "voice_learned"):
+                                _kw_hybrid *= 0.70
+
+                            documents.append({
+                                "content": _kw_doc,
+                                "source": _kw_meta.get("source", "Bilinmeyen"),
+                                "type": _kw_meta.get("type", "text"),
+                                "department": _kw_meta.get("department", "Genel"),
+                                "relevance": round(_kw_hybrid, 4),
+                                "distance": _kw_dist,
+                                "semantic_score": round(_kw_sem, 4),
+                                "keyword_score": round(_kw_kw_score, 4),
+                                "keyword_match": True,
+                            })
+                except Exception as _kw_err:
+                    logger.debug("keyword_supplement_skip", phrase=_phrase, error=str(_kw_err))
+
         # Re-rank: önce hybrid skora göre sırala
         documents.sort(key=lambda x: x["relevance"], reverse=True)
         
@@ -511,7 +571,7 @@ def search_documents(
                     for i, doc in enumerate(learned_results['documents'][0]):
                         l_metadata = learned_results['metadatas'][0][i] if learned_results['metadatas'] else {}
                         l_distance = learned_results['distances'][0][i] if learned_results['distances'] else 999
-                        l_semantic = max(0, 1 - l_distance)
+                        l_semantic = max(0, 1 - l_distance / 2.0)
                         # Öğrenilen bilgi %80 ağırlık (dokümanlardan sonra)
                         l_score = l_semantic * 0.80
                         if l_score > 0.15:  # Minimum eşik

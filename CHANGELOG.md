@@ -3,6 +3,29 @@
 Tüm önemli değişiklikler bu dosyada belgelenir.
 Format: [Semantic Versioning](https://semver.org/lang/tr/)
 
+## [5.10.6] — 2025-07-26
+
+### Düzeltildi — RAG Arama: Manuel Girişler ve Kısa Dokümanlar Bulunamıyor
+
+Manuel olarak eklenen bilgiler ("erman seçkin 3 temmuz 1994 da bayburt doğumludur") vektör aramasında büyük Excel dosyaları (personelListe 143 chunk) tarafından gölgelenerek retrieval'dan düşüyordu.
+
+#### app/rag/vector_store.py — 4 Düzeltme
+
+1. **Semantic skor formülü düzeltildi**: `max(0, 1 - distance)` → `max(0, 1 - distance / 2.0)`
+   - Eski formül 768-dim embedding L2 distance > 1.0 olan TÜM sonuçlara semantic_score=0 veriyordu
+   - Hybrid scoring %70 semantic ağırlığı tamamen boşa gidiyordu, sıralama sadece %30 keyword'e bağlıydı
+   - Yeni formül 1.0-2.0 aralığındaki mesafelere anlamlı semantic skor veriyor
+
+2. **Keyword-aware tamamlayıcı arama eklendi**: Vector search sonrasında sorgu kelime çiftleri ile `where_document.$contains` araması
+   - "erman seçkin" gibi isim/varlık içeren sorgulara birebir metin eşleşmesi
+   - Keyword-eşleşen sonuçlara %15 bonus skor
+   - Mevcut sonuçlarla duplikasyon kontrolü, web/chat cezaları korunuyor
+
+3. **Aday havuzu genişletildi**: `fetch_n` üst limiti 20 → 30
+   - Büyük koleksiyonlarda tek kaynağın (143 Excel chunk) tüm slotları doldurmasını azaltıyor
+
+4. **Learned collection semantic skoru düzeltildi**: Aynı formül düzeltmesi `learned_knowledge` aramasına da uygulandı
+
 ## [5.10.0] — 2025-07-24
 
 ### Eklendi — Upload Progress UI & Hata Bildirimleri

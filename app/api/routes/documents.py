@@ -238,7 +238,7 @@ def extract_text_from_file(filename: str, file_content: bytes) -> tuple:
     try:
         # ── Metin tabanlı dosyalar ──
         text_types = [
-            'text', 'markdown', 'csv', 'json', 'xml', 'html', 'python',
+            'text', 'markdown', 'json', 'xml', 'html', 'python',
             'javascript', 'typescript', 'jsx', 'tsx', 'java', 'csharp', 
             'cpp', 'c', 'c_header', 'cpp_header', 'sql', 'yaml', 'log',
             'restructuredtext', 'latex', 'ini', 'config', 'env', 'toml',
@@ -251,6 +251,42 @@ def extract_text_from_file(filename: str, file_content: bytes) -> tuple:
                 content = file_content.decode('utf-8')
             except UnicodeDecodeError:
                 content = file_content.decode('latin-1', errors='ignore')
+        
+        # ── CSV / TSV ── (v5.10.1: RAG-optimized row-by-row extraction)
+        elif doc_type == 'csv':
+            try:
+                import pandas as pd
+                df = None
+                for sep in [',', ';', '\t', '|']:
+                    try:
+                        df = pd.read_csv(io.BytesIO(file_content), sep=sep, encoding='utf-8')
+                        if len(df.columns) > 1:
+                            break
+                    except Exception:
+                        continue
+                if df is None:
+                    df = pd.read_csv(io.BytesIO(file_content), encoding='utf-8')
+                
+                columns = [str(c).strip() for c in df.columns]
+                all_rows_text = []
+                for idx, row in df.iterrows():
+                    parts = []
+                    for col in columns:
+                        val = row[col]
+                        if pd.notna(val):
+                            val_str = str(val).strip()
+                            if val_str:
+                                parts.append(f"{col}: {val_str}")
+                    if parts:
+                        all_rows_text.append(f"{filename} | Satır {idx + 1}: {', '.join(parts)}")
+                content = "\n".join(all_rows_text)
+                logger.info("csv_rag_extracted", filename=filename, rows=len(all_rows_text))
+            except Exception:
+                # Fallback: ham metin olarak oku
+                try:
+                    content = file_content.decode('utf-8')
+                except UnicodeDecodeError:
+                    content = file_content.decode('latin-1', errors='ignore')
         
         # ── PDF ──
         elif doc_type == 'pdf':
@@ -432,14 +468,44 @@ def extract_text_from_file(filename: str, file_content: bytes) -> tuple:
                 content = re.sub(r'[\\{}\[\]]', '', raw)
                 content = re.sub(r'\\[a-z]+\d*\s?', '', content)
         
-        # ── ODT (OpenDocument Text) ──
-        elif doc_type in ('odt', 'ods', 'odp'):
+        # ── ODS (OpenDocument Spreadsheet) ── (v5.10.1: RAG-optimized)
+        elif doc_type == 'ods':
+            try:
+                import pandas as pd
+                df = pd.read_excel(io.BytesIO(file_content), engine='odf')
+                columns = [str(c).strip() for c in df.columns]
+                all_rows_text = []
+                for idx, row in df.iterrows():
+                    parts = []
+                    for col in columns:
+                        val = row[col]
+                        if pd.notna(val):
+                            val_str = str(val).strip()
+                            if val_str:
+                                parts.append(f"{col}: {val_str}")
+                    if parts:
+                        all_rows_text.append(f"{filename} | Satır {idx + 1}: {', '.join(parts)}")
+                content = "\n".join(all_rows_text)
+                logger.info("ods_rag_extracted", filename=filename, rows=len(all_rows_text))
+            except Exception as e:
+                # Fallback: XML tag temizleme
+                try:
+                    import zipfile
+                    with zipfile.ZipFile(io.BytesIO(file_content)) as z:
+                        if 'content.xml' in z.namelist():
+                            xml_content = z.read('content.xml').decode('utf-8')
+                            content = re.sub(r'<[^>]+>', ' ', xml_content)
+                            content = re.sub(r'\s+', ' ', content).strip()
+                except Exception:
+                    raise HTTPException(status_code=500, detail=f"ODS okuma hatası: {str(e)}")
+        
+        # ── ODT / ODP (OpenDocument Text/Presentation) ──
+        elif doc_type in ('odt', 'odp'):
             try:
                 import zipfile
                 with zipfile.ZipFile(io.BytesIO(file_content)) as z:
                     if 'content.xml' in z.namelist():
                         xml_content = z.read('content.xml').decode('utf-8')
-                        # XML tag'larını temizle
                         content = re.sub(r'<[^>]+>', ' ', xml_content)
                         content = re.sub(r'\s+', ' ', content).strip()
             except Exception as e:

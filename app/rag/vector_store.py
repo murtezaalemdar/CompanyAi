@@ -202,16 +202,22 @@ def _cross_encoder_rerank(query: str, documents: list, top_k: int = 5) -> list:
         # Yeniden sırala
         documents.sort(key=lambda x: x["relevance"], reverse=True)
         
-        # v5.10.8: Keyword-matched sonuçların en az 1'inin top_k'da kalmasını garanti et
+        # v6.01.01: En iyi keyword eşleşmesinin (en yüksek kw_score) mutlaka
+        # top_k'da kalmasını garanti et. Eski versiyon sadece "herhangi bir
+        # keyword match var mı" diye bakıyordu — BEST keyword match düşebiliyordu.
         top_k_docs = documents[:top_k]
-        kw_in_top = any(d.get("keyword_match") for d in top_k_docs)
-        if not kw_in_top:
-            # Top_k dışında keyword match var mı? En yüksek keyword_score'luyu seç
-            remaining_kw = [d for d in documents[top_k:] if d.get("keyword_match")]
-            if remaining_kw:
-                # En iyi keyword eşleşmesi: önce keyword_score, sonra relevance'a göre sırala
-                remaining_kw.sort(key=lambda x: (x.get("keyword_score", 0), x.get("relevance", 0)), reverse=True)
-                best_kw = remaining_kw[0]
+        
+        # Tüm sonuçlar arasında en yüksek keyword_score'lu dokümanı bul
+        all_kw = [d for d in documents if d.get("keyword_match")]
+        if all_kw:
+            best_kw = max(all_kw, key=lambda x: (x.get("keyword_score", 0), x.get("relevance", 0)))
+            # Best keyword match top_k'da mı kontrol et
+            best_kw_in_top = any(
+                d.get("content", "")[:100] == best_kw.get("content", "")[:100]
+                for d in top_k_docs
+            )
+            if not best_kw_in_top:
+                # En düşük skorlu sonucu çıkar, en iyi keyword match'i ekle
                 top_k_docs[-1] = best_kw
                 top_k_docs.sort(key=lambda x: x["relevance"], reverse=True)
         
@@ -500,8 +506,9 @@ def search_documents(
                 distance = results['distances'][0][i] if results['distances'] else 0
                 
                 # Semantic skor (ChromaDB L2² distance → similarity)
-                # v5.10.8: Divisor 2.0→4.0 — yapısal veriler (Excel) daha yüksek mesafe üretir
-                semantic_score = max(0, 1 - distance / 4.0)
+                # v6.01.01: Divisor 4.0→8.0 — PDF/Excel chunk'ları dist>4.0 üretir,
+                # eski 4.0 divisor ile tüm semantic skorlar 0 oluyordu
+                semantic_score = max(0, 1 - distance / 8.0)
                 
                 # Keyword skor — v5.10.8: word-boundary matching
                 # Substring yerine kelime sınırı eşleşmesi kullan
@@ -518,6 +525,11 @@ def search_documents(
                 
                 # Hybrid skor: %70 semantic + %30 keyword
                 hybrid_score = 0.7 * semantic_score + 0.3 * keyword_score
+                
+                # v6.01.01: Multi-entity bonus — birden fazla farklı entity
+                # terimi eşleşen chunk'lara bonus ver (ör. "tarak" + "sanfor")
+                if keyword_score >= 0.5 and len(_entity_terms) >= 2:
+                    hybrid_score *= (1 + keyword_score)  # kw=0.833 → *1.833
                 
                 # Otomatik öğrenilmiş içerik → gerçek dokümanları önceliklendir
                 source = metadata.get("source", "")
@@ -542,6 +554,9 @@ def search_documents(
                     except (ValueError, TypeError):
                         pass
                 
+                # v6.01.01: keyword_match flag'ını tüm sonuçlara ata
+                # (CE reranking'de keyword-protected ağırlıklama için gerekli)
+                _has_kw_match = keyword_score > 0
                 documents.append({
                     "content": doc,
                     "source": metadata.get("source", "Bilinmeyen"),
@@ -551,6 +566,7 @@ def search_documents(
                     "distance": distance,
                     "semantic_score": round(semantic_score, 4),
                     "keyword_score": round(keyword_score, 4),
+                    "keyword_match": _has_kw_match,
                 })
         
         # ── v5.10.6 + v5.10.8: Keyword-aware tamamlayıcı arama ──
@@ -569,7 +585,7 @@ def search_documents(
             if _kw_doc[:100] in _existing_contents:
                 return
             _existing_contents.add(_kw_doc[:100])
-            _kw_sem = max(0, 1 - _kw_dist / 4.0)
+            _kw_sem = max(0, 1 - _kw_dist / 8.0)  # v6.01.01: divisor 4.0→8.0
             _kw_doc_norm = _normalize_tr(_kw_doc)
             _kw_word_set = set(_re.findall(r'\w+', _kw_doc_norm))
             _kw_hits = 0
@@ -671,10 +687,10 @@ def search_documents(
                     for i, doc in enumerate(learned_results['documents'][0]):
                         l_metadata = learned_results['metadatas'][0][i] if learned_results['metadatas'] else {}
                         l_distance = learned_results['distances'][0][i] if learned_results['distances'] else 999
-                        l_semantic = max(0, 1 - l_distance / 4.0)
+                        l_semantic = max(0, 1 - l_distance / 8.0)  # v6.01.01: divisor 4.0→8.0
                         # Öğrenilen bilgi %80 ağırlık (dokümanlardan sonra)
                         l_score = l_semantic * 0.80
-                        if l_score > 0.15:  # Minimum eşik
+                        if l_score > 0.08:  # v6.01.01: eşik 0.15→0.08 (divisor 8.0 ile uyumlu)
                             documents.append({
                                 "content": doc,
                                 "source": l_metadata.get("source", "Öğrenilmiş"),

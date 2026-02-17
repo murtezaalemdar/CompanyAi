@@ -71,6 +71,28 @@ def sanitize_document_content(text: str) -> str:
     return cleaned.strip()
 
 
+def _enhance_document_sections(text: str) -> str:
+    """Enhance ALL-CAPS section headers for better LLM comprehension.
+
+    Detects uppercase Turkish headings (e.g. TARAK, ŞARDON, SANFOR, RAM)
+    and wraps them with clear markers so the LLM treats each as a separate
+    machine/department category.
+    """
+    # Standalone ALL-CAPS word on its own line → section marker
+    text = re.sub(
+        r'(?m)^\s*([A-ZŞÇÜÖİĞ]{3,})\s*$',
+        r'\n=== \1 ===',
+        text
+    )
+    # Inline ALL-CAPS word at sentence end → break into new section
+    text = re.sub(
+        r'([.!?:;])\s+([A-ZŞÇÜÖİĞ]{3,})\s*\n',
+        r'\1\n\n=== \2 ===\n',
+        text
+    )
+    return text
+
+
 # ══════════════════════════════════════════════════════════════
 # 2. ANA SİSTEM PROMPT — DERİN & YAPISAL
 # ══════════════════════════════════════════════════════════════
@@ -387,7 +409,8 @@ def build_rag_prompt(question: str, context: dict, documents: list = None) -> tu
         doc_text += "AŞAĞIDAKİ DOKÜMANLAR BİLGİ TABANINDAN GETİRİLDİ. BU BİLGİLERİ KULLANARAK YANIT VER.\n"
         for i, doc in enumerate(sorted_docs[:5], 1):
             source = doc.get('source', 'Bilinmeyen')
-            content = sanitize_document_content(doc.get('content', '')[:1500])
+            content = sanitize_document_content(doc.get('content', '')[:3000])
+            content = _enhance_document_sections(content)
             relevance = doc.get('relevance', 0)
             doc_type = doc.get('type', 'doküman')
             label = "📄 Doküman" if doc_type not in ('chat_learned', 'web_learned') else ("💬 Chat Bilgisi" if doc_type == 'chat_learned' else "🌐 Web")
@@ -397,6 +420,11 @@ def build_rag_prompt(question: str, context: dict, documents: list = None) -> tu
 1. Dokümanlardan DOĞRUDAN ALINTI yaparak yanıt ver, kaynağı belirt
 2. Doküman bilgisi genel bilginle çelişiyorsa KESİNLİKLE DOKÜMANI tercih et
 3. Dokümanlarda yoksa açıkça belirt: "Bilgi tabanımda bu konuda veri bulunamadı."
+4. BÜYÜK HARFLE yazılmış kelimeler (ör. TARAK, SANFOR, ŞARDON, RAM, TRAŞ, YIKAMA, DÜZBOYA) bölüm başlıklarıdır.
+   Her bölüm başlığı FARKLI BİR MAKİNA TÜRÜ veya DEPARTMANI temsil eder — bunlar birbirinin eş anlamlısı DEĞİLDİR.
+   Örneğin: TARAK ≠ ŞARDON, TRAŞ ≠ TARAK, RAM ≠ SANFOR. Her biri bağımsız bir üretim aşamasıdır.
+   Bir bölüm başlığından sonraki sayı (ör. "3 adet", "12 adet") YALNIZCA o bölüme aittir.
+   Kullanıcı "tarak makinası" sorduğunda SADECE "TARAK" başlığı altındaki bilgiyi raporla, "ŞARDON" başlığı altındakini DEĞİL.
 """
         system += doc_text
     

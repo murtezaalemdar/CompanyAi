@@ -1,7 +1,13 @@
 """Konfigürasyon Yönetimi"""
 
 # Versiyon — frontend/src/constants.ts ile eşleşmeli
-APP_VERSION = "5.10.8"
+# Format: MAJOR.MINOR.PATCH (her segment 2 hane, ör. 6.01.00)
+# ÖNEMLİ KURAL:
+#   MAJOR (baş)  → Major değişiklik (mimari, geriye uyumsuz)
+#   MINOR (orta) → Önemli değişiklik (yeni özellik, önemli iyileştirme)
+#   PATCH (son)  → Küçük işlem (bugfix, ufak düzeltme)
+#   MINOR artınca PATCH=00, MAJOR artınca MINOR=00 ve PATCH=00 olur.
+APP_VERSION = "6.01.01"
 
 from pydantic_settings import BaseSettings
 from typing import List

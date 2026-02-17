@@ -1,7 +1,52 @@
 # Changelog
 
 Tüm önemli değişiklikler bu dosyada belgelenir.
-Format: [Semantic Versioning](https://semver.org/lang/tr/)
+
+## Versiyon Formatı: `MAJOR.MINOR.PATCH` (her segment 2 haneli)
+
+| Segment | Ne zaman artar? | Açıklama |
+|---------|----------------|------------|
+| **MAJOR** (baş) | Major değişiklik | Mimari değişiklik, büyük yapısal dönüşüm, geriye uyumsuz değişiklik |
+| **MINOR** (orta) | Önemli değişiklik | Yeni özellik, önemli iyileştirme, görünür fonksiyonel değişiklik |
+| **PATCH** (son) | Küçük işlem | Bugfix, ufak düzeltme, küçük iyileştirme |
+
+> MINOR artınca PATCH sıfırlanır. MAJOR artınca hem MINOR hem PATCH sıfırlanır.
+
+---
+
+## [6.01.01] — 2026-02-17
+
+### Düzeltildi — PDF RAG: Bölüm Başlığı Karışıklığı ve Semantic Scoring
+
+PDF dokümanlarındaki yapısal bilgiler (makina adetleri vb.) RAG ile sorgulandığında
+yanlış bölümün verisi raporlanıyordu. Örneğin "tarak makinası" sorulduğunda TARAK (3 adet)
+yerine ŞARDON (12 adet) bölümü raporlanıyordu.
+
+#### app/rag/vector_store.py — 5 RAG Scoring Bug Fix
+- **Semantic divisor 4.0→8.0**: PDF/Excel chunk'ları uzak mesafede (dist>4.0) olunca
+  tüm semantic score'lar 0 kalıyordu. Divisor artırılarak bu durum düzeltildi.
+- **keyword_match flag**: Ana vector search sonuçları `keyword_match=True` olarak
+  işaretlenmiyordu, bu yüzden cross-encoder reranking'de korumasız (40/60) kalıyorlardı.
+  Artık keyword_score > 0 olan tüm sonuçlar korunuyor (80/20).
+- **Multi-entity bonus**: 2+ entity terimi eşleşen sonuçlara hybrid_score bonusu
+  ana arama döngüsüne de eklendi (önceden sadece keyword supplement'te vardı).
+- **CE keyword guarantee**: En yüksek kw_score'lu sonuç top_k'da garanti edildi.
+- **Learned collection**: Divisor ve threshold güncellendi (4.0→8.0, 0.15→0.08).
+
+#### app/llm/prompts.py — Bölüm Başlığı Tanıma ve Content Truncation Fix
+- **Content truncation 1500→3000**: Chunk sonundaki kritik bölümler (TARAK, SANFOR)
+  1500 karakter limitinde kesilip LLM'e hiç ulaşmıyordu.
+- **Section header enhancement**: `_enhance_document_sections()` fonksiyonu eklendi.
+  ALL-CAPS bölüm başlıkları (TARAK, ŞARDON, SANFOR vb.) `=== BAŞLIK ===` formatıyla
+  işaretlenerek LLM'in her bölümü ayrı kategori olarak tanıması sağlandı.
+- **Explicit prompt rules**: TARAK ≠ ŞARDON gibi eş anlamlı OLMAYAN bölümlerin
+  karıştırılmaması için detaylı talimatlar eklendi.
+
+## [6.01.00] — 2026-02-17
+
+### Değişti — Versiyon Numarası Formatı
+- Yeni format: `MAJOR.MINOR.PATCH` her segment 2 haneli (ör. 6.01.00)
+- v5.10.8 → v6.01.00 geçişi
 
 ## [5.10.8] — 2025-07-26
 

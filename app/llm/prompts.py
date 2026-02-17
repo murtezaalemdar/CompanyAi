@@ -347,7 +347,8 @@ def build_prompt(question: str, context: dict) -> tuple[str, str]:
     
     # ── EN FAZLA 1 uzmanlık şablonu seç (v5.9.0) ──
     # Öncelik: Risk > Sezonluk > CoT (birbirleriyle karışmasın)
-    if mode not in ("Sohbet",) and intent != "sohbet":
+    # v5.10.4: Bilgi modunda CoT şablonu EKLENMEZ — kısa yanıt öncelikli
+    if mode not in ("Sohbet", "Bilgi") and intent not in ("sohbet", "bilgi"):
         if _needs_risk_analysis(question):
             system += f"\n\n{RISK_ANALYSIS_PROMPT}"
         elif _needs_seasonal_analysis(question):

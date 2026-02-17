@@ -98,7 +98,7 @@ WORK_PATTERNS = [
 
 # Bilgi talebi (internetten araştırma gerektirebilir)
 KNOWLEDGE_PATTERNS = [
-    r"\b(ne\s*zaman|kim\s*tarafından|nerede|hangi\s*ülke)\b",
+    r"\b(kim|ne\s*zaman|nasıl|neden|nerede|kaç|hangi)\b",
     r"\b(tarih|tarihçe|geçmiş|köken|etimoloji)\b",
     r"\b(güncel|son\s*dakika|bugün|dün|bu\s*hafta)\b",
     r"\b(fiyat|döviz|kur|borsa|altın|bitcoin)\b",

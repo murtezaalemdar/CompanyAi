@@ -189,7 +189,12 @@ def _cross_encoder_rerank(query: str, documents: list, top_k: int = 5) -> list:
             ce_score = ce_normalized[i]
             doc["cross_encoder_score"] = round(float(ce_scores[i]), 4)
             # v5.10.8: Keyword-matched sonuçlara ters ağırlık — keyword sinyali korunur
-            if doc.get("keyword_match"):
+            # Yüksek keyword_score → daha az CE etkisi (entity aramaları korunur)
+            kw_score = doc.get("keyword_score", 0)
+            if doc.get("keyword_match") and kw_score >= 0.5:
+                # Çok güçlü keyword eşleşme (ad+soyad gibi) → %80 hybrid, %20 CE
+                doc["relevance"] = round(0.80 * original_score + 0.20 * ce_score, 4)
+            elif doc.get("keyword_match"):
                 doc["relevance"] = round(0.65 * original_score + 0.35 * ce_score, 4)
             else:
                 doc["relevance"] = round(0.4 * original_score + 0.6 * ce_score, 4)
@@ -201,10 +206,13 @@ def _cross_encoder_rerank(query: str, documents: list, top_k: int = 5) -> list:
         top_k_docs = documents[:top_k]
         kw_in_top = any(d.get("keyword_match") for d in top_k_docs)
         if not kw_in_top:
-            # Top_k dışında keyword match var mı?
+            # Top_k dışında keyword match var mı? En yüksek keyword_score'luyu seç
             remaining_kw = [d for d in documents[top_k:] if d.get("keyword_match")]
             if remaining_kw:
-                top_k_docs[-1] = remaining_kw[0]  # En düşük sonucu keyword match ile değiştir
+                # En iyi keyword eşleşmesi: önce keyword_score, sonra relevance'a göre sırala
+                remaining_kw.sort(key=lambda x: (x.get("keyword_score", 0), x.get("relevance", 0)), reverse=True)
+                best_kw = remaining_kw[0]
+                top_k_docs[-1] = best_kw
                 top_k_docs.sort(key=lambda x: x["relevance"], reverse=True)
         
         logger.info("cross_encoder_reranked", candidates=len(documents), top_k=top_k)
@@ -572,6 +580,10 @@ def search_documents(
                     _kw_hits += 1
             _kw_kw_score = _kw_hits / max(len(_entity_terms), 1)
             _kw_hybrid = 0.7 * _kw_sem + 0.3 * _kw_kw_score
+            # v5.10.8: Multi-entity bonus — birden fazla entity eşleşen chunk'lara
+            # katlanarak bonus ver (ad+soyad gibi birleşik sorgularda doğru chunk'ı öne çıkarır)
+            if _kw_kw_score >= 0.5 and len(_entity_terms) >= 2:
+                bonus *= (1 + _kw_kw_score)  # kw=0.75 → bonus*1.75, kw=1.0 → bonus*2.0
             _kw_hybrid *= bonus
             _kw_src = _kw_meta.get("source", "")
             _kw_type = _kw_meta.get("type", "")

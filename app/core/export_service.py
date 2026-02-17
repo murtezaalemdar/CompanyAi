@@ -267,7 +267,7 @@ def generate_excel(content: str, title: str = "Rapor") -> Dict:
     }
     
     logger.info("export_excel_created", file_id=file_id, filename=filename)
-    return {"file_id": file_id, "filename": filename, "format": "excel"}
+    return {"success": True, "file_id": file_id, "filename": filename, "format": "excel"}
 
 
 # ──────────────────────────────────────────────
@@ -368,7 +368,7 @@ def generate_pdf(content: str, title: str = "Rapor") -> Dict:
     }
     
     logger.info("export_pdf_created", file_id=file_id, filename=filename)
-    return {"file_id": file_id, "filename": filename, "format": "pdf"}
+    return {"success": True, "file_id": file_id, "filename": filename, "format": "pdf"}
 
 
 # ──────────────────────────────────────────────
@@ -515,7 +515,7 @@ def generate_pptx(content: str, title: str = "Sunum") -> Dict:
     }
     
     logger.info("export_pptx_created", file_id=file_id, filename=filename)
-    return {"file_id": file_id, "filename": filename, "format": "pptx"}
+    return {"success": True, "file_id": file_id, "filename": filename, "format": "pptx"}
 
 
 # ──────────────────────────────────────────────
@@ -594,7 +594,7 @@ def generate_word(content: str, title: str = "Rapor") -> Dict:
     }
     
     logger.info("export_word_created", file_id=file_id, filename=filename)
-    return {"file_id": file_id, "filename": filename, "format": "word"}
+    return {"success": True, "file_id": file_id, "filename": filename, "format": "word"}
 
 
 # ──────────────────────────────────────────────
@@ -634,7 +634,7 @@ def generate_csv(content: str, title: str = "Veri") -> Dict:
     }
     
     logger.info("export_csv_created", file_id=file_id, filename=filename)
-    return {"file_id": file_id, "filename": filename, "format": "csv"}
+    return {"success": True, "file_id": file_id, "filename": filename, "format": "csv"}
 
 
 # ──────────────────────────────────────────────

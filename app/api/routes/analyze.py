@@ -902,8 +902,8 @@ async def export_analysis(
 
     try:
         result = generate_export(req.content, fmt, title)
-        if not result.get("success"):
-            raise HTTPException(status_code=500, detail=result.get("error", "Export hatası"))
+        if not result or not result.get("success"):
+            raise HTTPException(status_code=500, detail=(result or {}).get("error", "Export hatası"))
 
         return {
             "success": True,

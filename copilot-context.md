@@ -296,5 +296,141 @@ Deploy öncesi `app/config.py` ve `frontend/src/constants.ts` içindeki `APP_VER
 - **Frontend:** Music/Film ikonları, mor (ses) / mavi (video) önizleme, dosya tipi algılama
 - **Bağımlılık:** `opencv-python-headless>=4.8.0`
 
+## 🔒 SSL (v5.10.0)
+- **Server 1:** Mevcut HTTPS (`https://192.168.0.12`)
+- **Server 2:** Self-signed SSL sertifika (10 yıl, 2036'ya kadar geçerli)
+  - Sertifika: `/etc/nginx/ssl/server.crt` + `/etc/nginx/ssl/server.key`
+  - CN/SAN: `88.246.13.23`
+  - Nginx: `listen 443 ssl` + `listen 80` (ikisi de aktif)
+  - Dış erişim: `https://88.246.13.23:2015` (port yönlendirme: 2015 → 443)
+  - Not: Self-signed → tarayıcı uyarısı verir, "Devam et" ile geçilir
+
+## 🗄️ PostgreSQL Veritabanı Şeması
+- **DB:** PostgreSQL 14.20, port 5433, user `companyai`, db `companyai`
+- **ORM:** SQLAlchemy (async, asyncpg driver)
+- **Modeller** (`app/db/models.py`):
+
+### users
+| Kolon | Tip | Açıklama |
+|-------|-----|----------|
+| id | Integer PK | |
+| email | String(255) UNIQUE | Giriş e-postası |
+| hashed_password | String(255) | pbkdf2_sha256 hash |
+| full_name | String(255) | |
+| department | String(100) | Üretim, Satış, İK vb. |
+| role | String(50) | admin / manager / user |
+| is_active | Boolean | Hesap aktif mi |
+| must_change_password | Boolean | İlk giriş şifre değişimi |
+| password_changed_at | DateTime | Son şifre değişim zamanı |
+| failed_login_attempts | Integer | Ardışık başarısız giriş (5→kilit) |
+| locked_until | DateTime | Hesap kilitleme zamanı |
+| created_at / updated_at | DateTime | |
+
+### queries
+| Kolon | Tip | Açıklama |
+|-------|-----|----------|
+| id | Integer PK | |
+| user_id | FK→users | |
+| question | Text | Sorulan soru |
+| answer | Text | AI yanıtı |
+| department | String(100) | |
+| mode | String(100) | |
+| risk_level | String(50) | |
+| confidence | Float | |
+| processing_time_ms | Integer | İşlem süresi (ms) |
+| created_at | DateTime | |
+
+### audit_logs
+| Kolon | Tip | Açıklama |
+|-------|-----|----------|
+| id | Integer PK | |
+| user_id | FK→users | |
+| action | String(100) | login, logout, query, admin_action |
+| resource | String(100) | Etkilenen kaynak |
+| details | Text | JSON detaylar |
+| ip_address | String(50) | |
+| user_agent | String(255) | |
+| hash_chain | String(64) | SHA-256 tamper-proof zincir |
+| created_at | DateTime | |
+
+### system_settings
+| Kolon | Tip | Açıklama |
+|-------|-----|----------|
+| id | Integer PK | |
+| key | String(100) UNIQUE | Ayar anahtarı |
+| value | Text | Ayar değeri |
+| description | String(255) | |
+| updated_at | DateTime | |
+| updated_by | FK→users | |
+
+### chat_sessions
+| Kolon | Tip | Açıklama |
+|-------|-----|----------|
+| id | Integer PK | |
+| user_id | FK→users | |
+| title | String(255) | "Yeni Sohbet" default |
+| is_active | Boolean | |
+| created_at / updated_at | DateTime | |
+
+### conversation_memory
+| Kolon | Tip | Açıklama |
+|-------|-----|----------|
+| id | Integer PK | |
+| user_id | FK→users | |
+| session_id | FK→chat_sessions | |
+| question | Text | |
+| answer | Text | |
+| department | String(100) | |
+| intent | String(50) | |
+| created_at | DateTime | |
+
+### user_preferences
+| Kolon | Tip | Açıklama |
+|-------|-----|----------|
+| id | Integer PK | |
+| user_id | FK→users | |
+| key | String(100) | name, favorite_topic, style vb. |
+| value | Text | |
+| source | String(200) | Hangi konuşmadan çıkarıldı |
+| created_at / updated_at | DateTime | |
+
+### company_culture
+| Kolon | Tip | Açıklama |
+|-------|-----|----------|
+| id | Integer PK | |
+| category | String(100) | report_style, comm_style, tool_preference, workflow |
+| key | String(200) | |
+| value | Text | |
+| frequency | Integer | Kaç kez gözlemlendi |
+| source_user_id | FK→users | |
+| source_text | String(300) | |
+| created_at / updated_at | DateTime | |
+
+### xai_records
+| Kolon | Tip | Açıklama |
+|-------|-----|----------|
+| id | Integer PK | |
+| query_hash | String(20) | |
+| query_preview | String(200) | |
+| mode | String(50) | |
+| module_source | String(50) | |
+| weighted_confidence | Float | |
+| risk_level | String(20) | |
+| risk_score | Float | |
+| reasoning_steps | Integer | |
+| sources_used | Integer | |
+| rag_hit / web_searched / had_reflection | Boolean | |
+| word_count | Integer | |
+| factors | JSON | Faktör skorları |
+| counterfactual | Text | |
+| user_rating | Float | 1-5 arası geri bildirim |
+| created_at | DateTime | |
+
+### İlişkiler
+- User → queries, audit_logs, chat_sessions, conversation_memories, preferences
+- ChatSession → messages (ConversationMemory)
+- Query → user
+- AuditLog → user (hash_chain ile tamper-proof)
+
 
 

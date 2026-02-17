@@ -695,4 +695,39 @@ c478097 feat: Gorsel arama sonuclari karti + rich_data liste destegi
 - Ollama qwen2.5:72b (GPU inference, hızlı)
 - Nginx: `client_max_body_size 500M`, `proxy_read_timeout 900s`
 - ChromaDB export: `/opt/companyai/sync_chromadb_export.py`
+- SSL: Self-signed sertifika (RSA 2048, 10 yıl: 2026–2036)
+  - Sertifika: `/etc/nginx/ssl/server.crt` + `/etc/nginx/ssl/server.key`
+  - CN/SAN: `88.246.13.23`
+  - Nginx: `listen 443 ssl` + `listen 80` (ikisi de aktif)
+  - Dış erişim: `https://88.246.13.23:2015` (port yönlendirme: 2015 → 443)
+
+---
+
+## 🗄️ PostgreSQL DB Şeması (v5.10.0)
+
+**DB:** PostgreSQL 14.20, port 5433, user `companyai`, db `companyai`
+**ORM:** SQLAlchemy async (asyncpg) — Model dosyası: `app/db/models.py`
+
+### Tablolar (8 tablo)
+| Tablo | Satır Sayısı (yaklaşık) | Açıklama |
+|-------|------------------------|----------|
+| `users` | 13 kolon | Kullanıcı yönetimi + RBAC + hesap kilitleme |
+| `queries` | 10 kolon | AI sorgu geçmişi + performans metrikleri |
+| `audit_logs` | 9 kolon | SHA-256 hash chain tamper-proof denetim |
+| `system_settings` | 6 kolon | Anahtar-değer sistem ayarları |
+| `chat_sessions` | 6 kolon | Kalıcı sohbet oturumları |
+| `conversation_memory` | 8 kolon | Kalıcı konuşma hafızası |
+| `user_preferences` | 7 kolon | AI'ın hatırlaması gereken kullanıcı tercihleri |
+| `company_culture` | 9 kolon | Şirket çalışma kalıpları (otomatik çıkarım) |
+| `xai_records` | 17 kolon | XAI açıklanabilirlik verileri + kullanıcı rating |
+
+### İlişkiler
+```
+users ──1:N──→ queries
+users ──1:N──→ audit_logs (hash_chain tamper-proof)
+users ──1:N──→ chat_sessions ──1:N──→ conversation_memory
+users ──1:N──→ user_preferences
+users ──1:N──→ company_culture (source_user_id)
+users ──1:1──→ system_settings (updated_by)
+```
 

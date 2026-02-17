@@ -1345,7 +1345,161 @@ cd frontend && npx cap sync
 - **Cron (S1):** `*/15 * * * *` `/opt/companyai/sync_chromadb.py`
 
 #### Sunucu Durum (v5.10.0)
-| Sunucu | IP | Donanım | Nginx Body Size | Proxy Timeout |
-|--------|-----|---------|-----------------|---------------|
-| Server 1 | 192.168.0.12:22 | CPU-only, Xeon 4316, 64GB | 500M | — |
-| Server 2 | 88.246.13.23:2013 | 2× RTX 3090, 48GB VRAM | 500M | 900s |
+| Sunucu | IP | Donanım | Nginx Body Size | Proxy Timeout | SSL |
+|--------|-----|---------|-----------------|---------------|-----|
+| Server 1 | 192.168.0.12:22 | CPU-only, Xeon 4316, 64GB | 500M | — | Mevcut HTTPS |
+| Server 2 | 88.246.13.23:2013 | 2× RTX 3090, 48GB VRAM | 500M | 900s | Self-signed (2036'ya kadar) |
+
+#### SSL Yapılandırması (Server 2)
+- Self-signed sertifika (RSA 2048, 10 yıl geçerli: 2026–2036)
+- CN/SAN: `88.246.13.23`
+- Sertifika: `/etc/nginx/ssl/server.crt` + `/etc/nginx/ssl/server.key`
+- Nginx: `listen 443 ssl` + `listen 80` (ikisi de aktif)
+- Protokoller: TLSv1.2, TLSv1.3; Ciphers: HIGH:!aNULL:!MD5
+- Port yönlendirme: Dışarıdan `2015 → 443`
+- Dış erişim: `https://88.246.13.23:2015`
+- Not: Self-signed → tarayıcı "Bağlantınız gizli değil" uyarısı verir
+
+---
+
+## 🗄️ PostgreSQL Veritabanı Şeması
+
+**DB:** PostgreSQL 14.20, port 5433, user `companyai`, db `companyai`  
+**ORM:** SQLAlchemy (async, asyncpg driver)  
+**Model dosyası:** `app/db/models.py`
+
+### Tablolar
+
+#### users
+```
+id              INTEGER PK
+email           VARCHAR(255) UNIQUE NOT NULL  — Giriş e-postası
+hashed_password VARCHAR(255) NOT NULL        — pbkdf2_sha256
+full_name       VARCHAR(255)
+department      VARCHAR(100)                 — Üretim, Satış, İK vb.
+role            VARCHAR(50) DEFAULT 'user'   — admin / manager / user
+is_active       BOOLEAN DEFAULT TRUE
+must_change_password BOOLEAN DEFAULT FALSE   — İlk giriş şifre değişimi
+password_changed_at  TIMESTAMP               — Son şifre değişim zamanı
+failed_login_attempts INTEGER DEFAULT 0      — 5 başarısız → 15dk kilit
+locked_until    TIMESTAMP                    — Hesap kilitleme zamanı
+created_at      TIMESTAMP DEFAULT now()
+updated_at      TIMESTAMP DEFAULT now()
+```
+**İlişkiler:** → queries, audit_logs, chat_sessions, conversation_memories, preferences
+
+#### queries
+```
+id                INTEGER PK
+user_id           INTEGER FK→users NOT NULL
+question          TEXT NOT NULL
+answer            TEXT
+department        VARCHAR(100)
+mode              VARCHAR(100)
+risk_level        VARCHAR(50)
+confidence        FLOAT
+processing_time_ms INTEGER    — İşlem süresi (ms)
+created_at        TIMESTAMP
+```
+
+#### audit_logs
+```
+id          INTEGER PK
+user_id     INTEGER FK→users
+action      VARCHAR(100) NOT NULL  — login, logout, query, admin_action
+resource    VARCHAR(100)           — Etkilenen kaynak
+details     TEXT                   — JSON formatında detaylar
+ip_address  VARCHAR(50)
+user_agent  VARCHAR(255)
+hash_chain  VARCHAR(64)            — SHA-256 tamper-proof zincir
+created_at  TIMESTAMP
+```
+
+#### system_settings
+```
+id          INTEGER PK
+key         VARCHAR(100) UNIQUE NOT NULL
+value       TEXT
+description VARCHAR(255)
+updated_at  TIMESTAMP
+updated_by  INTEGER FK→users
+```
+
+#### chat_sessions
+```
+id          INTEGER PK
+user_id     INTEGER FK→users NOT NULL
+title       VARCHAR(255) DEFAULT 'Yeni Sohbet'
+is_active   BOOLEAN DEFAULT TRUE
+created_at  TIMESTAMP
+updated_at  TIMESTAMP
+```
+**İlişki:** → messages (ConversationMemory), order_by created_at
+
+#### conversation_memory
+```
+id          INTEGER PK
+user_id     INTEGER FK→users NOT NULL
+session_id  INTEGER FK→chat_sessions
+question    TEXT NOT NULL
+answer      TEXT NOT NULL
+department  VARCHAR(100)
+intent      VARCHAR(50)
+created_at  TIMESTAMP
+```
+
+#### user_preferences
+```
+id          INTEGER PK
+user_id     INTEGER FK→users NOT NULL
+key         VARCHAR(100) NOT NULL    — name, favorite_topic, style vb.
+value       TEXT NOT NULL
+source      VARCHAR(200)             — Hangi konuşmadan çıkarıldı
+created_at  TIMESTAMP
+updated_at  TIMESTAMP
+```
+
+#### company_culture
+```
+id              INTEGER PK
+category        VARCHAR(100) NOT NULL  — report_style, comm_style, tool_preference, workflow
+key             VARCHAR(200) NOT NULL
+value           TEXT NOT NULL
+frequency       INTEGER DEFAULT 1     — Kaç kez gözlemlendi
+source_user_id  INTEGER FK→users
+source_text     VARCHAR(300)
+created_at      TIMESTAMP
+updated_at      TIMESTAMP
+```
+
+#### xai_records
+```
+id                  INTEGER PK
+query_hash          VARCHAR(20) NOT NULL   — Sorgu hash'i
+query_preview       VARCHAR(200)
+mode                VARCHAR(50)
+module_source       VARCHAR(50)
+weighted_confidence FLOAT NOT NULL
+risk_level          VARCHAR(20)
+risk_score          FLOAT
+reasoning_steps     INTEGER
+sources_used        INTEGER
+rag_hit             BOOLEAN DEFAULT FALSE
+web_searched        BOOLEAN DEFAULT FALSE
+had_reflection      BOOLEAN DEFAULT FALSE
+word_count          INTEGER
+factors             JSON                   — Faktör skorları [{name, key, score, weight}]
+counterfactual      TEXT
+user_rating         FLOAT                  — 1-5 arası geri bildirim
+created_at          TIMESTAMP
+```
+
+### ER Diyagramı (Özet)
+```
+users ──1:N──→ queries
+users ──1:N──→ audit_logs
+users ──1:N──→ chat_sessions ──1:N──→ conversation_memory
+users ──1:N──→ user_preferences
+users ──1:N──→ company_culture (source_user_id)
+users ──1:1──→ system_settings (updated_by)
+```

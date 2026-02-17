@@ -3,6 +3,22 @@
 Tüm önemli değişiklikler bu dosyada belgelenir.
 Format: [Semantic Versioning](https://semver.org/lang/tr/)
 
+## [5.10.7] — 2025-07-26
+
+### Düzeltildi — Export İndirme: Türkçe Karakter UnicodeEncodeError
+
+Analiz sonuçlarını Excel/PDF/Word/CSV/PPTX olarak dışa aktarma butonları dosyayı oluşturuyordu ancak indirme sırasında 500 hatası veriyordu.
+
+**Kök neden**: HTTP `Content-Disposition` header'ı latin-1 encoding kullanır. Dosya adında Türkçe karakterler (İ,Ö,Ç,Ş,Ü,Ğ) olduğunda `UnicodeEncodeError: 'latin-1' codec can't encode character '\u0130'` hatası oluşuyordu.
+
+#### app/core/export_service.py — `_safe_filename()` düzeltildi
+- Mevcut `_TR_MAP` transliteration tablosu artık dosya adı oluşturmada da kullanılıyor
+- Türkçe karakterler: İ→I, Ö→O, Ç→C, Ş→S, Ü→U, Ğ→G (ASCII-safe)
+
+#### app/api/routes/analyze.py — Download endpoint header düzeltildi
+- RFC 5987 uyumlu `Content-Disposition` header: `filename*=UTF-8''...` ile orijinal Türkçe ad korunur
+- Eski tarayıcılar için ASCII-safe `filename` fallback eklendi
+
 ## [5.10.6] — 2025-07-26
 
 ### Düzeltildi — RAG Arama: Manuel Girişler ve Kısa Dokümanlar Bulunamıyor

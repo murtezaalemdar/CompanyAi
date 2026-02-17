@@ -944,9 +944,18 @@ async def download_analysis_export(
         "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     }
 
+    # Dosya adını ASCII-safe yap (HTTP header'lar latin-1 encoding kullanır)
+    raw_filename = info["filename"]
+    # ASCII-safe fallback (Türkçe karaktersiz)
+    ascii_filename = raw_filename.encode("ascii", "ignore").decode("ascii") or "rapor"
+    # RFC 5987: UTF-8 encoding ile orijinal Türkçe ad korunur
+    from urllib.parse import quote
+    utf8_filename = quote(raw_filename)
+    disposition = f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{utf8_filename}"
+
     return FileResponse(
         path=info["path"],
-        filename=info["filename"],
+        filename=ascii_filename,
         media_type=media_types.get(info["format"], "application/octet-stream"),
-        headers={"Content-Disposition": f'attachment; filename="{info["filename"]}"'},
+        headers={"Content-Disposition": disposition},
     )

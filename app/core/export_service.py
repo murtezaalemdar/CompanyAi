@@ -683,19 +683,22 @@ def get_export_info(file_id: str) -> Optional[Dict]:
 # Yardımcı
 # ──────────────────────────────────────────────
 
-def _safe_filename(name: str) -> str:
-    """Dosya adı için güvenli karakter seti."""
-    safe = re.sub(r'[^\w\s-]', '', name)
-    safe = re.sub(r'\s+', '_', safe.strip())
-    return safe[:50] or "rapor"
-
-
 # Türkçe → ASCII transliteration (PDF font desteği olmayan karakterler için)
 _TR_MAP = str.maketrans({
     'ı': 'i', 'İ': 'I', 'ş': 's', 'Ş': 'S',
     'ç': 'c', 'Ç': 'C', 'ğ': 'g', 'Ğ': 'G',
     'ö': 'o', 'Ö': 'O', 'ü': 'u', 'Ü': 'U',
 })
+
+
+def _safe_filename(name: str) -> str:
+    """Dosya adı için güvenli karakter seti — HTTP header latin-1 uyumlu."""
+    # Türkçe karakterleri ASCII karşılıklarına çevir (header uyumluluğu)
+    safe = name.translate(_TR_MAP)
+    safe = re.sub(r'[^\w\s-]', '', safe)
+    safe = re.sub(r'\s+', '_', safe.strip())
+    return safe[:50] or "rapor"
+
 
 def _transliterate_turkish(text: str) -> str:
     """Türkçe karakterleri ASCII karşılıklarına dönüştürür (PDF uyumluluğu).

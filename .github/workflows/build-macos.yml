@@ -1,0 +1,91 @@
+# ══════════════════════════════════════════════════════════════
+#  CompanyAI — macOS Desktop App Build (.app.zip)
+#  Trigger: Manuel (workflow_dispatch) veya tag push
+#  Çıktı: CompanyAI.app.zip artifact
+# ══════════════════════════════════════════════════════════════
+name: Build macOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_id:
+        description: "Hedef sunucu (1=LAN, 2=WAN)"
+        required: true
+        default: "1"
+        type: choice
+        options:
+          - "1"
+          - "2"
+      upload_to_server:
+        description: "Sunucuya yükle"
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "v*"
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  build-macos:
+    name: macOS Build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pywebview pyinstaller pyobjc-framework-WebKit
+
+      - name: Set SERVER_ID
+        run: |
+          SERVER_ID=${{ github.event.inputs.server_id || '1' }}
+          sed -i '' "s/^SERVER_ID *= *[0-9]*/SERVER_ID = ${SERVER_ID}/" desktop/app.py
+          echo "SERVER_ID set to ${SERVER_ID}"
+          grep "^SERVER_ID" desktop/app.py
+
+      - name: Build .app with PyInstaller
+        run: |
+          pyinstaller desktop/companyai_mac.spec --noconfirm --clean
+          ls -lh dist/
+
+      - name: Create .app.zip
+        run: |
+          cd dist
+          # .app bundle'ı zip'le (symlink'leri koruyarak)
+          ditto -c -k --sequesterRsrc --keepParent CompanyAI.app CompanyAI.app.zip
+          ls -lh CompanyAI.app.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CompanyAI-macOS
+          path: dist/CompanyAI.app.zip
+          retention-days: 30
+
+      - name: Upload to Server (optional)
+        if: ${{ github.event.inputs.upload_to_server == 'true' }}
+        env:
+          SSH_KEY: ${{ secrets.COMPANYAI_SSH_KEY }}
+        run: |
+          # SSH key setup
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 192.168.0.12 >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          # S1'e yükle
+          scp -i ~/.ssh/deploy_key dist/CompanyAI.app.zip root@192.168.0.12:/var/www/html/downloads/CompanyAI.app.zip
+          echo "✅ S1'e yüklendi"
+
+          # Cleanup
+          rm -f ~/.ssh/deploy_key

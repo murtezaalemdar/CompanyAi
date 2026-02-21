@@ -5,7 +5,7 @@
 //   MINOR (orta) → Önemli değişiklik (yeni özellik, önemli iyileştirme)
 //   PATCH (son)  → Küçük işlem (bugfix, ufak düzeltme)
 //   MINOR artınca PATCH=00, MAJOR artınca MINOR=00 ve PATCH=00 olur.
-export const APP_VERSION = '6.03.00'
+export const APP_VERSION = '7.17.00'
 
 export const DEPARTMENTS = [
     "Yönetim",

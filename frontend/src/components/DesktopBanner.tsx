@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Monitor, X, Download, Smartphone, Laptop } from 'lucide-react'
+import { Monitor, X, Download, Smartphone, Laptop, Terminal } from 'lucide-react'
 
 type PlatformInfo = {
-    platform: 'windows' | 'macos' | 'android' | 'ios'
+    platform: 'windows' | 'macos' | 'linux' | 'android' | 'ios'
     title: string
     description: string
     icon: typeof Monitor
@@ -26,7 +26,7 @@ function detectPlatform(): PlatformInfo | null {
             title: 'iOS Uygulaması',
             description: 'CompanyAI\'ı iPhone\'unuza yükleyin — daha hızlı erişim',
             icon: Smartphone,
-            downloadUrl: null, // App Store linki eklenecek
+            downloadUrl: null, // Apple Developer Account gerekli
             buttonText: 'Yakında',
         }
     }
@@ -38,8 +38,8 @@ function detectPlatform(): PlatformInfo | null {
             title: 'Android Uygulaması',
             description: 'CompanyAI\'ı telefonunuza yükleyin — daha hızlı erişim',
             icon: Smartphone,
-            downloadUrl: null, // Play Store linki eklenecek
-            buttonText: 'Yakında',
+            downloadUrl: '/downloads/CompanyAI.apk',
+            buttonText: 'İndir',
         }
     }
 
@@ -51,6 +51,18 @@ function detectPlatform(): PlatformInfo | null {
             description: 'CompanyAI\'ı Mac\'inize yükleyin — native deneyim',
             icon: Laptop,
             downloadUrl: '/downloads/CompanyAI.app.zip',
+            buttonText: 'İndir',
+        }
+    }
+
+    // Linux
+    if (/Linux/i.test(ua) && !/Android/i.test(ua)) {
+        return {
+            platform: 'linux',
+            title: 'Linux Uygulaması',
+            description: 'CompanyAI\'ı Linux\'unuza yükleyin — native deneyim',
+            icon: Terminal,
+            downloadUrl: '/downloads/CompanyAI-Linux',
             buttonText: 'İndir',
         }
     }
@@ -69,13 +81,14 @@ function detectPlatform(): PlatformInfo | null {
 /**
  * Platform-duyarlı uygulama indirme banner'ı.
  * - Windows  → .exe indir
- * - macOS    → .app indir
- * - Android  → "Yakında" (Play Store linki eklenecek)
- * - iOS      → "Yakında" (App Store linki eklenecek)
+ * - macOS    → .app.zip indir
+ * - Linux    → binary indir
+ * - Android  → .apk indir
+ * - iOS      → "Yakında" (Apple Developer Account gerekli)
  * - pywebview / Capacitor içinde → GİZLENİR
  * Kullanıcı kapattığında 1 gün boyunca tekrar gösterilmez.
  */
-const BANNER_VERSION = 'v2' // localStorage key versiyonu — eski dismiss'leri bypass eder
+const BANNER_VERSION = 'v3' // localStorage key versiyonu — eski dismiss'leri bypass eder
 
 export default function DesktopBanner() {
     const [visible, setVisible] = useState(false)

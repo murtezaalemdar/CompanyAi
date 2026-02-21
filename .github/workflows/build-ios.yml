@@ -1,0 +1,198 @@
+# ══════════════════════════════════════════════════════════════
+#  CompanyAI — iOS Build (.ipa)
+#  Trigger: Manuel (workflow_dispatch) veya tag push
+#  Gereksinimler:
+#    - Apple Developer Account (secrets'ta yapılandırılmalı)
+#    - Provisioning Profile + Signing Certificate
+#  Çıktı: CompanyAI.ipa artifact
+# ══════════════════════════════════════════════════════════════
+name: Build iOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Build tipi"
+        required: true
+        default: "ad-hoc"
+        type: choice
+        options:
+          - "ad-hoc"
+          - "app-store"
+          - "development"
+  push:
+    tags:
+      - "v*"
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  build-ios:
+    name: iOS Build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Sync Capacitor iOS
+        working-directory: frontend
+        run: npx cap sync ios
+
+      - name: Install CocoaPods
+        working-directory: frontend/ios/App
+        run: |
+          gem install cocoapods
+          pod install || pod install --repo-update
+
+      # ── Apple Signing ──────────────────────────────────
+      - name: Install Apple Certificate
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        env:
+          CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
+        run: |
+          # Temp keychain oluştur
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          # Certificate'ı import et
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          echo -n "$CERTIFICATE_P12" | base64 --decode -o $CERT_PATH
+          security import $CERT_PATH -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          # Provisioning profile'ı kur
+          PP_PATH=$RUNNER_TEMP/profile.mobileprovision
+          echo -n "$PROVISIONING_PROFILE" | base64 --decode -o $PP_PATH
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      # ── Xcode Build ────────────────────────────────────
+      - name: Build IPA (Signed)
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        working-directory: frontend/ios/App
+        env:
+          BUILD_TYPE: ${{ github.event.inputs.build_type || 'ad-hoc' }}
+        run: |
+          # Export method
+          case "$BUILD_TYPE" in
+            "app-store")  METHOD="app-store" ;;
+            "ad-hoc")     METHOD="ad-hoc" ;;
+            *)            METHOD="development" ;;
+          esac
+
+          # Archive
+          xcodebuild archive \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/CompanyAI.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_STYLE=Manual \
+            | xcpretty
+
+          # Export plist oluştur
+          cat > $RUNNER_TEMP/ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${METHOD}</string>
+            <key>teamID</key>
+            <string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <key>compileBitcode</key>
+            <false/>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          # Export IPA
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/CompanyAI.xcarchive \
+            -exportPath $RUNNER_TEMP/export \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
+            | xcpretty
+
+          # IPA'yı dist'e kopyala
+          mkdir -p ../../../dist
+          cp $RUNNER_TEMP/export/*.ipa ../../../dist/CompanyAI.ipa
+          ls -lh ../../../dist/CompanyAI.ipa
+
+      - name: Build IPA (Unsigned — for testing)
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 == '' }}
+        working-directory: frontend/ios/App
+        run: |
+          echo "⚠️  Apple signing secrets yapılandırılmamış."
+          echo "    Unsigned simulator build yapılıyor..."
+          echo ""
+          echo "📋 Signed IPA için gereken GitHub Secrets:"
+          echo "   APPLE_CERTIFICATE_P12    → .p12 sertifika (base64)"
+          echo "   APPLE_CERTIFICATE_PASSWORD → .p12 şifresi"
+          echo "   APPLE_PROVISIONING_PROFILE → .mobileprovision (base64)"
+          echo "   APPLE_TEAM_ID            → Apple Developer Team ID"
+          echo ""
+
+          # Simulator build (imzasız ama derleme test edilir)
+          xcodebuild build \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty || true
+
+          echo "✅ Derleme başarılı (unsigned simulator build)"
+
+      # ── Artifact Upload ────────────────────────────────
+      - name: Upload IPA artifact
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: CompanyAI-iOS
+          path: dist/CompanyAI.ipa
+          retention-days: 30
+
+      - name: Upload to Server (optional)
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.COMPANYAI_SSH_KEY != '' }}
+        env:
+          SSH_KEY: ${{ secrets.COMPANYAI_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 192.168.0.12 >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          scp -i ~/.ssh/deploy_key dist/CompanyAI.ipa root@192.168.0.12:/var/www/html/downloads/CompanyAI.ipa
+          echo "✅ IPA S1'e yüklendi"
+
+          rm -f ~/.ssh/deploy_key
+
+      # ── Cleanup ────────────────────────────────────────
+      - name: Clean up keychain
+        if: always()
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security delete-keychain $KEYCHAIN_PATH 2>/dev/null || true

@@ -7,7 +7,7 @@
 #   MINOR (orta) → Önemli değişiklik (yeni özellik, önemli iyileştirme)
 #   PATCH (son)  → Küçük işlem (bugfix, ufak düzeltme)
 #   MINOR artınca PATCH=00, MAJOR artınca MINOR=00 ve PATCH=00 olur.
-APP_VERSION = "6.03.00"
+APP_VERSION = "7.17.00"
 
 from pydantic_settings import BaseSettings
 from typing import List
@@ -22,10 +22,13 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://companyai:password@localhost:5432/companyai"
     
+    # Vector Database (pgvector — ayrı chromadb veritabanı)
+    VECTOR_DB_URL: str = "postgresql://companyai:companyai@localhost:5433/chromadb"
+    
     # JWT Authentication
     SECRET_KEY: str = "change-this-to-a-very-long-random-string-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 720
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
     # Admin
